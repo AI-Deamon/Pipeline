@@ -404,13 +404,9 @@ pipeline {
                     // Ensure report directory exists
                     sh "mkdir -p reports"
 
-                    // Checkout Pipeline repo to access Nmap_system tools
+                    // Nmap tools are in backend/nmap_system/ (part of checked-out repo)
                     sh """
-                        # Clone Pipeline repo to get Nmap_system tools
-                        if [ ! -d "Pipeline" ]; then
-                            git clone https://github.com/Bhaskar-ITM/Pipeline.git
-                        fi
-                        cd Pipeline/Nmap_system/pentest_system
+                        cd backend/nmap_system
 
                         # Create targets.json for single target scan
                         echo '{"targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"scanned"}]}' > targets.json
@@ -424,7 +420,7 @@ pipeline {
 
                     // Copy findings to reports directory
                     sh """
-                        cp Pipeline/Nmap_system/pentest_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
+                        cp backend/nmap_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
                         echo "Nmap system scan completed"
                     """
 
