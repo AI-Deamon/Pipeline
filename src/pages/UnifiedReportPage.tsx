@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import type { UnifiedReport, TrendData } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
 import ToolBarChart from '../components/ToolBarChart';
+import TrendLineChart from '../components/TrendLineChart';
 import { ArrowLeft, Download } from 'lucide-react';
 
 const UnifiedReportPage = () => {
@@ -104,9 +105,8 @@ const UnifiedReportPage = () => {
       {/* Trend Chart */}
       <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">Historical Trend (Last 30 Days)</h3>
-        {/* Add LineChart here - will be added in Phase 4 */}
         {trends.length > 0 ? (
-          <p className="text-slate-500">Trend chart will be displayed here</p>
+          <TrendLineChart data={trends} />
         ) : (
           <p className="text-slate-500">No trend data available</p>
         )}
