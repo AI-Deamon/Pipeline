@@ -1,10 +1,13 @@
 from typing import List, Optional
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.db import get_db
-from app.models.db_models import ScanReportDB, ProjectDB
+from app.models.db_models import ScanReportDB, ProjectDB, ScanDB
+from app.services.reporting.reporter import UnifiedReportGenerator
+from app.services.reporting.parsers.base import SecurityFinding
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -174,3 +177,163 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": f"Report {report_id} deleted"}
+
+
+@router.get("/projects/{project_id}/reports/unified")
+def get_unified_report(
+    project_id: str,
+    scan_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get unified report combining all tools"""
+    # If scan_id provided, get that scan's reports
+    # Otherwise, get latest completed scan
+    query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    if scan_id:
+        query = query.filter(ScanReportDB.scan_id == scan_id)
+        reports = query.all()
+    else:
+        # Get latest scan
+        latest_scan = (
+            db.query(ScanDB)
+            .filter(ScanDB.project_id == project_id, ScanDB.state == "COMPLETED")
+            .order_by(ScanDB.finished_at.desc())
+            .first()
+        )
+        if latest_scan:
+            reports = query.filter(ScanReportDB.scan_id == latest_scan.scan_id).all()
+        else:
+            reports = []
+
+    # Combine all findings
+    all_findings = []
+    total_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+    for report in reports:
+        findings = report.findings or []
+        all_findings.extend(findings)
+        severity = report.severity_summary or {}
+        for key in total_severity:
+            total_severity[key] += severity.get(key, 0)
+
+    return {
+        "project_id": project_id,
+        "scan_id": scan_id,
+        "total_findings": len(all_findings),
+        "severity": total_severity,
+        "findings": all_findings,
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.get("/projects/{project_id}/reports/trends")
+def get_report_trends(
+    project_id: str,
+    days: int = 30,
+    db: Session = Depends(get_db)
+):
+    """Get findings trends over time"""
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    reports = (
+        db.query(ScanReportDB)
+        .join(ScanDB, ScanReportDB.scan_id == ScanDB.scan_id)
+        .filter(
+            ScanReportDB.project_id == project_id,
+            ScanDB.finished_at >= cutoff_date
+        )
+        .order_by(ScanDB.finished_at)
+        .all()
+    )
+
+    trends = {}
+    for report in reports:
+        date_key = report.created_at.strftime("%Y-%m-%d")
+        if date_key not in trends:
+            trends[date_key] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+        severity = report.severity_summary or {}
+        for key in trends[date_key]:
+            trends[date_key][key] += severity.get(key, 0)
+
+    return [
+        {"date": date, **data}
+        for date, data in sorted(trends.items())
+    ]
+
+
+@router.get("/projects/{project_id}/reports/unified/export")
+def export_unified_report(
+    project_id: str,
+    format: str = "html",
+    scan_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Export unified report as HTML or PDF"""
+    # Get unified report data (similar to get_unified_report)
+    query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    if scan_id:
+        query = query.filter(ScanReportDB.scan_id == scan_id)
+    else:
+        latest_scan = (
+            db.query(ScanDB)
+            .filter(ScanDB.project_id == project_id, ScanDB.state == "COMPLETED")
+            .order_by(ScanDB.finished_at.desc())
+            .first()
+        )
+        if latest_scan:
+            query = query.filter(ScanReportDB.scan_id == latest_scan.scan_id)
+
+    reports = query.all()
+
+    # Collect findings into SecurityFinding objects
+    all_findings = []
+    for report in reports:
+        for f_dict in (report.findings or []):
+            all_findings.append(SecurityFinding(
+                id=f_dict.get("id", "unknown"),
+                tool=report.tool_name,
+                severity=f_dict.get("severity", "Info"),
+                title=f_dict.get("title", "Untitled"),
+                description=f_dict.get("description", ""),
+                cve=f_dict.get("cve"),
+                host=f_dict.get("host"),
+                port=f_dict.get("port"),
+                package=f_dict.get("package"),
+                recommendation=f_dict.get("recommendation", ""),
+                raw_evidence=f_dict.get("raw_evidence", ""),
+            ))
+
+    # Get project name if available
+    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+    project_name = project.name if project else project_id
+
+    # Determine scan_id for report
+    used_scan_id = scan_id or (latest_scan.scan_id if latest_scan else "unknown")
+
+    generator = UnifiedReportGenerator(
+        project_id=project_id,
+        scan_id=used_scan_id,
+        findings=all_findings,
+        project_name=project_name
+    )
+
+    if format == "pdf":
+        content = generator.generate_pdf()
+        media_type = "application/pdf"
+        ext = "pdf"
+    else:
+        content = generator.generate_html()
+        media_type = "text/html"
+        ext = "html"
+
+    from fastapi.responses import Response
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"attachment; filename=security-report-project-{project_id}.{ext}"
+        }
+    )
