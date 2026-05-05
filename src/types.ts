@@ -22,6 +22,7 @@ export type Project = {
   target_url?: string;
   last_scan_state?: string;
   last_scan_id?: string;
+  last_scan_time?: string;
 };
 
 export type Scan = {
@@ -39,12 +40,54 @@ export type Scan = {
   jenkins_queue_id?: string;
 };
 
+// Report Summary Types
+export type SeveritySummary = {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+};
+
+export type ToolSummary = {
+  tool: string;
+  findings: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  link?: string;
+};
+
+export type ReportSummary = {
+  project_id: string;
+  total_findings: number;
+  severity: SeveritySummary;
+  tools: ToolSummary[];
+};
+
+export type UnifiedReport = {
+  project_id: string;
+  scan_id?: string;
+  total_findings: number;
+  severity: SeveritySummary;
+  findings: FindingItem[];
+  generated_at: string;
+};
+
+export type TrendData = {
+  date: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+};
+
 // Backend stage IDs (snake_case) - used in API calls
 export const FIXED_STAGES = [
   'git_checkout',
   'sonar_scanner',
   'sonar_quality_gate',
-  'npm_pip_install',
   'dependency_check',
   'trivy_fs_scan',
   'docker_build',
@@ -59,7 +102,6 @@ export const STAGE_DISPLAY_NAMES: Record<StageId, string> = {
   'git_checkout': 'Git Checkout',
   'sonar_scanner': 'Sonar Scanner',
   'sonar_quality_gate': 'Sonar Quality Gate',
-  'npm_pip_install': 'NPM / PIP Install',
   'dependency_check': 'Dependency Check',
   'trivy_fs_scan': 'Trivy FS Scan',
   'docker_build': 'Docker Build',

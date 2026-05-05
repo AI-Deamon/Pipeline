@@ -139,6 +139,19 @@ export const api = {
     download: async (reportId: number) => {
       const response = await apiClient.get(`/reports/${reportId}/download`);
       return response.data;
-    }
+    },
+    getUnified: async (projectId: string, scanId?: string) => {
+      const url = scanId
+        ? `/reports/projects/${projectId}/reports/unified?scan_id=${scanId}`
+        : `/reports/projects/${projectId}/reports/unified`;
+      const response = await apiClient.get(url);
+      return response.data;
+    },
+    getTrends: async (projectId: string, days: number = 30) => {
+      const response = await apiClient.get(
+        `/reports/projects/${projectId}/reports/trends?days=${days}`
+      );
+      return response.data;
+    },
   }
 };
