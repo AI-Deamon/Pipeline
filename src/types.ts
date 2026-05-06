@@ -73,6 +73,12 @@ export type UnifiedReport = {
   severity: SeveritySummary;
   findings: FindingItem[];
   generated_at: string;
+  risk_score?: {
+    score: number;
+    trend: string;
+    level: string;
+    previous_score?: number;
+  };
 };
 
 export type TrendData = {

@@ -97,7 +97,7 @@ const UnifiedReportPage = () => {
       />
 
       {/* Summary Cards */}
-      <div id="Summary" className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-4 gap-4 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="text-3xl font-bold text-red-600">{report.severity.critical}</div>
           <div className="text-sm text-slate-500">Critical</div>
@@ -116,7 +116,28 @@ const UnifiedReportPage = () => {
         </div>
       </div>
 
-      {/* Charts */}
+       {/* Risk Score Card */}
+       {report.risk_score && (
+         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
+           <h3 className="text-lg font-semibold text-slate-900 mb-4">Risk Assessment</h3>
+           <div className="flex items-center gap-8">
+             <div>
+               <div className="text-4xl font-bold text-slate-900">{report.risk_score.score}/100</div>
+               <div className="text-sm text-slate-500">{report.risk_score.level}</div>
+             </div>
+             <div>
+               <div className="text-sm">
+                 Trend: <span className="font-medium capitalize">{report.risk_score.trend}</span>
+               </div>
+               <div className="text-sm text-slate-500">
+                 Previous Score: {report.risk_score.previous_score ?? 'N/A'}
+               </div>
+             </div>
+           </div>
+         </div>
+       )}
+
+       {/* Charts */}
       <div className="grid grid-cols-2 gap-6 mb-8">
         <div id="Severity Distribution" className="bg-white rounded-xl border border-slate-200 p-6">
           <SeverityPieChart
