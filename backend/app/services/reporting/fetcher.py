@@ -14,6 +14,7 @@ from app.services.reporting.parsers import (
     parse_depcheck_report,
     parse_nmap_findings,
     create_sonar_report_link,
+    fetch_sonar_issues,
     calculate_severity_summary,
     calculate_expires_at,
     SecurityFinding,
@@ -103,9 +104,13 @@ class ReportFetcher:
     async def create_sonar_link(
         self, scan_id: str, project_id: str, sonar_key: Optional[str]
     ) -> Optional[ScanReportDB]:
-        """Create a SonarQube report entry (link only, no parsing)"""
+        """Create a SonarQube report by fetching actual issues via API"""
         if not sonar_key:
             return None
+
+        # Fetch actual issues from SonarQube API
+        sonar_findings = await fetch_sonar_issues(sonar_key)
+        severity_summary = calculate_severity_summary(sonar_findings)
 
         report_url = create_sonar_report_link(sonar_key)
 
@@ -113,8 +118,8 @@ class ReportFetcher:
             scan_id=scan_id,
             project_id=project_id,
             tool_name="sonar",
-            severity_summary={"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            findings=[],
+            severity_summary=severity_summary,
+            findings=[f.to_dict() for f in sonar_findings],
             raw_report=None,
             report_url=report_url,
             created_at=datetime.now(timezone.utc),
@@ -126,11 +131,11 @@ class ReportFetcher:
             db.add(report)
             db.commit()
             db.refresh(report)
-            logger.info(f"Created SonarQube link report: {report_url}")
+            logger.info(f"Stored SonarQube report with {len(sonar_findings)} findings")
             return report
         except Exception as e:
             db.rollback()
-            logger.error(f"Error creating SonarQube link: {e}")
+            logger.error(f"Error storing SonarQube report: {e}")
             return None
         finally:
             db.close()
