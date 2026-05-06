@@ -217,11 +217,36 @@ def get_unified_report(
         for key in total_severity:
             total_severity[key] += severity.get(key, 0)
 
+    # Calculate risk score
+    from app.services.reporting.risk_calculator import RiskCalculator
+    calculator = RiskCalculator()
+    risk_score = calculator.calculate(total_severity)
+
+    # Get previous scan for trend
+    previous = (
+        db.query(ScanReportDB)
+        .join(ScanDB, ScanReportDB.scan_id == ScanDB.scan_id)
+        .filter(ScanReportDB.project_id == project_id)
+        .filter(ScanReportDB.scan_id != (scan_id or (latest_scan.scan_id if 'latest_scan' in locals() else None)))
+        .filter(ScanDB.state == "COMPLETED")
+        .order_by(ScanDB.finished_at.desc())
+        .first()
+    )
+    previous_severity = previous.severity_summary if previous else {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    previous_score = calculator.calculate(previous_severity)
+    risk_trend = calculator.get_trend(risk_score, previous_score)
+
     return {
         "project_id": project_id,
         "scan_id": scan_id,
         "total_findings": len(all_findings),
         "severity": total_severity,
+        "risk_score": {
+            "score": risk_score,
+            "trend": risk_trend,
+            "level": calculator.get_risk_level(risk_score),
+            "previous_score": previous_score,
+        },
         "findings": all_findings,
         "generated_at": datetime.now(timezone.utc).isoformat()
     }

@@ -5,6 +5,7 @@ import type { UnifiedReport, TrendData } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
 import ToolBarChart from '../components/ToolBarChart';
 import TrendLineChart from '../components/TrendLineChart';
+import TableOfContents from '../components/TableOfContents';
 import { ArrowLeft, Download } from 'lucide-react';
 
 const UnifiedReportPage = () => {
@@ -13,6 +14,8 @@ const UnifiedReportPage = () => {
   const [report, setReport] = useState<UnifiedReport | null>(null);
   const [trends, setTrends] = useState<TrendData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentSection, setCurrentSection] = useState<string>('Summary');
+  const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Findings'];
 
   useEffect(() => {
     if (!projectId) return;
@@ -62,8 +65,14 @@ const UnifiedReportPage = () => {
         </button>
       </div>
 
+      <TableOfContents
+        sections={sections}
+        currentSection={currentSection}
+        onSectionClick={setCurrentSection}
+      />
+
       {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div id="Summary" className="grid grid-cols-4 gap-4 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="text-3xl font-bold text-red-600">{report.severity.critical}</div>
           <div className="text-sm text-slate-500">Critical</div>
@@ -84,7 +93,7 @@ const UnifiedReportPage = () => {
 
       {/* Charts */}
       <div className="grid grid-cols-2 gap-6 mb-8">
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div id="Severity Distribution" className="bg-white rounded-xl border border-slate-200 p-6">
           <SeverityPieChart
             critical={report.severity.critical}
             high={report.severity.high}
@@ -92,7 +101,7 @@ const UnifiedReportPage = () => {
             low={report.severity.low}
           />
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-6">
+        <div id="Tool Comparison" className="bg-white rounded-xl border border-slate-200 p-6">
           <ToolBarChart
             tools={[
               { tool: 'Trivy FS', findings: 23, critical: 1, high: 5, medium: 10, low: 7 },
@@ -103,7 +112,7 @@ const UnifiedReportPage = () => {
       </div>
 
       {/* Trend Chart */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
+      <div id="Historical Trend" className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">Historical Trend (Last 30 Days)</h3>
         {trends.length > 0 ? (
           <TrendLineChart data={trends} />
@@ -113,7 +122,7 @@ const UnifiedReportPage = () => {
       </div>
 
       {/* Findings Table */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6">
+      <div id="Findings" className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">
           Findings ({report.total_findings} total)
         </h3>

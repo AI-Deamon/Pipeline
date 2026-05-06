@@ -17,6 +17,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
 from app.services.reporting.parsers.base import SecurityFinding, calculate_severity_summary
+from app.services.reporting.risk_calculator import RiskCalculator
 
 # Color constants
 DARK_BLUE = colors.HexColor("#1F3864")
@@ -148,3 +149,37 @@ class UnifiedReportGenerator:
         # Build PDF
         doc.build(elements)
         return buffer.getvalue()
+
+    def generate_risk_summary(self) -> dict:
+        """Generate risk score and trend"""
+        calculator = RiskCalculator()
+        score = calculator.calculate(self.severity_summary)
+
+        # Get previous scan for trend (if available)
+        from app.core.db import SessionLocal
+        from app.models.db_models import ScanReportDB, ScanDB
+        from sqlalchemy import desc
+
+        db = SessionLocal()
+        try:
+            previous = (
+                db.query(ScanReportDB)
+                .join(ScanDB, ScanReportDB.scan_id == ScanDB.scan_id)
+                .filter(ScanReportDB.project_id == self.project_id)
+                .filter(ScanReportDB.scan_id != self.scan_id)
+                .filter(ScanDB.state == "COMPLETED")
+                .order_by(desc(ScanDB.finished_at))
+                .first()
+            )
+
+            previous_severity = previous.severity_summary if previous else {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+            previous_score = calculator.calculate(previous_severity)
+
+            return {
+                "score": score,
+                "trend": calculator.get_trend(score, previous_score),
+                "level": calculator.get_risk_level(score),
+                "previous_score": previous_score,
+            }
+        finally:
+            db.close()
