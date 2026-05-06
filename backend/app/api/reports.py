@@ -288,6 +288,50 @@ def get_report_trends(
     ]
 
 
+@router.get("/projects/{project_id}/reports/compliance")
+def get_compliance_report(
+    project_id: str,
+    scan_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get OWASP Top 10 and CWE Top 25 compliance report"""
+    from app.services.reporting.compliance_mapper import ComplianceMapper
+
+    # Get findings (same logic as unified report)
+    query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    if scan_id:
+        query = query.filter(ScanReportDB.scan_id == scan_id)
+        reports = query.all()
+    else:
+        latest_scan = (
+            db.query(ScanDB)
+            .filter(ScanDB.project_id == project_id, ScanDB.state == "COMPLETED")
+            .order_by(ScanDB.finished_at.desc())
+            .first()
+        )
+        if latest_scan:
+            reports = query.filter(ScanReportDB.scan_id == latest_scan.scan_id).all()
+        else:
+            reports = []
+
+    # Collect all findings
+    all_findings = []
+    for report in reports:
+        for f_dict in (report.findings or []):
+            all_findings.append(f_dict)
+
+    mapper = ComplianceMapper()
+    compliance = mapper.get_compliance_summary(all_findings)
+
+    return {
+        "project_id": project_id,
+        "scan_id": scan_id,
+        "compliance": compliance,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/projects/{project_id}/reports/unified/export")
 def export_unified_report(
     project_id: str,
