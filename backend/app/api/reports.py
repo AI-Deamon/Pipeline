@@ -337,6 +337,7 @@ def export_unified_report(
     project_id: str,
     format: str = "html",
     scan_id: Optional[str] = None,
+    report_type: str = "technical",
     db: Session = Depends(get_db)
 ):
     """Export unified report as HTML or PDF"""
@@ -382,11 +383,16 @@ def export_unified_report(
     # Determine scan_id for report
     used_scan_id = scan_id or (latest_scan.scan_id if latest_scan else "unknown")
 
+    # Normalize report_type
+    valid_types = {"executive", "technical", "compliance", "comparison"}
+    rtype = report_type if report_type in valid_types else "technical"
+
     generator = UnifiedReportGenerator(
         project_id=project_id,
         scan_id=used_scan_id,
         findings=all_findings,
-        project_name=project_name
+        project_name=project_name,
+        report_type=rtype
     )
 
     if format == "pdf":
