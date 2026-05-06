@@ -117,3 +117,20 @@ export type StageId = typeof FIXED_STAGES[number];
 export const getStageDisplayName = (stageId: StageId): string => {
   return STAGE_DISPLAY_NAMES[stageId] || stageId;
 };
+
+// Finding type for unified reports
+export type Finding = {
+  id: string;
+  severity: string;
+  title: string;
+  description?: string;
+  cve?: string;
+  host?: string;
+  port?: number;
+  service?: string;
+  uri?: string;
+  package?: string;
+  recommendation?: string;
+  tool?: string;
+  raw_evidence?: string;
+};

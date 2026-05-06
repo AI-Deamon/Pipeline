@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
-import type { UnifiedReport, TrendData } from '../types';
+import type { UnifiedReport, TrendData, Finding } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
 import ToolBarChart from '../components/ToolBarChart';
 import TrendLineChart from '../components/TrendLineChart';
 import TableOfContents from '../components/TableOfContents';
+import FilterBar from '../components/FilterBar';
+import FindingDetailModal from '../components/FindingDetailModal';
 import { ArrowLeft, Download } from 'lucide-react';
 
 const UnifiedReportPage = () => {
@@ -15,6 +17,10 @@ const UnifiedReportPage = () => {
   const [trends, setTrends] = useState<TrendData[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentSection, setCurrentSection] = useState<string>('Summary');
+  const [search, setSearch] = useState('');
+  const [selectedSeverities, setSelectedSeverities] = useState<string[]>([]);
+  const [selectedTools, setSelectedTools] = useState<string[]>([]);
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Findings'];
 
   useEffect(() => {
@@ -49,6 +55,25 @@ const UnifiedReportPage = () => {
       </div>
     );
   }
+
+  // Compute available tools and filter findings
+  const availableTools = [...new Set(report.findings.map(f => f.tool).filter(Boolean))] as string[];
+  const filteredFindings = report.findings.filter(f => {
+    // Search filter
+    if (search && !f.title.toLowerCase().includes(search.toLowerCase()) &&
+        !f.description?.toLowerCase().includes(search.toLowerCase())) {
+      return false;
+    }
+    // Severity filter
+    if (selectedSeverities.length > 0 && !selectedSeverities.includes(f.severity)) {
+      return false;
+    }
+    // Tool filter
+    if (selectedTools.length > 0 && !selectedTools.includes(f.tool)) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="max-w-6xl mx-auto p-8">
@@ -121,10 +146,21 @@ const UnifiedReportPage = () => {
         )}
       </div>
 
+      {/* Filter Bar */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        selectedSeverities={selectedSeverities}
+        onSeverityChange={setSelectedSeverities}
+        selectedTools={selectedTools}
+        onToolChange={setSelectedTools}
+        availableTools={availableTools}
+      />
+
       {/* Findings Table */}
       <div id="Findings" className="bg-white rounded-xl border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-4">
-          Findings ({report.total_findings} total)
+          Findings ({filteredFindings.length} total)
         </h3>
         <table className="w-full">
           <thead>
@@ -136,8 +172,12 @@ const UnifiedReportPage = () => {
             </tr>
           </thead>
           <tbody>
-            {report.findings.map((finding, idx) => (
-              <tr key={idx} className="border-b">
+            {filteredFindings.map((finding, idx) => (
+              <tr
+                key={idx}
+                className="border-b cursor-pointer hover:bg-slate-50"
+                onClick={() => setSelectedFinding(finding)}
+              >
                 <td className="p-2">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${
                     finding.severity === 'Critical' ? 'bg-red-100 text-red-700' :
@@ -156,6 +196,12 @@ const UnifiedReportPage = () => {
           </tbody>
         </table>
       </div>
+
+      {/* Finding Detail Modal */}
+      <FindingDetailModal
+        finding={selectedFinding}
+        onClose={() => setSelectedFinding(null)}
+      />
     </div>
   );
 };
