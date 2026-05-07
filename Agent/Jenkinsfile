@@ -476,17 +476,19 @@ pipeline {
                 def jenkinsConsoleUrl = null
 
                 if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'ABORTED') {
-                    def failedStage = null
-                    try {
-                        def buildWrapper = currentBuild.rawBuild
-                        if (buildWrapper && buildWrapper.hasProperty('execution')) {
-                            def executions = buildWrapper.execution
-                            if (executions) {
-                                for (stage in executions) {
-                                    if (stage.status == 'FAILURE' || stage.status == 'ABORTED') {
-                                        failedStage = stage
-                                        break
-                                    }
+                    def failedStage = STAGES_RESULTS ? STAGES_RESULTS.find { it.status == 'FAIL' } : null
+
+                    if (currentBuild.buildCauses?.any { it.shortDescription?.contains('Timeout') }) {
+                        errorType = 'TIMEOUT'
+                        errorMessage = "Scan timed out after ${params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() / 60 : 120} minutes"
+                    } else if (failedStage) {
+                        errorType = 'PIPELINE_ERROR'
+                        errorMessage = "Pipeline failed at stage: ${failedStage.stage}. Check Jenkins console for details."
+                    } else {
+                        errorType = 'PIPELINE_ERROR'
+                        errorMessage = "Pipeline failed. Check Jenkins console logs for details."
+                    }
+                }
                                 }
                             }
                         }
