@@ -488,25 +488,7 @@ pipeline {
                         errorType = 'PIPELINE_ERROR'
                         errorMessage = "Pipeline failed. Check Jenkins console logs for details."
                     }
-                }
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        echo "Could not get detailed error: ${e.message}"
-                    }
-                    
-                    if (currentBuild.buildCauses?.any { it.shortDescription?.contains('Timeout') }) {
-                        errorType = 'TIMEOUT'
-                        errorMessage = "Scan timed out after ${params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() / 60 : 120} minutes"
-                    } else if (failedStage) {
-                        errorType = 'PIPELINE_ERROR'
-                        errorMessage = "Pipeline failed at stage: ${failedStage.name}. Check Jenkins console for details."
-                    } else {
-                        errorType = 'PIPELINE_ERROR'
-                        errorMessage = "Pipeline failed. Check Jenkins console logs for details."
-                    }
-                    
+
                     jenkinsConsoleUrl = "${env.JENKINS_BASE_URL ?: 'http://192.168.1.101:8080'}/job/${env.JOB_NAME}/${env.BUILD_NUMBER}/console"
                 }
 
