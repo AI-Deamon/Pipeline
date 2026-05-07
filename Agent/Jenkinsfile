@@ -433,37 +433,6 @@ pipeline {
                 }
             }
         }
-                        echo "SKIP: No target_ip provided"
-                        return
-                    }
-
-                    // Ensure report directory exists
-                    sh "mkdir -p reports"
-
-                    // Nmap tools are in backend/nmap_system/ (part of checked-out repo)
-                    sh """
-                        cd backend/nmap_system
-
-                        # Create targets.json for single target scan
-                        echo '{"targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"scanned"}]}' > targets.json
-
-                        # Run scanner (11 scan types per target)
-                        python3 scanner.py
-
-                        # Run parser (17 detection rules)
-                        python3 parser.py
-                    """
-
-                    // Copy findings to reports directory
-                    sh """
-                        cp backend/nmap_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
-                        echo "Nmap system scan completed"
-                    """
-
-                    recordStage('nmap_scan', 'PASS', 'Nmap system scan completed (11 scans + parser)')
-                }
-            }
-        }
 
         stage('ZAP Scan') {
             when { expression { shouldRun('zap_scan') } }
