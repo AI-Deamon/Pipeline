@@ -305,7 +305,7 @@ pipeline {
                     def allImageTags = []
                     
                     dockerfiles.each { dockerfile ->
-                        def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').take(100)
+                        def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(100)
                         def imageTag = "${PROJECT.project_id ?: 'scan'}:${imageName}-${params.SCAN_ID}"
                         def buildContext = dockerfile.contains('/') ? dockerfile.substring(0, dockerfile.lastIndexOf('/')) : '.'
                         
@@ -344,7 +344,7 @@ pipeline {
                         
                         // Push each image
                         allImageTags.each { imageTag ->
-                            def imageName = imageTag.replaceAll('[^a-zA-Z0-9/]', '-')
+                            def imageName = imageTag.replaceAll('[^a-zA-Z0-9/]', '-').toLowerCase()
                             def pushTag = "${DOCKER_USER}/${imageName}".toString()
                             
                             echo "Pushing ${imageTag} as ${pushTag}"
