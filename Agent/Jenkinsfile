@@ -194,7 +194,7 @@ pipeline {
                             // Use Jenkins SonarQube server configuration
                             def projectName = PROJECT.project_name ?: params.SCAN_ID
                             withSonarQubeEnv('sonar-server') {
-                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=${PROJECT.sonar_key ?: params.SCAN_ID} -Dsonar.projectName=\"${projectName}\" -Dsonar.sourceEncoding=UTF-8 -Dsonar.exclusions=reports/**"
+                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=\"${PROJECT.sonar_key ?: params.SCAN_ID}\" -Dsonar.projectName=\"${projectName}\" -Dsonar.sourceEncoding=UTF-8 -Dsonar.exclusions=reports/**"
                             }
                             recordStage('sonar_scanner', 'PASS', 'Sonar scan completed')
                         } catch (Exception e) {
@@ -405,29 +405,37 @@ pipeline {
                     sh "mkdir -p reports"
 
                     // Clone Pipeline repo to get Nmap tools (they're in Pipeline/backend/nmap_system/)
-                    sh """
-                        # Clone Pipeline repo if not already present
-                        if [ ! -d "Pipeline" ]; then
-                            git clone https://github.com/BHaskar-ITM/Pipeline.git
-                        fi
-                        
-                        cd Pipeline/backend/nmap_system/
+                    withCredentials([usernamePassword(credentialsId: PROJECT.credentials_id ?: 'github-credentials',
+                                                      usernameVariable: 'GIT_USER',
+                                                      passwordVariable: 'GIT_PASS')]) {
+                        sh """
+                            # Clone Pipeline repo if not already present
+                            if [ ! -d "Pipeline" ]; then
+                                git clone https://\${GIT_USER}:\${GIT_PASS}@github.com/Bhaskar-ITM/Pipeline.git
+                            fi
+                            
+                            cd Pipeline/backend/nmap_system/
 
-                        # Create targets.json for single target scan
-                        echo '{"targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"scanned"}]}' > targets.json
+                            # Create targets.json for single target scan
+                            echo '{"targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"scanned"}]}' > targets.json
 
-                        # Run scanner (11 scan types per target)
-                        python3 scanner.py
+                            # Run scanner (11 scan types per target)
+                            python3 scanner.py
 
-                        # Run parser (17 detection rules)
-                        python3 parser.py
-                    """
+                            # Run parser (17 detection rules)
+                            python3 parser.py
+                        """
+                    }
 
                     // Copy findings to reports directory
-                    sh """
-                        cp Pipeline/backend/nmap_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
-                        echo "Nmap system scan completed"
-                    """
+                    withCredentials([usernamePassword(credentialsId: PROJECT.credentials_id ?: 'github-credentials',
+                                                      usernameVariable: 'GIT_USER',
+                                                      passwordVariable: 'GIT_PASS')]) {
+                        sh """
+                            cp Pipeline/backend/nmap_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
+                            echo "Nmap system scan completed"
+                        """
+                    }
 
                     recordStage('nmap_scan', 'PASS', 'Nmap system scan completed (11 scans + parser)')
                 }
