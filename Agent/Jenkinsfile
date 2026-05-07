@@ -332,7 +332,7 @@ pipeline {
                                                   usernameVariable: 'DOCKER_USER',
                                                   passwordVariable: 'DOCKER_PASS')]) {
                     script {
-                        def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') : []
+                        def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
                         
                         if (allImageTags.isEmpty()) {
                             echo "⚠️  No images to push - skipping Docker push"
@@ -366,7 +366,7 @@ pipeline {
             when { expression { shouldRun('trivy_image_scan') } }
             steps {
                 script {
-                    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') : []
+                    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
                     
                     if (allImageTags.isEmpty()) {
                         echo "⚠️  No images to scan - skipping Trivy image scan"
