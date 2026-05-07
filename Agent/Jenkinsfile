@@ -406,7 +406,7 @@ pipeline {
                     sh """
                         cd backend/nmap_system
 
-                        echo '{"targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"scanned"}]}' > targets.json
+                        echo '{"client":"Pipeline Auto Scan","month":"${new Date().format("MMMM yyyy")}","targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"Test"}]}' > targets.json
 
                         python3 scanner.py
 
