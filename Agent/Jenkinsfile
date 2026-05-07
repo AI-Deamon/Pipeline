@@ -307,19 +307,31 @@ pipeline {
                     dockerfiles.each { dockerfile ->
                         def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(100)
                         def imageTag = "${PROJECT.project_id ?: 'scan'}:${imageName}-${params.SCAN_ID}"
-                        def buildContext = dockerfile.contains('/') ? dockerfile.substring(0, dockerfile.lastIndexOf('/')) : '.'
+                        def buildContext = '.'
                         
                         echo "Building ${dockerfile} with context: ${buildContext}"
-                        sh "docker build -t ${imageTag} -f ${dockerfile} ${buildContext} || echo 'Build failed for ${dockerfile}'"
+                        def buildResult = sh(
+                            script: "docker build -t ${imageTag} -f ${dockerfile} ${buildContext}",
+                            returnStatus: true
+                        )
                         
-                        allImageTags << imageTag
-                        buildResults << dockerfile
+                        if (buildResult == 0) {
+                            allImageTags << imageTag
+                            buildResults << dockerfile
+                        } else {
+                            echo "Build failed for ${dockerfile}"
+                        }
                     }
                     
                     // Store all image tags for later stages
                     env.ALL_IMAGE_TAGS = allImageTags.join(',')
-                    env.DOCKERFILE_COUNT = dockerfiles.size().toString()
+                    env.DOCKERFILE_COUNT = allImageTags.size().toString()
                     
+                    if (buildResults.isEmpty()) {
+                        echo "All Docker builds failed - skipping Docker stages"
+                        recordStage('docker_build', 'SKIPPED', 'All Docker builds failed')
+                        return
+                    }
                     recordStage('docker_build', 'PASS', 'Built ${buildResults.size()} images: ' + buildResults.join(', '))
                 }
             }
