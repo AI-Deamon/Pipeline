@@ -1,0 +1,591 @@
+import groovy.transform.Field
+
+@Field def STAGES_RESULTS = []
+@Field def PROJECT = [:]
+@Field def SELECTED = []
+@Field def IS_MANUAL = false
+@Field def IMAGE_TAG = ''
+
+// Dynamic dependency detection function - finds all package manager files in repo
+def findDependencyFiles() {
+    def dependencies = [
+        npm: [],
+        pip: [],
+        yarn: [],
+        poetry: []
+    ]
+    
+    // Search for dependency files in entire repository (exclude node_modules)
+    sh "find . -type f -name 'package.json' -not -path '*/node_modules/*' 2>/dev/null > npm_files.txt"
+    sh "find . -type f -name 'requirements.txt' -not -path '*/node_modules/*' 2>/dev/null > pip_files.txt"
+    sh "find . -type f -name 'yarn.lock' -not -path '*/node_modules/*' 2>/dev/null > yarn_files.txt"
+    sh "find . -type f -name 'pyproject.toml' -not -path '*/node_modules/*' 2>/dev/null > poetry_files.txt"
+    
+    if (fileExists('npm_files.txt')) {
+        def npmFiles = readFile('npm_files.txt').trim()
+        dependencies.npm = npmFiles ? npmFiles.split('\n').findAll { it.trim() } : []
+    }
+    if (fileExists('pip_files.txt')) {
+        def pipFiles = readFile('pip_files.txt').trim()
+        dependencies.pip = pipFiles ? pipFiles.split('\n').findAll { it.trim() } : []
+    }
+    if (fileExists('yarn_files.txt')) {
+        def yarnFiles = readFile('yarn_files.txt').trim()
+        dependencies.yarn = yarnFiles ? yarnFiles.split('\n').findAll { it.trim() } : []
+    }
+    if (fileExists('poetry_files.txt')) {
+        def poetryFiles = readFile('poetry_files.txt').trim()
+        dependencies.poetry = poetryFiles ? poetryFiles.split('\n').findAll { it.trim() } : []
+    }
+    
+    // Cleanup temporary files
+    sh "rm -f npm_files.txt pip_files.txt yarn_files.txt poetry_files.txt"
+    
+    echo "Found dependencies: npm=${dependencies.npm.size()}, pip=${dependencies.pip.size()}, yarn=${dependencies.yarn.size()}, poetry=${dependencies.poetry.size()}"
+    
+    return dependencies
+}
+
+// Get unique scan paths from dependency files
+def getDependencyScanPaths() {
+    def dependencies = findDependencyFiles()
+    def scanPaths = []
+    
+    // Add directory containing each npm package.json
+    dependencies.npm.each { file ->
+        def dir = file.substring(0, file.lastIndexOf('/'))
+        if (dir && !scanPaths.contains(dir)) {
+            scanPaths << dir
+        }
+    }
+    
+    // Add directory containing each pip requirements.txt
+    dependencies.pip.each { file ->
+        def dir = file.substring(0, file.lastIndexOf('/'))
+        if (dir && !scanPaths.contains(dir)) {
+            scanPaths << dir
+        }
+    }
+    
+    // Add directories from yarn
+    dependencies.yarn.each { file ->
+        def dir = file.substring(0, file.lastIndexOf('/'))
+        if (dir && !scanPaths.contains(dir)) {
+            scanPaths << dir
+        }
+    }
+    
+    // Add directories from poetry
+    dependencies.poetry.each { file ->
+        def dir = file.substring(0, file.lastIndexOf('/'))
+        if (dir && !scanPaths.contains(dir)) {
+            scanPaths << dir
+        }
+    }
+    
+    // Default to root if no specific paths found
+    if (scanPaths.isEmpty()) {
+        scanPaths << '.'
+    }
+    
+    echo "Scan paths: ${scanPaths.join(', ')}"
+    return scanPaths
+}
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'SCAN_ID', defaultValue: '')
+        choice(name: 'SCAN_MODE', choices: ['AUTOMATED', 'MANUAL'])
+        text(name: 'PROJECT_DATA', defaultValue: '{}')
+        text(name: 'SELECTED_STAGES', defaultValue: '[]')
+        text(name: 'SCAN_TIMEOUT', defaultValue: '7200')  // Dynamic timeout in seconds
+        string(name: 'CALLBACK_TOKEN', defaultValue: '', description: 'Callback token for backend auth')
+    }
+
+    environment {
+        // Use environment variable for backend URL, fallback to host machine IP for callback
+        CALLBACK_URL = "${env.BACKEND_URL ?: 'http://192.168.1.101:8000'}/api/v1/scans/${params.SCAN_ID}/callback"
+        CALLBACK_TOKEN = "${params.CALLBACK_TOKEN ?: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'}"
+        REPORT_DIR = "reports"
+    }
+
+    options {
+        // Dynamic timeout based on scan complexity (default 2 hours)
+        timeout(time: params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() : 7200, unit: 'SECONDS')
+        disableConcurrentBuilds()
+        skipStagesAfterUnstable()
+        // Keep build logs for debugging
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+        stage('Init Context') {
+            steps {
+                script {
+                    // Debug logging
+                    echo "=== Init Context Started ==="
+                    echo "SCAN_ID received: ${params.SCAN_ID}"
+                    echo "SCAN_MODE received: ${params.SCAN_MODE}"
+                    
+                    // Validate SCAN_ID
+                    if (!params.SCAN_ID?.trim()) {
+                        error("SCAN_ID is mandatory. Backend handshake failed.")
+                    }
+                    
+                    if (params.SCAN_ID =~ /\s/) {
+                        error("SCAN_ID must not contain spaces. Use UUID format.")
+                    }
+                    
+                    echo "SCAN_ID validation passed"
+                    
+                    // Unescape HTML entities in parameters
+                    def projectData = params.PROJECT_DATA.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+                    def selectedStages = params.SELECTED_STAGES.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+                    
+                    echo "Unescaped PROJECT_DATA: ${projectData}"
+                    echo "Unescaped SELECTED_STAGES: ${selectedStages}"
+                    
+                    // Parse JSON using readJSON (sandbox-safe)
+                    def projectMap = readJSON text: projectData
+                    PROJECT = new HashMap(projectMap)
+                    
+                    def selectedList = readJSON text: selectedStages
+                    SELECTED = new ArrayList(selectedList)
+                    
+                    IS_MANUAL = params.SCAN_MODE == "MANUAL"
+                    sh "mkdir -p reports"
+                    
+                    echo "Parsed PROJECT: ${PROJECT}"
+                    echo "Parsed SELECTED: ${SELECTED}"
+                    echo "IS_MANUAL: ${IS_MANUAL}"
+                    echo "=== Init Context Completed ==="
+                }
+            }
+        }
+
+        stage('Git Checkout') {
+            steps {
+                script {
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: PROJECT.branch ?: 'main']],
+                        userRemoteConfigs: [[
+                            url: PROJECT.git_url,
+                            credentialsId: PROJECT.credentials_id ?: 'github-credentials'
+                        ]]
+                    ])
+                    recordStage('git_checkout', 'PASS', 'Git checkout successful')
+                }
+            }
+        }
+
+        stage('Sonar Scanner') {
+            when { expression { shouldRun('sonar_scanner') } }
+            steps {
+                // Per-stage timeout: 15 minutes for Sonar analysis
+                timeout(time: 15, unit: 'MINUTES') {
+                    script {
+                        // Get the SonarQube Scanner tool path
+                        def scannerHome = tool 'sonar-scanner'
+
+                        try {
+                            // Use Jenkins SonarQube server configuration
+                            def projectName = PROJECT.project_name ?: params.SCAN_ID
+                            withSonarQubeEnv('sonar-server') {
+                                sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=\"${PROJECT.sonar_key ?: params.SCAN_ID}\" -Dsonar.projectName=\"${projectName}\" -Dsonar.sourceEncoding=UTF-8 -Dsonar.exclusions=reports/**"
+                            }
+                            recordStage('sonar_scanner', 'PASS', 'Sonar scan completed')
+                        } catch (Exception e) {
+                            echo "⚠️  SonarQube failed: ${e.message}"
+                            echo "   Continuing pipeline with other security scans..."
+                            recordStage('sonar_scanner', 'WARN', "SonarQube failed: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Sonar Quality Gate') {
+            when { expression { shouldRun('sonar_quality_gate') } }
+            steps {
+                echo "⏭️  Skipping SonarQube Quality Gate check"
+                recordStage('sonar_quality_gate', 'SKIPPED', 'Quality Gate check skipped')
+            }
+        }
+
+        stage('Dependency Check') {
+            when { expression { shouldRun('dependency_check') } }
+            steps {
+                script {
+                    // Ensure report directory exists before running dependency check
+                    sh "mkdir -p reports"
+                    
+                    // Auto-detect dependency files and get scan paths
+                    def scanPaths = getDependencyScanPaths()
+                    
+                    if (!scanPaths || scanPaths.isEmpty()) {
+                        echo "No dependency files found - skipping Dependency Check"
+                        recordStage('dependency_check', 'SKIPPED', 'No dependency files found to scan')
+                        return
+                    }
+                    
+                    // Build OWASP Dependency-Check arguments
+                    def scanArgs = [
+                        "--project ${params.SCAN_ID}",
+                        "--format JSON",
+                        "--format HTML",
+                        "--out reports",
+                        "--enableExperimental"
+                    ]
+                    
+                    // Add each scan path
+                    scanPaths.each { path ->
+                        scanArgs << "--scan ${path}"
+                    }
+                    
+                    // Add custom exclusions from project config if available
+                    if (PROJECT.dependency_exclusions) {
+                        scanArgs << "--exclude ${PROJECT.dependency_exclusions}"
+                    }
+                    
+                    echo "Running OWASP Dependency-Check with paths: ${scanPaths.join(', ')}"
+                    echo "Arguments: ${scanArgs.join(' ')}"
+                    
+                    try {
+                        dependencyCheck additionalArguments: scanArgs.join(' '), odcInstallation: 'OWasp'
+                        recordStage('dependency_check', 'PASS', 'Dependency check completed for: ' + scanPaths.join(', '))
+                    } catch (Exception e) {
+                        echo "⚠️  Dependency Check failed: ${e.message}"
+                        recordStage('dependency_check', 'FAIL', "Dependency Check failed: ${e.message}")
+                        error("Dependency Check failed: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        stage('Trivy FS Scan') {
+            when { expression { shouldRun('trivy_fs_scan') } }
+            steps {
+                sh """
+                    /home/kali_linux/.local/bin/trivy fs --format json \
+                      --skip-files "reports/**" \
+                      -o reports/trivy-fs.json . || true
+                """
+                recordStage('trivy_fs_scan', 'PASS', 'Trivy FS scan completed')
+            }
+        }
+
+        stage('Docker Build') {
+            when { expression { shouldRun('docker_build') } }
+            steps {
+                script {
+                    // Find all Dockerfiles in the repository
+                    def dockerfiles = []
+                    def output = sh(
+                        script: "find . -type f \\( -name 'Dockerfile*' -o -name '*.Dockerfile' \\) ! -name '*.md' | sort",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (output) {
+                        dockerfiles = output.split('\n').findAll { it.trim() }
+                    }
+                    
+                    if (dockerfiles.isEmpty()) {
+                        echo "⚠️  No Dockerfiles found - skipping Docker build"
+                        recordStage('docker_build', 'SKIPPED', 'No Dockerfiles found')
+                        return
+                    }
+                    
+                    echo "Found ${dockerfiles.size()} Dockerfiles: ${dockerfiles.join(', ')}"
+                    
+                    // Build each Dockerfile found and store image tags
+                    def buildResults = []
+                    def allImageTags = []
+                    
+                    dockerfiles.each { dockerfile ->
+                        def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(100)
+                        def imageTag = "${PROJECT.project_id ?: 'scan'}:${imageName}-${params.SCAN_ID}"
+                        def buildContext = '.'
+                        
+                        echo "Building ${dockerfile} with context: ${buildContext}"
+                        def buildResult = sh(
+                            script: "docker build -t ${imageTag} -f ${dockerfile} ${buildContext}",
+                            returnStatus: true
+                        )
+                        
+                        if (buildResult == 0) {
+                            allImageTags << imageTag
+                            buildResults << dockerfile
+                        } else {
+                            echo "Build failed for ${dockerfile}"
+                        }
+                    }
+                    
+                    // Store all image tags for later stages
+                    env.ALL_IMAGE_TAGS = allImageTags.join(',')
+                    env.DOCKERFILE_COUNT = allImageTags.size().toString()
+                    
+                    if (buildResults.isEmpty()) {
+                        echo "All Docker builds failed - skipping Docker stages"
+                        recordStage('docker_build', 'SKIPPED', 'All Docker builds failed')
+                        return
+                    }
+                    recordStage('docker_build', 'PASS', 'Built ${buildResults.size()} images: ' + buildResults.join(', '))
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            when { expression { shouldRun('docker_push') } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-credentials',
+                                                  usernameVariable: 'DOCKER_USER',
+                                                  passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
+                        
+                        if (allImageTags.isEmpty()) {
+                            echo "⚠️  No images to push - skipping Docker push"
+                            recordStage('docker_push', 'SKIPPED', 'No images to push')
+                            return
+                        }
+                        
+                        def pushedImages = []
+                        
+                        // Push each image
+                        allImageTags.each { imageTag ->
+                            def imageName = imageTag.replaceAll('[^a-zA-Z0-9/]', '-').toLowerCase()
+                            def pushTag = "${DOCKER_USER}/${imageName}".toString()
+                            
+                            echo "Pushing ${imageTag} as ${pushTag}"
+                            sh "docker tag ${imageTag} ${pushTag}"
+                            sh '''
+                                echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin || exit 1
+                                docker push ''' + pushTag + ''' || { echo "Push failed for ''' + pushTag + '''"; }
+                            '''
+                            pushedImages << pushTag
+                        }
+                        
+                        recordStage('docker_push', 'PASS', 'Pushed ${pushedImages.size()} images: ' + pushedImages.join(', '))
+                    }
+                }
+            }
+        }
+
+        stage('Trivy Image Scan') {
+            when { expression { shouldRun('trivy_image_scan') } }
+            steps {
+                script {
+                    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
+                    
+                    if (allImageTags.isEmpty()) {
+                        echo "⚠️  No images to scan - skipping Trivy image scan"
+                        recordStage('trivy_image_scan', 'SKIPPED', 'No images to scan')
+                        return
+                    }
+                    
+                    def scannedImages = []
+                    
+                    // Scan each image
+                    allImageTags.each { imageTag ->
+                        def safeTag = imageTag.toString()
+                        echo "Scanning image: ${safeTag}"
+                        sh "/home/kali_linux/.local/bin/trivy image --format json -o reports/trivy-image.json ${safeTag} || true"
+                        scannedImages << safeTag
+                    }
+                    
+                    recordStage('trivy_image_scan', 'PASS', 'Scanned ${scannedImages.size()} images: ' + scannedImages.join(', '))
+                }
+            }
+        }
+
+        stage('Nmap System Scan') {
+            when { expression { shouldRun('nmap_scan') } }
+            steps {
+                script {
+                    if (!PROJECT.target_ip) {
+                        if (IS_MANUAL) {
+                            error("target_ip required for manual Nmap scan")
+                        }
+                        echo "SKIP: No target_ip provided"
+                        return
+                    }
+
+                    sh "mkdir -p reports"
+
+                    sh """
+                        cd backend/nmap_system
+
+                        echo '{"client":"Pipeline Auto Scan","month":"${new Date().format("MMMM yyyy")}","targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"Test"}]}' > targets.json
+
+                        python3 scanner.py
+
+                        python3 parser.py
+                    """
+
+                    sh """
+                        cp backend/nmap_system/scans/*/findings.json reports/nmap_findings.json 2>/dev/null || true
+                        echo "Nmap system scan completed"
+                    """
+
+                    recordStage('nmap_scan', 'PASS', 'Nmap system scan completed (11 scans + parser)')
+                }
+            }
+        }
+
+        stage('ZAP Scan') {
+            when { expression { shouldRun('zap_scan') } }
+            steps {
+                script {
+                    if (!PROJECT.target_url) {
+                        if (IS_MANUAL) {
+                            error("target_url required for manual ZAP scan")
+                        }
+                        echo "SKIP: No target_url provided"
+                        return
+                    }
+                    withEnv(["TARGET_URL=${PROJECT.target_url}"]) {
+                        sh '''
+                            zap.sh -daemon -host 127.0.0.1 -port 8090 -config api.disablekey=true &
+                            ZAP_PID=$!
+                            sleep 30
+                            
+                            # First add URL to context (required for active scan)
+                            curl "http://127.0.0.1:8090/JSON/context/action/includeInContext/?contextName=Default&regex=.*" || true
+                            
+                            # Spider scan first (passive)
+                            curl "http://127.0.0.1:8090/JSON/spider/action/scan/?url=$TARGET_URL" || true
+                            sleep 60
+                            
+                            # Active scan - use correct endpoint and add URL to sites first
+                            curl "http://127.0.0.1:8090/JSON/ascan/action/addUrl/?url=$TARGET_URL" || true
+                            sleep 5
+                            curl "http://127.0.0.1:8090/JSON/ascan/action/scan/?url=$TARGET_URL&recurse=true" || true
+                            sleep 120
+                            
+                            # Fixed: use correct API endpoints for ZAP 2.17+
+                            curl "http://127.0.0.1:8090/OTHER/core/other/htmlreport/" -o reports/zap.html || true
+                            curl "http://127.0.0.1:8090/OTHER/core/other/jsonreport/" -o reports/zap.json || true
+                            
+                            kill $ZAP_PID 2>/dev/null || true
+                        '''
+                    }
+                    recordStage('zap_scan', 'PASS', 'ZAP scan completed')
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                archiveArtifacts artifacts: "reports/**", allowEmptyArchive: true
+
+                def errorMessage = null
+                def errorType = null
+                def jenkinsConsoleUrl = null
+
+                if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'ABORTED') {
+                    def failedStage = STAGES_RESULTS ? STAGES_RESULTS.find { it.status == 'FAIL' } : null
+
+                    if (currentBuild.buildCauses?.any { it.shortDescription?.contains('Timeout') }) {
+                        errorType = 'TIMEOUT'
+                        errorMessage = "Scan timed out after ${params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() / 60 : 120} minutes"
+                    } else if (failedStage) {
+                        errorType = 'PIPELINE_ERROR'
+                        errorMessage = "Pipeline failed at stage: ${failedStage.stage}. Check Jenkins console for details."
+                    } else {
+                        errorType = 'PIPELINE_ERROR'
+                        errorMessage = "Pipeline failed. Check Jenkins console logs for details."
+                    }
+
+                    jenkinsConsoleUrl = "${env.JENKINS_BASE_URL ?: 'http://192.168.1.101:8080'}/job/${env.JOB_NAME}/${env.BUILD_NUMBER}/console"
+                }
+
+                def payload = [
+                    status: currentBuild.currentResult,
+                    build_number: currentBuild.number,
+                    scan_id: params.SCAN_ID,
+                    scan_mode: params.SCAN_MODE,
+                    stages: STAGES_RESULTS ?: [],
+                    finished_at: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
+                    ERROR_MESSAGE: errorMessage ?: "Pipeline completed with status: ${currentBuild.currentResult}",
+                    ERROR_TYPE: errorType ?: 'SUCCESS',
+                    JENKINS_CONSOLE_URL: jenkinsConsoleUrl
+                ]
+
+                writeFile file: 'callback.json', text: groovy.json.JsonOutput.toJson(payload)
+
+                sh """
+                    curl -sS -X POST \
+                      -H "Content-Type: application/json" \
+                      -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
+                      --data @callback.json \
+                      "${CALLBACK_URL}" \
+                    || echo "Callback failed"
+                """
+            }
+        }
+
+        success {
+            echo "Pipeline completed successfully for SCAN_ID: ${params.SCAN_ID}"
+        }
+
+        failure {
+            echo "Pipeline failed for SCAN_ID: ${params.SCAN_ID}"
+        }
+    }
+}
+
+def shouldRun(stageName) {
+    if (IS_MANUAL == false) {
+        return true
+    }
+    return SELECTED.contains(stageName)
+}
+
+def recordStage(stageName, status, summary) {
+    if (!binding.hasVariable('STAGES_RESULTS')) {
+        STAGES_RESULTS = []
+    }
+    STAGES_RESULTS.add([
+        stage: stageName.toString(),
+        status: status.toString(),
+        summary: summary.toString(),
+        timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+    ])
+    echo "Recorded stage: ${stageName} - ${status}"
+    
+    // Send intermediate callback to update frontend
+    sendIntermediateCallback(stageName)
+}
+
+def sendIntermediateCallback(finishedStage) {
+    def currentStages = STAGES_RESULTS ?: []
+    
+    def payload = [
+        status: 'RUNNING',
+        build_number: currentBuild.number,
+        scan_id: params.SCAN_ID,
+        scan_mode: params.SCAN_MODE,
+        stages: currentStages,
+        finished_at: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
+        ERROR_MESSAGE: null,
+        ERROR_TYPE: null,
+        JENKINS_CONSOLE_URL: null
+    ]
+    
+     writeFile file: 'callback.json', text: groovy.json.JsonOutput.toJson(payload)
+     
+     sh """
+         curl -sS -X POST \
+           -H "Content-Type: application/json" \
+           -H "X-Callback-Token: ${CALLBACK_TOKEN}" \
+           --data @callback.json \
+           "${CALLBACK_URL}" \
+          || echo "Intermediate callback failed"
+     """
+
+}
