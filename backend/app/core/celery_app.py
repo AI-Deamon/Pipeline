@@ -5,7 +5,10 @@ celery_app = Celery(
     "devsecops_worker",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.jenkins_tasks"]
+    include=[
+        "app.tasks.jenkins_tasks",
+        "app.tasks.report_tasks",
+    ],
 )
 
 celery_app.conf.update(

@@ -155,6 +155,11 @@ def scan_callback(
     scan_obj.stage_results = normalized_stages
 
     jenkins_status = str(report.get("status", "")).upper()
+
+    build_number = report.get("build_number")
+    if build_number is None:
+        build_number = report.get("buildNumber")
+
     if jenkins_status == "RUNNING":
         # Jenkins confirmed build started - transition from CREATED to RUNNING
         scan_obj.state = ScanState.RUNNING
@@ -168,6 +173,7 @@ def scan_callback(
         if build_num:
             from app.tasks.report_tasks import process_scan_reports_task
             from app.core.config import settings
+
             background_tasks.add_task(
                 process_scan_reports_task.delay,
                 scan_id=scan_id,

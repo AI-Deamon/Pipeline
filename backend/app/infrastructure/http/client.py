@@ -33,26 +33,28 @@ class HttpClient:
             if "jenkins" in self.base_url.lower() and method == "POST":
                 try:
                     crumb_response = self.session.get(
-                        f"{self.base_url}/crumbIssuer/api/json",
-                        timeout=10
+                        f"{self.base_url}/crumbIssuer/api/json", timeout=10
                     )
                     if crumb_response.ok:
                         crumb_data = crumb_response.json()
-                        crumb_field = crumb_data.get('crumbRequestField', 'Jenkins-Crumb')
-                        crumb_value = crumb_data.get('crumb')
+                        crumb_field = crumb_data.get(
+                            "crumbRequestField", "Jenkins-Crumb"
+                        )
+                        crumb_value = crumb_data.get("crumb")
                         if crumb_value:
+                            # Add CSRF token to this request's headers
                             request_headers[crumb_field] = crumb_value
                 except Exception as e:
                     logger.warning(f"Failed to get Jenkins crumb: {e}")
 
             # Check if this is a Jenkins request with parameters
             is_jenkins_request = "jenkins" in self.base_url.lower()
-            
+
             if is_jenkins_request and method == "POST":
                 # Jenkins buildWithParameters: POST to URL with params as query string
                 logger.info(f"[HTTP] Sending Jenkins POST request to {url}")
                 logger.info(f"[HTTP] Query params: {params}")
-                
+
                 # Performance Optimization (Bolt ⚡): Use self.session.request for connection pooling
                 response = self.session.request(
                     method=method,
@@ -75,7 +77,9 @@ class HttpClient:
                 )
             else:
                 # For all other requests, use JSON
-                logger.info(f"[HTTP] Sending request to {url} with params: {params}, json: {data}")
+                logger.info(
+                    f"[HTTP] Sending request to {url} with params: {params}, json: {data}"
+                )
                 # Performance Optimization (Bolt ⚡): Use self.session.request for connection pooling
                 response = self.session.request(
                     method=method,
@@ -93,7 +97,17 @@ class HttpClient:
                     message=response.text,
                 )
 
-            return response.json() if response.content else None
+            # For Jenkins requests, return the response object to allow header inspection
+            if is_jenkins_request:
+                return response
+
+            # For other APIs, return JSON if content exists
+            if response.content:
+                return response.json()
+            return {
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+            }
 
         except requests.RequestException as e:
             raise ExternalServiceError(

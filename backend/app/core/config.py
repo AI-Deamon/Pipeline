@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
     CORS_ORIGINS: List[str] = ["http://localhost:5173"]
     SONARQUBE_URL: str = "localhost:9000"
+    SONARQUBE_PROTOCOL: str = "http"
 
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -40,7 +41,9 @@ class Settings(BaseSettings):
         # Validate security tokens for non-test environments or when using real Jenkins
         if self.ENV != "test" or not self.MOCK_EXECUTION:
             if not self.CALLBACK_TOKEN or len(self.CALLBACK_TOKEN.strip()) < 32:
-                raise ValueError("CALLBACK_TOKEN must be set and at least 32 characters")
+                raise ValueError(
+                    "CALLBACK_TOKEN must be set and at least 32 characters"
+                )
             if not self.API_KEY or len(self.API_KEY.strip()) < 32:
                 raise ValueError("API_KEY must be set and at least 32 characters")
 

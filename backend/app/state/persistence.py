@@ -28,7 +28,9 @@ def persist_state(scans_db: dict, projects_db: dict) -> None:
                     "scan_id": s.scan_id,
                     "project_id": s.project_id,
                     "scan_mode": s.scan_mode,
-                    "state": s.state.value if hasattr(s.state, "value") else str(s.state),
+                    "state": s.state.value
+                    if hasattr(s.state, "value")
+                    else str(s.state),
                     "selected_stages": s.selected_stages,
                     "created_at": s.created_at.isoformat(),
                     "started_at": s.started_at.isoformat() if s.started_at else None,
@@ -72,9 +74,21 @@ def restore_state() -> tuple[dict, dict]:
                 selected_stages=raw.get("selected_stages", []),
                 state=ScanState(raw["state"]),
             )
-            scan.created_at = datetime.fromisoformat(raw["created_at"])
-            scan.started_at = datetime.fromisoformat(raw["started_at"]) if raw.get("started_at") else None
-            scan.finished_at = datetime.fromisoformat(raw["finished_at"]) if raw.get("finished_at") else None
+            scan.created_at = (
+                datetime.fromisoformat(raw["created_at"]).replace(tzinfo=timezone.utc)
+                if raw.get("created_at")
+                else None
+            )
+            scan.started_at = (
+                datetime.fromisoformat(raw["started_at"]).replace(tzinfo=timezone.utc)
+                if raw.get("started_at")
+                else None
+            )
+            scan.finished_at = (
+                datetime.fromisoformat(raw["finished_at"]).replace(tzinfo=timezone.utc)
+                if raw.get("finished_at")
+                else None
+            )
             scan.jenkins_build_number = raw.get("jenkins_build_number")
             scan.jenkins_queue_id = raw.get("jenkins_queue_id")
             scan.stage_results = raw.get("stage_results", [])
@@ -86,7 +100,9 @@ def restore_state() -> tuple[dict, dict]:
 
             scans[sid] = scan
         except Exception:
-            logger.exception("Skipping invalid scan payload during restore for scan_id=%s", sid)
+            logger.exception(
+                "Skipping invalid scan payload during restore for scan_id=%s", sid
+            )
 
     projects = payload.get("projects", {})
     return scans, projects

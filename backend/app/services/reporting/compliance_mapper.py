@@ -87,7 +87,7 @@ class ComplianceMapper:
         """
         title = finding.get("title", "").lower()
         description = finding.get("description", "").lower()
-        cve = finding.get("cve", "").lower()
+        cve = (finding.get("cve") or "").lower()
 
         # Keyword matching
         if any(kw in title or kw in description or kw in cve for kw in ["sql", "injection", "sqli"]):

@@ -18,80 +18,75 @@ const RegisterPage = () => {
     try {
       await api.auth.register(username, password);
       navigate('/login', { 
-        state: { message: 'Registration successful! Please sign in with your new credentials.' } 
+        state: { message: 'Registration successful! Please sign in.' } 
       });
     } catch (err: unknown) {
-      console.error('Registration failed', err);
       const errorMessage = err && typeof err === 'object' && 'response' in err 
         ? (err.response as { data?: { detail?: string } })?.data?.detail 
-        : 'Initialization failed. Username might already be in use.';
-      setError(errorMessage || 'Initialization failed.');
+        : 'Registration failed.';
+      setError(errorMessage || 'Registration failed.');
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/20 blur-[120px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
-      <div className="absolute bottom-0 left-0 w-96 h-96 bg-blue-900/20 blur-[120px] rounded-full translate-y-1/2 -translate-x-1/2"></div>
-
-      <div className="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-10 relative z-10 animate-in zoom-in-95 duration-500">
-        <div className="flex flex-col items-center mb-10">
-          <div className="w-20 h-20 bg-blue-600 rounded-[2rem] flex items-center justify-center mb-6 shadow-xl shadow-blue-900/20 ring-8 ring-blue-50">
-            <Shield className="w-10 h-10 text-white" aria-hidden="true" />
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-sm p-8">
+        <div className="flex flex-col items-center mb-8">
+          <div className="w-12 h-12 bg-slate-900 rounded-lg flex items-center justify-center mb-4">
+            <Shield className="w-6 h-6 text-white" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tight uppercase leading-none mb-2 text-center">Join the Pipeline</h1>
-          <p className="text-slate-500 font-medium text-sm tracking-tight">Initialize your operator credentials</p>
+          <h1 className="text-2xl font-semibold text-slate-900">Create Account</h1>
+          <p className="text-slate-500 text-sm">Sign up for an account</p>
         </div>
 
-        <form onSubmit={handleRegister} className="space-y-6">
+        <form onSubmit={handleRegister} className="space-y-5">
           {error && (
-            <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl text-xs font-bold flex items-start gap-3 animate-shake">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4" />
               {error}
             </div>
           )}
           
-          <div className="space-y-2">
-            <label htmlFor="username" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Choose Operator Name
+          <div>
+            <label htmlFor="username" className="block text-sm font-medium text-slate-700 mb-1">
+              Username
             </label>
             <input
               id="username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="input-field"
-              placeholder="e.g. jdoe_sec"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/5"
+              placeholder="Choose a username"
               required
               autoFocus
               disabled={isLoading}
             />
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="password" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
-              Secure Access Token
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+              Password
             </label>
-            <div className="relative group">
+            <div className="relative">
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input-field pr-12"
-                placeholder="Minimum 8 characters"
+                className="w-full px-3 py-2 pr-10 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/5"
+                placeholder="At least 8 characters"
                 required
                 disabled={isLoading}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 hover:text-blue-600 transition-colors p-1 rounded-lg"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
           </div>
@@ -99,31 +94,27 @@ const RegisterPage = () => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full btn-primary h-14 mt-4 flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
+            className="w-full py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {isLoading ? (
               <>
-                <Loader2 className="animate-spin h-5 w-5" />
-                Processing...
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Creating...
               </>
             ) : (
               <>
-                <CheckCircle className="w-5 h-5" />
-                Initialize Operator
+                <CheckCircle className="w-4 h-4" />
+                Create Account
               </>
             )}
           </button>
         </form>
 
-        <div className="mt-10 text-center text-xs font-bold text-slate-400 uppercase tracking-widest">
-          Already Enrolled?{' '}
-          <Link to="/login" className="text-blue-600 hover:text-blue-700 transition-colors">
-            Command Center Sign In
+        <div className="mt-6 text-center text-sm text-slate-500">
+          Already have an account?{' '}
+          <Link to="/login" className="text-slate-900 font-medium hover:underline">
+            Sign in
           </Link>
-        </div>
-
-        <div className="mt-12 pt-8 border-t border-slate-50 text-center text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">
-          End-to-End Encryption Enabled
         </div>
       </div>
     </div>

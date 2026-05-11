@@ -1,6 +1,7 @@
 import uuid
 import shutil
 from pathlib import Path
+from datetime import timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
@@ -12,7 +13,12 @@ from app.state.scan_state import ScanState
 
 router = APIRouter()
 
-ACTIVE_STATES = {ScanState.CREATED.value, ScanState.QUEUED.value, ScanState.RUNNING.value}
+ACTIVE_STATES = {
+    ScanState.CREATED.value,
+    ScanState.QUEUED.value,
+    ScanState.RUNNING.value,
+}
+
 
 def _get_last_scan_map(db: Session) -> dict[str, str]:
     subq = (
@@ -36,19 +42,38 @@ def _get_last_scan_map(db: Session) -> dict[str, str]:
     )
     return {row.project_id: row.scan_id for row in rows}
 
+
 @router.get("/projects", response_model=list[dict])
 def list_projects(db: Session = Depends(get_db)):
     last_scan_map = _get_last_scan_map(db)
     db_projects = db.query(ProjectDB).all()
-    return [
-        {
-            "project_id": p.project_id,
-            "name": p.name,
-            "last_scan_state": p.last_scan_state,
-            "last_scan_id": last_scan_map.get(p.project_id),
-        }
-        for p in db_projects
-    ]
+    projects = []
+    for p in db_projects:
+        last_scan_id = last_scan_map.get(p.project_id)
+        last_scan_time = None
+        if last_scan_id:
+            last_scan = db.query(ScanDB).filter(ScanDB.scan_id == last_scan_id).first()
+            if last_scan and last_scan.created_at:
+                # Convert UTC to IST (UTC+5:30)
+                dt = last_scan.created_at
+                if dt.tzinfo is None:
+                    from datetime import timezone, timedelta
+
+                    dt = dt.replace(tzinfo=timezone.utc)
+                # Add 5:30 hours for IST
+                ist_dt = dt + timedelta(hours=5, minutes=30)
+                last_scan_time = ist_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        projects.append(
+            {
+                "project_id": p.project_id,
+                "name": p.name,
+                "last_scan_state": p.last_scan_state,
+                "last_scan_id": last_scan_id,
+                "last_scan_time": last_scan_time,
+            }
+        )
+    return projects
+
 
 @router.post("/projects", response_model=ProjectResponse)
 def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
@@ -62,12 +87,13 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
         sonar_key=project.sonar_key,
         target_ip=project.target_ip,
         target_url=str(project.target_url) if project.target_url else None,
-        status="CREATED"
+        status="CREATED",
     )
     db.add(db_project)
     db.commit()
     db.refresh(db_project)
     return db_project
+
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: str, db: Session = Depends(get_db)):
@@ -88,7 +114,9 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
-def update_project(project_id: str, project: ProjectUpdate, db: Session = Depends(get_db)):
+def update_project(
+    project_id: str, project: ProjectUpdate, db: Session = Depends(get_db)
+):
     db_project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")

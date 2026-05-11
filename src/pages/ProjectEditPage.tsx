@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { AlertCircle, ChevronLeft, PencilLine } from 'lucide-react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
+import { AlertCircle, ChevronLeft } from 'lucide-react';
 import { api } from '../services/api';
 import type { Project } from '../types';
 import { ProjectForm, type ProjectFormValues } from '../components/ProjectForm';
@@ -19,7 +19,7 @@ const ProjectEditPage = () => {
   useEffect(() => {
     const loadProject = async () => {
       if (!projectId) {
-        setError('Missing project identifier');
+        setError('Missing project ID');
         setLoading(false);
         return;
       }
@@ -32,7 +32,7 @@ const ProjectEditPage = () => {
           setProject(data);
         }
       } catch (err: any) {
-        setError(ApiError.getErrorMessage(err, 'Failed to load project details'));
+        setError(ApiError.getErrorMessage(err, 'Failed to load project'));
       } finally {
         setLoading(false);
       }
@@ -60,7 +60,7 @@ const ProjectEditPage = () => {
       setProject(updated);
       return `Project "${updated.name}" updated successfully!`;
     } catch (err: any) {
-      throw new Error(ApiError.getErrorMessage(err, 'Project update failed. Check server logs.'));
+      throw new Error(ApiError.getErrorMessage(err, 'Update failed'));
     }
   };
 
@@ -68,19 +68,15 @@ const ProjectEditPage = () => {
 
   if (error || !project) {
     return (
-      <div className="max-w-xl mx-auto py-20 text-center space-y-6 bg-white border border-slate-200 rounded-[3rem] shadow-xl shadow-slate-100">
-        <div className="w-20 h-20 bg-red-50 text-red-600 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-inner">
-          <AlertCircle className="w-10 h-10" />
-        </div>
-        <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight uppercase mb-2 leading-none">Project Not Found</h2>
-          <p className="text-slate-500 font-medium leading-relaxed italic">{error || 'The project could not be loaded.'}</p>
-        </div>
+      <div className="max-w-lg mx-auto py-20 text-center">
+        <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold text-slate-900 mb-2">Project not found</h2>
+        <p className="text-slate-500 mb-6">{error || 'Could not load project'}</p>
         <button
           onClick={() => navigate('/dashboard')}
-          className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-200"
+          className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium"
         >
-          Return to Dashboard
+          Back to Projects
         </button>
       </div>
     );
@@ -89,33 +85,29 @@ const ProjectEditPage = () => {
   const isLocked = ACTIVE_STATES.has(project.last_scan_state || '');
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4 space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate(`/projects/${projectId}`)}
-            className="p-3 bg-white border border-slate-200 text-slate-500 hover:text-slate-900 rounded-2xl transition-all active:scale-95 shadow-sm"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-          <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none mb-1 uppercase">Edit Project</h1>
-            <p className="text-slate-500 text-sm font-medium">Update configuration and pipeline metadata for {project.name}</p>
-          </div>
+    <div className="max-w-2xl mx-auto p-8 pb-20">
+      <header className="flex items-center gap-4 mb-8">
+        <Link
+          to={`/projects/${projectId}`}
+          className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </Link>
+        <div className="flex-1">
+          <h1 className="text-2xl font-semibold text-slate-900">Edit Project</h1>
+          <p className="text-sm text-slate-500">{project.name}</p>
         </div>
-        <div className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm">
-          <PencilLine className="w-4 h-4 text-blue-600" />
-          Blueprint Editor
-        </div>
-      </div>
+      </header>
 
-      <ProjectForm
-        initialValues={initialValues}
-        onSubmit={handleUpdate}
-        submitLabel="Save Changes"
-        locked={isLocked}
-        lockedMessage="Project edits are disabled while a scan is running. Wait for the scan to finish or cancel it before editing."
-      />
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+        <ProjectForm
+          initialValues={initialValues}
+          onSubmit={handleUpdate}
+          submitLabel="Save Changes"
+          locked={isLocked}
+          lockedMessage="Cannot edit while a scan is running."
+        />
+      </div>
     </div>
   );
 };

@@ -36,6 +36,9 @@ def scan_to_response(scan_obj: ScanDB) -> dict:
             "jenkins_console_url": scan_obj.jenkins_console_url,
         }
 
+    def format_dt(dt):
+        return dt.isoformat() if dt else None
+
     return {
         "scan_id": scan_obj.scan_id,
         "project_id": scan_obj.project_id,
@@ -44,9 +47,9 @@ def scan_to_response(scan_obj: ScanDB) -> dict:
         if hasattr(scan_obj.state, "value")
         else str(scan_obj.state),
         "selected_stages": scan_obj.selected_stages,
-        "created_at": scan_obj.created_at,
-        "started_at": scan_obj.started_at,
-        "finished_at": scan_obj.finished_at,
+        "created_at": format_dt(scan_obj.created_at),
+        "started_at": format_dt(scan_obj.started_at),
+        "finished_at": format_dt(scan_obj.finished_at),
         "results": scan_obj.stage_results,
         "error": error,
         "retry_count": scan_obj.retry_count or 0,
@@ -71,6 +74,9 @@ def expire_scan_if_timed_out(
     if not started or scan_obj.state != ScanState.RUNNING:
         return False
 
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+
     elapsed = (now - started).total_seconds()
     if elapsed > timeout_seconds:
         scan_obj.state = ScanState.FAILED
@@ -88,6 +94,62 @@ def expire_scan_if_timed_out(
             "Scan %s exceeded timeout (%s sec) and was marked FAILED",
             scan_obj.scan_id,
             timeout_seconds,
+        )
+        return True
+    return False
+
+
+def check_scan_not_started(
+    db,
+    scan_obj: ScanDB,
+    project_obj: ProjectDB,
+    now: datetime | None = None,
+    not_started_timeout: int = 600,
+    auto_commit: bool = True,
+) -> bool:
+    """Check if scan was triggered but Jenkins never started (e.g., syntax error in Jenkinsfile).
+
+    This handles cases where:
+    - Jenkinsfile has syntax errors
+    - Jenkins fails to start the job
+    - Git fetch fails before pipeline starts
+
+    The scan will be marked FAILED if it's still in CREATED state after not_started_timeout seconds.
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    if scan_obj.state != ScanState.CREATED:
+        return False
+
+    created = scan_obj.created_at
+    if not created:
+        return False
+
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+
+    elapsed = (now - created).total_seconds()
+
+    if elapsed > not_started_timeout:
+        scan_obj.state = ScanState.FAILED
+        scan_obj.finished_at = now
+        scan_obj.error_message = "Jenkins pipeline failed to start - possible Jenkinsfile syntax error or configuration issue. Check Jenkins console for details."
+        scan_obj.error_type = "PIPELINE_ERROR"
+        scan_obj.jenkins_console_url = (
+            f"{settings.JENKINS_BASE_URL}/job/Security-pipeline/"
+        )
+
+        if project_obj:
+            project_obj.last_scan_state = ScanState.FAILED.value
+
+        if auto_commit:
+            db.commit()
+
+        logger.warning(
+            "Scan %s was not started by Jenkins after %s seconds - marked as FAILED",
+            scan_obj.scan_id,
+            not_started_timeout,
         )
         return True
     return False

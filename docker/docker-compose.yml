@@ -7,7 +7,7 @@ services:
     env_file:
       - ../.env.dev
     environment:
-      - DATABASE_URL=postgresql://devsecops:devsecops@localhost:5433/devsecops_dev
+      - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
       - REDIS_URL=redis://localhost:6379/0
       - JENKINS_BASE_URL=http://localhost:8080
     depends_on:
@@ -25,7 +25,7 @@ services:
     env_file:
       - ../.env.dev
     environment:
-      - DATABASE_URL=postgresql://devsecops:devsecops@localhost:5433/devsecops_dev
+      - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
       - REDIS_URL=redis://localhost:6379/0
       - JENKINS_BASE_URL=http://localhost:8080
     depends_on:

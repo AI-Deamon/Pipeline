@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 from datetime import datetime, timezone
@@ -30,9 +31,11 @@ def process_scan_reports_task(
             logger.error(f"Scan {scan_id} not found")
             return
 
-        project_obj = db.query(ProjectDB).filter(
-            ProjectDB.project_id == scan_obj.project_id
-        ).first()
+        project_obj = (
+            db.query(ProjectDB)
+            .filter(ProjectDB.project_id == scan_obj.project_id)
+            .first()
+        )
         if not project_obj:
             logger.error(f"Project {scan_obj.project_id} not found")
             return
@@ -40,14 +43,20 @@ def process_scan_reports_task(
         sonar_key = project_obj.sonar_key
 
         if not jenkins_base_url:
-            jenkins_base_url = f"http://{project_obj.target_ip}" if project_obj.target_ip else "http://localhost:8080"
+            jenkins_base_url = (
+                f"http://{project_obj.target_ip}"
+                if project_obj.target_ip
+                else "http://localhost:8080"
+            )
 
-        reports = process_scan_reports(
-            scan_id=scan_id,
-            project_id=scan_obj.project_id,
-            jenkins_base_url=jenkins_base_url,
-            jenkins_build_number=jenkins_build_number,
-            sonar_key=sonar_key,
+        reports = asyncio.run(
+            process_scan_reports(
+                scan_id=scan_id,
+                project_id=scan_obj.project_id,
+                jenkins_base_url=jenkins_base_url,
+                jenkins_build_number=jenkins_build_number,
+                sonar_key=sonar_key,
+            )
         )
 
         logger.info(f"Processed {len(reports)} reports for scan {scan_id}")

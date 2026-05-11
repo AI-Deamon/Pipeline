@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+   backend:
+     environment:
+       - JENKINS_BASE_URL=http://192.168.1.101:8080
+     env_file:
+       - ../.env.staging
+     restart: unless-stopped
+     ports:
+       - "8000:8000"
+     volumes:
+       - ../storage/staging:/app/backend/storage/staging
+     extra_hosts:
+       - "host.docker.internal:host-gateway"
+       - "jenkins-host:192.168.1.101"
+
+  celery_worker:
+    environment:
+      - JENKINS_BASE_URL=http://192.168.1.101:8080
+    env_file:
+      - ../.env.staging
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "jenkins-host:192.168.1.101"
+
+  frontend:
+    env_file:
+      - ../.env.staging
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    volumes:
+      - ../docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  postgres:
+    env_file:
+      - ../.env.staging
+    restart: unless-stopped
+

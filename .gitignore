@@ -62,3 +62,4 @@ storage/
 # Untracked Agent folder
 Agent/.agent/
 Agent/.worktrees/
+.superdesign

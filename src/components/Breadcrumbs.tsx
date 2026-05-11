@@ -69,12 +69,12 @@ export const Breadcrumbs = ({ projectName }: BreadcrumbsProps) => {
               {pathnames[0] === 'scans' && (
                 <>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-                  <span className="text-slate-900">Execution Trace</span>
+                  <span className="text-slate-900">Scan Progress</span>
                 </>
               )}
             </>
           ) : pathnames[0] === 'scans' ? (
-            <span className="text-slate-900">Execution Trace</span>
+            <span className="text-slate-900">Scan Progress</span>
           ) : null}
         </>
       )}

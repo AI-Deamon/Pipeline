@@ -10,7 +10,14 @@ logger = logging.getLogger(__name__)
 def get_sonar_url() -> str:
     """Lazy load SONARQUBE_URL to avoid import errors"""
     from app.core.config import settings
+
     return settings.SONARQUBE_URL
+
+
+def get_sonar_protocol() -> str:
+    from app.core.config import settings
+
+    return getattr(settings, "SONARQUBE_PROTOCOL", "http")
 
 
 def get_sonar_dashboard_link(sonar_key: str) -> str:
@@ -19,7 +26,8 @@ def get_sonar_dashboard_link(sonar_key: str) -> str:
     Uses SONARQUBE_URL from environment.
     """
     sonar_url = get_sonar_url()
-    return f"https://{sonar_url}/dashboard?id={sonar_key}"
+    proto = get_sonar_protocol()
+    return f"{proto}://{sonar_url}/dashboard?id={sonar_key}"
 
 
 def create_sonar_report_link(sonar_key: Optional[str]) -> Optional[str]:
@@ -32,7 +40,8 @@ def create_sonar_report_link(sonar_key: Optional[str]) -> Optional[str]:
 def get_sonar_issues_link(sonar_key: str) -> str:
     """Generate SonarQube issues page link"""
     sonar_url = get_sonar_url()
-    return f"https://{sonar_url}/project/issues?id={sonar_key}&resolved=false"
+    proto = get_sonar_protocol()
+    return f"{proto}://{sonar_url}/project/issues?id={sonar_key}&resolved=false"
 
 
 # Severity mapping from SonarQube to our standard
@@ -45,30 +54,33 @@ SEVERITY_MAP = {
 }
 
 
-async def fetch_sonar_issues(sonar_key: str, sonar_url: str = None) -> List[SecurityFinding]:
+async def fetch_sonar_issues(
+    sonar_key: str, sonar_url: str = None
+) -> List[SecurityFinding]:
     """
     Fetch actual issues from SonarQube API.
     Returns list of SecurityFinding objects.
     """
     if not sonar_url:
         sonar_url = get_sonar_url()
-    
-    url = f"https://{sonar_url}/api/issues/search"
+
+    proto = get_sonar_protocol()
+    url = f"{proto}://{sonar_url}/api/issues/search"
     params = {
         "componentKeys": sonar_key,
         "severities": "BLOCKER,CRITICAL,MAJOR,MINOR",
         "ps": 500,  # Page size
     }
-    
+
     findings = []
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(url, params=params)
-            
+
             if response.status_code == 200:
                 data = response.json()
                 issues = data.get("issues", [])
-                
+
                 for issue in issues:
                     severity = SEVERITY_MAP.get(issue.get("severity", ""), "Unknown")
                     finding = SecurityFinding(
@@ -77,12 +89,14 @@ async def fetch_sonar_issues(sonar_key: str, sonar_url: str = None) -> List[Secu
                         severity=severity,
                         title=issue.get("message", ""),
                         description=f"Rule: {issue.get('rule', 'unknown')}",
-                        host=issue.get("component", "").split(":")[0] if issue.get("component") else "",
+                        host=issue.get("component", "").split(":")[0]
+                        if issue.get("component")
+                        else "",
                         recommendation=f"Fix according to rule {issue.get('rule', '')}",
                         raw_evidence=str(issue),
                     )
                     findings.append(finding)
-        
+
         return findings
     except Exception as e:
         logger.error(f"Error fetching SonarQube issues: {e}")

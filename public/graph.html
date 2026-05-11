@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture Knowledge Graph</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #e2e8f0;
+    }
+    #graph-container {
+      width: 100%;
+      height: 100vh;
+    }
+    svg { width: 100%; height: 100%; }
+    .node circle {
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .node circle:hover {
+      stroke: #fff;
+      stroke-width: 3px;
+      filter: brightness(1.2);
+    }
+    .node text {
+      font-size: 10px;
+      fill: #e2e8f0;
+      pointer-events: none;
+      text-anchor: middle;
+      font-weight: 600;
+    }
+    .link {
+      stroke: #334155;
+      stroke-opacity: 0.6;
+      stroke-width: 1.5px;
+    }
+    .tooltip {
+      position: absolute;
+      background: rgba(15, 23, 42, 0.95);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 12px;
+      color: #e2e8f0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      max-width: 250px;
+      z-index: 100;
+    }
+    .tooltip.visible { opacity: 1; }
+    .tooltip-title {
+      font-weight: 700;
+      color: #60a5fa;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    .tooltip-desc {
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+    .controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      gap: 8px;
+      z-index: 10;
+    }
+    .control-btn {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .control-btn:hover {
+      background: rgba(59, 130, 246, 0.3);
+      border-color: #3b82f6;
+    }
+    .legend {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      display: flex;
+      gap: 16px;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .header {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+    }
+    .header h1 {
+      font-size: 18px;
+      font-weight: 800;
+      color: #60a5fa;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .header p {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .stats {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 30px;
+      background: rgba(15, 23, 42, 0.8);
+      padding: 10px 20px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: #60a5fa;
+    }
+    .stat-label {
+      font-size: 9px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Security Pipeline</h1>
+    <p>Architecture Knowledge Graph</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value" id="node-count">30</div>
+      <div class="stat-label">Nodes</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="edge-count">40</div>
+      <div class="stat-label">Connections</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="control-btn" onclick="resetZoom()">Reset</button>
+    <button class="control-btn" onclick="togglePhysics()">Pause</button>
+    <button class="control-btn" onclick="expandGraph()">Expand</button>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background: #3b82f6;"></div><span>Frontend</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background: #10b981;"></div><span>Backend</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background: #f59e0b;"></div><span>Database</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background: #ef4444;"></div><span>Services</span></div>
+    <div class="legend-item"><div class="legend-dot" style="background: #8b5cf6;"></div><span>Scanners</span></div>
+  </div>
+
+  <div id="graph-container"></div>
+  <div class="tooltip" id="tooltip">
+    <div class="tooltip-title"></div>
+    <div class="tooltip-desc"></div>
+  </div>
+
+  <script>
+    const graphData = {
+      nodes: [
+        // Frontend
+        { id: "React UI", group: "frontend", description: "User interface built with React" },
+        { id: "WebSocket Client", group: "frontend", description: "Real-time scan updates" },
+        { id: "API Client", group: "frontend", description: "HTTP requests to backend" },
+        { id: "Dashboard", group: "frontend", description: "Main dashboard page" },
+        { id: "Scan Status", group: "frontend", description: "Live scan progress view" },
+        
+        // Backend
+        { id: "FastAPI", group: "backend", description: "Python web framework" },
+        { id: "Auth", group: "backend", description: "Authentication endpoints" },
+        { id: "Projects API", group: "backend", description: "Project CRUD operations" },
+        { id: "Scans API", group: "backend", description: "Scan management" },
+        { id: "WebSocket Manager", group: "backend", description: "Broadcasts scan updates" },
+        { id: "Callbacks", group: "backend", description: "Jenkins callback handler" },
+        { id: "State Management", group: "backend", description: "Scan state machine" },
+        
+        // Database
+        { id: "PostgreSQL", group: "database", description: "Primary database" },
+        { id: "Projects Table", group: "database", description: "Stores project configs" },
+        { id: "Scans Table", group: "database", description: "Stores scan records" },
+        { id: "Users Table", group: "database", description: "User accounts" },
+        
+        // External Services
+        { id: "Jenkins", group: "services", description: "CI/CD pipeline runner" },
+        { id: "GitHub", group: "services", description: "Source code repository" },
+        { id: "Docker Hub", group: "services", description: "Container registry" },
+        { id: "SonarQube", group: "services", description: "Code quality analysis" },
+        
+        // Scanners
+        { id: "Trivy FS", group: "scanners", description: "Filesystem vulnerability scanner" },
+        { id: "Trivy Image", group: "scanners", description: "Container image scanner" },
+        { id: "OWASP DC", group: "scanners", description: "Dependency vulnerability scanner" },
+        { id: "ZAP", group: "scanners", description: "Web application scanner" },
+        { id: "Nmap", group: "scanners", description: "Network port scanner" },
+        { id: "npm audit", group: "scanners", description: "Node package scanner" },
+        
+        // State
+        { id: "ScanState", group: "backend", description: "Scan lifecycle states" },
+        { id: "Redis", group: "services", description: "Cache and message broker" }
+      ],
+      links: [
+        // Frontend to Backend
+        { source: "React UI", target: "API Client" },
+        { source: "React UI", target: "WebSocket Client" },
+        { source: "Dashboard", target: "API Client" },
+        { source: "Scan Status", target: "WebSocket Client" },
+        { source: "Scan Status", target: "API Client" },
+        
+        // Backend connections
+        { source: "API Client", target: "FastAPI" },
+        { source: "WebSocket Client", target: "WebSocket Manager" },
+        { source: "FastAPI", target: "Auth" },
+        { source: "FastAPI", target: "Projects API" },
+        { source: "FastAPI", target: "Scans API" },
+        { source: "FastAPI", target: "WebSocket Manager" },
+        { source: "Auth", target: "PostgreSQL" },
+        { source: "Projects API", target: "PostgreSQL" },
+        { source: "Scans API", target: "PostgreSQL" },
+        { source: "Scans API", target: "State Management" },
+        { source: "Scans API", target: "Callbacks" },
+        { source: "State Management", target: "ScanState" },
+        { source: "WebSocket Manager", target: "ScanState" },
+        
+        // Database
+        { source: "PostgreSQL", target: "Projects Table" },
+        { source: "PostgreSQL", target: "Scans Table" },
+        { source: "PostgreSQL", target: "Users Table" },
+        
+        // Jenkins connections
+        { source: "Scans API", target: "Jenkins" },
+        { source: "Jenkins", target: "GitHub" },
+        { source: "Jenkins", target: "Docker Hub" },
+        { source: "Jenkins", target: "SonarQube" },
+        { source: "Jenkins", target: "Trivy FS" },
+        { source: "Jenkins", target: "Trivy Image" },
+        { source: "Jenkins", target: "OWASP DC" },
+        { source: "Jenkins", target: "ZAP" },
+        { source: "Jenkins", target: "Nmap" },
+        { source: "Jenkins", target: "npm audit" },
+        { source: "Jenkins", target: "Callbacks" },
+        { source: "Callbacks", target: "State Management" }
+      ]
+    };
+
+    const colors = {
+      frontend: "#3b82f6",
+      backend: "#10b981",
+      database: "#f59e0b",
+      services: "#ef4444",
+      scanners: "#8b5cf6"
+    };
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    const svg = d3.select("#graph-container")
+      .append("svg")
+      .attr("viewBox", [0, 0, width, height]);
+
+    const g = svg.append("g");
+
+    const zoom = d3.zoom()
+      .scaleExtent([0.2, 4])
+      .on("zoom", (event) => g.attr("transform", event.transform));
+
+    svg.call(zoom);
+
+    const simulation = d3.forceSimulation(graphData.nodes)
+      .force("link", d3.forceLink(graphData.links).id(d => d.id).distance(100))
+      .force("charge", d3.forceManyBody().strength(-300))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(40));
+
+    const link = g.append("g")
+      .selectAll(".link")
+      .data(graphData.links)
+      .join("line")
+      .attr("class", "link");
+
+    const node = g.append("g")
+      .selectAll(".node")
+      .data(graphData.nodes)
+      .join("g")
+      .attr("class", "node")
+      .call(d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended));
+
+    node.append("circle")
+      .attr("r", 15)
+      .attr("fill", d => colors[d.group])
+      .on("mouseover", showTooltip)
+      .on("mouseout", hideTooltip);
+
+    node.append("text")
+      .attr("dy", 28)
+      .text(d => d.id);
+
+    simulation.on("tick", () => {
+      link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+
+      node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+
+    function dragstarted(event) {
+      if (!event.active) simulation.alphaTarget(0.3).restart();
+      event.subject.fx = event.subject.x;
+      event.subject.fy = event.subject.y;
+    }
+
+    function dragged(event) {
+      event.subject.fx = event.x;
+      event.subject.fy = event.y;
+    }
+
+    function dragended(event) {
+      if (!event.active) simulation.alphaTarget(0);
+      event.subject.fx = null;
+      event.subject.fy = null;
+    }
+
+    const tooltip = document.getElementById("tooltip");
+
+    function showTooltip(event, d) {
+      tooltip.querySelector(".tooltip-title").textContent = d.id;
+      tooltip.querySelector(".tooltip-desc").textContent = d.description;
+      tooltip.classList.add("visible");
+      tooltip.style.left = event.pageX + 15 + "px";
+      tooltip.style.top = event.pageY + 15 + "px";
+    }
+
+    function hideTooltip() {
+      tooltip.classList.remove("visible");
+    }
+
+    function resetZoom() {
+      svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
+    }
+
+    let physicsPaused = false;
+    function togglePhysics() {
+      physicsPaused = !physicsPaused;
+      simulation.alphaTarget(physicsPaused ? 0 : 0.3).restart();
+    }
+
+    function expandGraph() {
+      simulation.force("charge").strength(-500);
+      simulation.alpha(1).restart();
+    }
+
+    document.getElementById("node-count").textContent = graphData.nodes.length;
+    document.getElementById("edge-count").textContent = graphData.links.length;
+  </script>
+</body>
+</html>

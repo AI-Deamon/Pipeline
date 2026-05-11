@@ -1,4 +1,4 @@
-import { Clock, CheckCircle, AlertCircle, Loader2, Activity } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, Loader2, Activity, SkipForward } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { type ScanStage } from '../types';
 
@@ -6,6 +6,7 @@ interface ScanProgressBarProps {
   stages: ScanStage[];
   scanState: string;
   startedAt?: string;
+  createdAt?: string;  // Add fallback for when startedAt is not yet set
   selectedStages?: string[];
 }
 
@@ -13,7 +14,6 @@ const STAGE_ORDER = [
   'git_checkout',
   'sonar_scanner',
   'sonar_quality_gate',
-  'npm_pip_install',
   'dependency_check',
   'trivy_fs_scan',
   'docker_build',
@@ -27,7 +27,6 @@ const STAGE_DISPLAY_NAMES: Record<string, string> = {
   git_checkout: 'Git Checkout',
   sonar_scanner: 'Sonar Scanner',
   sonar_quality_gate: 'Quality Gate',
-  npm_pip_install: 'Install Dependencies',
   dependency_check: 'Dependency Check',
   trivy_fs_scan: 'Trivy FS Scan',
   docker_build: 'Docker Build',
@@ -43,6 +42,8 @@ function getStageStatusIcon(status: string) {
     return <CheckCircle className="w-4 h-4 text-green-600" />;
   } else if (statusLower.includes('fail') || statusLower.includes('error')) {
     return <AlertCircle className="w-4 h-4 text-red-600" />;
+  } else if (statusLower.includes('skipped')) {
+    return <SkipForward className="w-4 h-4 text-slate-400" />;
   } else if (statusLower.includes('running') || statusLower.includes('progress') || statusLower.includes('executing')) {
     return <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />;
   }
@@ -79,13 +80,15 @@ function calculateProgress(stages: ScanStage[], relevantStages: string[]): {
   return { completed, running, percentage };
 }
 
-function useElapsedTime(startedAt?: string, isRunning?: boolean) {
+function useElapsedTime(startedAt?: string, createdAt?: string, isRunning?: boolean) {
   const [elapsed, setElapsed] = useState<string>('00:00');
 
   useEffect(() => {
-    if (!startedAt) return;
+    // Use startedAt if available, otherwise fall back to createdAt
+    const referenceTime = startedAt || createdAt;
+    if (!referenceTime) return;
 
-    const startTime = new Date(startedAt).getTime();
+    const startTime = new Date(referenceTime).getTime();
 
     const update = () => {
       const now = new Date().getTime();
@@ -104,7 +107,7 @@ function useElapsedTime(startedAt?: string, isRunning?: boolean) {
     }
 
     return () => clearInterval(interval);
-  }, [startedAt, isRunning]);
+  }, [startedAt, createdAt, isRunning]);
 
   return elapsed;
 }
@@ -144,13 +147,14 @@ export function ScanProgressBar({
   stages,
   scanState,
   startedAt,
+  createdAt,
   selectedStages
 }: ScanProgressBarProps) {
   const isRunning = scanState === 'RUNNING' || scanState === 'QUEUED';
   const isComplete = scanState === 'COMPLETED';
   const isFailed = scanState === 'FAILED';
 
-  const elapsed = useElapsedTime(startedAt, isRunning);
+  const elapsed = useElapsedTime(startedAt, createdAt, isRunning);
 
   const relevantStages = selectedStages && selectedStages.length > 0
     ? STAGE_ORDER.filter(s => selectedStages.includes(s))
@@ -185,12 +189,12 @@ export function ScanProgressBar({
               <h4 className={`text-base font-black uppercase tracking-tight mb-1 ${
                 isStalled ? 'text-amber-900' : 'text-blue-900'
               }`}>
-                {isStalled ? 'Pipeline Initialization Delayed' : 'Pipeline Initializing'}
+                {isStalled ? 'Scan Starting Delayed' : 'Starting Scan'}
               </h4>
               <p className={`text-sm mb-3 ${isStalled ? 'text-amber-700' : 'text-blue-700'}`}>
                 {isStalled
-                  ? 'The pipeline is taking longer than expected to start. This may indicate Jenkins queue delays or resource constraints.'
-                  : 'The pipeline is starting up. Stage data will appear shortly as Jenkins begins execution.'}
+                  ? 'The scan is taking longer than expected to start. This may indicate Jenkins queue delays.'
+                  : 'The scan is starting. Stage data will appear shortly.'}
               </p>
               <div className="flex items-center gap-2">
                 <span className={`text-xs font-mono font-black uppercase tracking-widest ${
@@ -228,7 +232,7 @@ export function ScanProgressBar({
           </div>
           <div>
             <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase leading-none mb-1">
-              {isRunning ? 'Pipeline Executing' : isComplete ? 'Scan Finalized' : isFailed ? 'Pipeline Halted' : 'Scan Context'}
+              {isRunning ? 'Scan Running' : isComplete ? 'Scan Complete' : isFailed ? 'Scan Failed' : 'Scan Ready'}
             </h3>
             <div className="flex items-center gap-2" aria-live="polite">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Status:</span>

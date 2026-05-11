@@ -1,14 +1,12 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Key, Shield, CheckCircle, AlertCircle, Info, ChevronLeft, Bell } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CheckCircle, AlertCircle, Bell, ChevronLeft } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { notificationService } from '../services/notifications';
 
 const SettingsPage = () => {
-  const navigate = useNavigate();
   const { addToast } = useToast();
   
-  // Initialize state from session storage (lazy initialization)
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem('API_KEY') || '');
   const [showKey, setShowKey] = useState(false);
   const [hasExistingKey, setHasExistingKey] = useState(() => !!sessionStorage.getItem('API_KEY'));
@@ -21,104 +19,58 @@ const SettingsPage = () => {
 
   const handleSave = () => {
     if (!apiKey.trim()) {
-      addToast({
-        type: 'error',
-        title: 'Invalid Key',
-        message: 'API key cannot be empty',
-      });
+      addToast({ type: 'error', title: 'Invalid Key', message: 'API key cannot be empty' });
       return;
-    }
-
-    if (apiKey.trim().length < 32) {
-      addToast({
-        type: 'warning',
-        title: 'Short Key',
-        message: 'API key should be at least 32 characters for security',
-      });
     }
 
     sessionStorage.setItem('API_KEY', apiKey.trim());
     setHasExistingKey(true);
-    addToast({
-      type: 'success',
-      title: 'API Key Saved',
-      message: 'Your API key has been securely stored in browser session storage',
-    });
-  };
-
-  const handleNotificationPermission = async () => {
-    const granted = await notificationService.requestPermission();
-    if (granted) {
-      setNotificationPermission('granted');
-      addToast({
-        type: 'success',
-        title: 'Notifications Enabled',
-        message: 'Desktop notifications are now enabled for scan updates',
-      });
-    } else {
-      addToast({
-        type: 'error',
-        title: 'Permission Denied',
-        message: 'Notification permission was denied or is not supported',
-      });
-    }
+    addToast({ type: 'success', title: 'Saved', message: 'API key has been saved' });
   };
 
   const handleClear = () => {
     sessionStorage.removeItem('API_KEY');
     setApiKey('');
     setHasExistingKey(false);
-    addToast({
-      type: 'info',
-      title: 'API Key Cleared',
-      message: 'Your API key has been removed from browser storage',
-    });
+    addToast({ type: 'info', title: 'Cleared', message: 'API key has been removed' });
+  };
+
+  const handleNotificationPermission = async () => {
+    const granted = await notificationService.requestPermission();
+    if (granted) {
+      setNotificationPermission('granted');
+      addToast({ type: 'success', title: 'Enabled', message: 'Notifications enabled' });
+    } else {
+      addToast({ type: 'error', title: 'Denied', message: 'Permission denied' });
+    }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 px-4 py-8">
-      {/* Header */}
-      <div className="flex items-center gap-6">
-        <button
-          onClick={() => navigate('/dashboard')}
-          className="p-3 bg-white border border-slate-200 text-slate-500 hover:text-slate-900 rounded-2xl transition-all active:scale-95 shadow-sm flex items-center gap-2 group"
-        >
-          <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-          <span className="text-xs font-black uppercase tracking-widest pr-2">Back to Dashboard</span>
-        </button>
-      </div>
+    <div className="max-w-2xl mx-auto p-8">
+      <Link
+        to="/dashboard"
+        className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-700 mb-6"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        <span className="text-sm">Back</span>
+      </Link>
 
-      <div className="bg-white border border-slate-200 rounded-[3rem] shadow-2xl shadow-slate-200/50 overflow-hidden">
-        {/* Header */}
-        <div className="bg-slate-50/50 border-b border-slate-100 px-10 py-8">
-          <div className="flex items-center gap-4 mb-2">
-            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-900/20">
-              <Key className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight uppercase leading-none">API Configuration</h1>
-              <p className="text-slate-500 text-xs font-medium mt-1">Manage your API authentication settings</p>
-            </div>
-          </div>
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+        <div className="border-b border-slate-100 px-6 py-4">
+          <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
+          <p className="text-sm text-slate-500">Manage your account settings</p>
         </div>
 
-        <div className="p-10 space-y-10">
-          {/* Info Banner */}
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6 flex items-start gap-4">
-            <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-2">
-              <h3 className="text-sm font-black text-blue-900 uppercase tracking-wider">Why Configure API Key?</h3>
-              <p className="text-xs text-blue-800 font-medium leading-relaxed">
-                The API key authenticates scan management operations (reset, cancel) with the backend. Without it, you can view scans but cannot control them.
-                This key is stored locally in your browser and never transmitted to external servers.
-              </p>
-            </div>
+        <div className="p-6 space-y-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              The API key is used for scan management (reset, cancel). Without it, you can view scans but cannot control them.
+            </p>
           </div>
 
-          {/* API Key Form */}
-          <div className="space-y-4">
-            <label htmlFor="api-key" className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
-              Backend API Key
+          <div>
+            <label htmlFor="api-key" className="block text-sm font-medium text-slate-700 mb-2">
+              API Key
             </label>
             <div className="relative">
               <input
@@ -126,129 +78,99 @@ const SettingsPage = () => {
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your API key (min 32 characters)"
-                className={`input-field pr-32 ${hasExistingKey ? 'border-green-300 bg-green-50/30' : ''}`}
+                placeholder="Enter your API key"
+                className="w-full px-3 py-2 pr-24 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/5"
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setShowKey(!showKey)}
-                  className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                  className="text-xs text-slate-500 hover:text-slate-700"
                 >
                   {showKey ? 'Hide' : 'Show'}
                 </button>
                 {hasExistingKey && (
-                  <div className="flex items-center gap-1.5 text-green-600">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-widest">Saved</span>
-                  </div>
+                  <span className="text-xs text-green-600 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Saved
+                  </span>
                 )}
               </div>
             </div>
-            <p className="text-[10px] font-medium text-slate-400 ml-1 flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 opacity-50" />
-              Stored locally in browser sessionStorage (cleared on tab close) • Not shared with external services
-            </p>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-4 pt-6 border-t border-slate-100">
+          <div className="flex gap-3">
             <button
               onClick={handleSave}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95 shadow-xl shadow-blue-200 flex items-center justify-center gap-3"
+              className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800"
             >
-              <CheckCircle className="w-5 h-5" />
-              {hasExistingKey ? 'Update Key' : 'Save Key'}
+              {hasExistingKey ? 'Update' : 'Save'}
             </button>
             {hasExistingKey && (
               <button
                 onClick={handleClear}
-                className="px-8 py-4 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95 shadow-sm"
+                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50"
               >
                 Clear
               </button>
             )}
           </div>
 
-          {/* Status */}
           {hasExistingKey ? (
-            <div className="bg-green-50 border border-green-200 rounded-2xl p-6 flex items-center gap-4">
-              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600" />
               <div>
-                <h4 className="text-sm font-black text-green-900 uppercase tracking-wider">API Key Configured</h4>
-                <p className="text-xs text-green-700 font-medium mt-1">
-                  Scan management features are fully enabled. You can reset and cancel scans.
-                </p>
+                <p className="text-sm font-medium text-green-800">API Key Configured</p>
+                <p className="text-xs text-green-700">Scan management features are enabled</p>
               </div>
             </div>
           ) : (
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex items-center gap-4">
-              <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                <AlertCircle className="w-6 h-6 text-amber-600" />
-              </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600" />
               <div>
-                <h4 className="text-sm font-black text-amber-900 uppercase tracking-wider">API Key Not Configured</h4>
-                <p className="text-xs text-amber-700 font-medium mt-1">
-                  Scan viewing works, but reset/cancel operations will fail without authentication.
-                </p>
+                <p className="text-sm font-medium text-amber-800">API Key Not Configured</p>
+                <p className="text-xs text-amber-700">Reset/cancel operations will fail</p>
               </div>
             </div>
           )}
 
-          {/* Desktop Notifications Section */}
-          <div className="border-t border-slate-200 pt-10">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/20">
-                <Bell className="w-5 h-5 text-white" />
-              </div>
+          <div className="border-t border-slate-200 pt-6">
+            <div className="flex items-center gap-3 mb-4">
+              <Bell className="w-5 h-5 text-slate-600" />
               <div>
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">Desktop Notifications</h3>
-                <p className="text-slate-500 text-xs font-medium">Get notified when scans complete</p>
+                <p className="text-sm font-medium text-slate-900">Desktop Notifications</p>
+                <p className="text-xs text-slate-500">Get notified when scans complete</p>
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
-              <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                Enable browser notifications to receive desktop alerts when your security scans complete or fail.
-                Notifications include scan status and a quick link to view results.
-              </p>
-
-              <button
-                onClick={handleNotificationPermission}
-                disabled={notificationPermission === 'granted'}
-                className={`w-full py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all active:scale-95 flex items-center justify-center gap-3 ${
-                  notificationPermission === 'granted'
-                    ? 'bg-green-100 text-green-700 border-2 border-green-300 cursor-default'
-                    : 'bg-slate-900 text-white hover:bg-slate-800 shadow-xl shadow-slate-200'
-                }`}
-              >
-                {notificationPermission === 'granted' ? (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    Notifications Enabled
-                  </>
-                ) : (
-                  <>
-                    <Bell className="w-5 h-5" />
-                    Enable Desktop Notifications
-                  </>
-                )}
-              </button>
-
-              {notificationPermission === 'denied' && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider mb-1">Permission Denied</h4>
-                    <p className="text-xs text-amber-700 font-medium">
-                      You have blocked notifications. To re-enable, go to your browser settings and allow notifications for this site.
-                    </p>
-                  </div>
-                </div>
+            <button
+              onClick={handleNotificationPermission}
+              disabled={notificationPermission === 'granted'}
+              className={`w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 ${
+                notificationPermission === 'granted'
+                  ? 'bg-green-100 text-green-700 border border-green-300'
+                  : 'bg-slate-900 text-white hover:bg-slate-800'
+              }`}
+            >
+              {notificationPermission === 'granted' ? (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  Enabled
+                </>
+              ) : (
+                <>
+                  <Bell className="w-4 h-4" />
+                  Enable Notifications
+                </>
               )}
-            </div>
+            </button>
+
+            {notificationPermission === 'denied' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+                <p className="text-xs text-amber-800">
+                  Notifications blocked. Enable in browser settings.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

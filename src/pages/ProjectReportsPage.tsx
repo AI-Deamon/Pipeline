@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
-import { ChevronLeft, Loader2, ExternalLink, AlertCircle, Shield } from 'lucide-react';
+import { ChevronLeft, Loader2, ExternalLink, AlertCircle, Shield, History } from 'lucide-react';
 
 interface SeveritySummary {
   critical: number;
@@ -69,39 +69,80 @@ const toolIcons: Record<string, string> = {
   sonar: 'S',
 };
 
+interface ScanInfo {
+  scan_id: string;
+  state: string;
+  created_at: string;
+}
+
 const ProjectReportsPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialScanId = (location.state as any)?.scanId;
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [project, setProject] = useState<{ project_id: string; name: string } | null>(null);
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [reports, setReports] = useState<ReportDetail[]>([]);
+  const [scans, setScans] = useState<ScanInfo[]>([]);
+  const [selectedScanId, setSelectedScanId] = useState<string>('');
+
+  const loadReports = (scanId: string) => {
+    setLoading(true);
+    const id = scanId || undefined;
+    api.reports.getSummary(projectId!, id)
+      .then(data => {
+        setSummary(data);
+        return api.reports.getAll(projectId!, id);
+      })
+      .then(data => {
+        setReports(data || []);
+        setLoading(false);
+      })
+      .catch(() => {
+        setError('Failed to load reports');
+        setLoading(false);
+      });
+  };
 
   useEffect(() => {
     if (!projectId) return;
 
     Promise.all([
       api.projects.get(projectId),
-      fetch(`/api/v1/reports/projects/${projectId}/reports/summary`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('API_KEY')}` }
-      }).then(r => r.json()).catch(() => null),
-      fetch(`/api/v1/reports/projects/${projectId}/reports`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('API_KEY')}` }
-      }).then(r => r.json()).catch(() => [])
-    ]).then(([projData, summaryData, reportsData]) => {
-      if (projData) {
-        setProject(projData);
-      }
-      setSummary(summaryData);
-      setReports(reportsData || []);
-      setLoading(false);
-    }).catch(() => {
-      setError('Failed to load reports');
-      setLoading(false);
-    });
+      api.scans.getHistory(projectId),
+    ])
+      .then(([projectData, scanData]) => {
+        if (projectData) {
+          setProject(projectData);
+        }
+        const scanList: ScanInfo[] = (scanData || [])
+          .filter((s: ScanInfo) => {
+            if (initialScanId) return s.scan_id === initialScanId || s.state === 'COMPLETED';
+            return s.state === 'COMPLETED';
+          })
+          .sort((a: ScanInfo, b: ScanInfo) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+        setScans(scanList);
+        const target = initialScanId && scanList.some(s => s.scan_id === initialScanId)
+          ? initialScanId
+          : (scanList[0]?.scan_id || '');
+        setSelectedScanId(target);
+        return loadReports(target);
+      })
+      .catch(() => {
+        setError('Failed to load reports');
+        setLoading(false);
+      });
   }, [projectId]);
+
+  const handleScanChange = (scanId: string) => {
+    setSelectedScanId(scanId);
+    loadReports(scanId);
+  };
 
   const toggleTool = (tool: string) => {
     setExpandedTool(expandedTool === tool ? null : tool);
@@ -143,6 +184,24 @@ const ProjectReportsPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Scan Selector */}
+      {scans.length > 1 && (
+        <div className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 p-3">
+          <History className="w-5 h-5 text-slate-400" />
+          <select
+            value={selectedScanId}
+            onChange={(e) => handleScanChange(e.target.value)}
+            className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            {scans.map((s) => (
+              <option key={s.scan_id} value={s.scan_id}>
+                Scan {s.scan_id.slice(0, 8)}... ({new Date(s.created_at).toLocaleDateString()})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Summary Cards */}
       {summary && summary.total_findings > 0 && (

@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ScanState(str, Enum):
     CREATED = "CREATED"
     QUEUED = "QUEUED"
@@ -7,3 +8,4 @@ class ScanState(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
+    SKIPPED = "SKIPPED"

@@ -47,7 +47,6 @@ STAGE_TIMEOUTS = {
     "git_checkout": 300,  # 5 minutes
     "sonar_scanner": 900,  # 15 minutes
     "sonar_quality_gate": 600,  # 10 minutes
-    "npm_pip_install": 600,  # 10 minutes
     "dependency_check": 900,  # 15 minutes
     "trivy_fs_scan": 600,  # 10 minutes
     "docker_build": 900,  # 15 minutes
@@ -76,7 +75,6 @@ JENKINS_STAGE_NAME_TO_ID = {
     "Git Checkout": "git_checkout",
     "Sonar Scanner": "sonar_scanner",
     "Sonar Quality Gate": "sonar_quality_gate",
-    "NPM / PIP Install": "npm_pip_install",
     "Dependency Check": "dependency_check",
     "Trivy FS Scan": "trivy_fs_scan",
     "Docker Build": "docker_build",
@@ -234,6 +232,9 @@ def _scan_to_response(scan_obj: ScanDB) -> dict:
             "jenkins_console_url": scan_obj.jenkins_console_url,
         }
 
+    def format_dt(dt):
+        return dt.isoformat() if dt else None
+
     return {
         "scan_id": scan_obj.scan_id,
         "project_id": scan_obj.project_id,
@@ -242,9 +243,9 @@ def _scan_to_response(scan_obj: ScanDB) -> dict:
         if hasattr(scan_obj.state, "value")
         else str(scan_obj.state),
         "selected_stages": scan_obj.selected_stages,
-        "created_at": scan_obj.created_at,
-        "started_at": scan_obj.started_at,
-        "finished_at": scan_obj.finished_at,
+        "created_at": format_dt(scan_obj.created_at),
+        "started_at": format_dt(scan_obj.started_at),
+        "finished_at": format_dt(scan_obj.finished_at),
         "results": scan_obj.stage_results,
         "error": error,
         "retry_count": scan_obj.retry_count or 0,

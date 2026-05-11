@@ -71,7 +71,7 @@ export type UnifiedReport = {
   scan_id?: string;
   total_findings: number;
   severity: SeveritySummary;
-  findings: FindingItem[];
+  findings: Finding[];
   generated_at: string;
   risk_score?: {
     score: number;
@@ -139,4 +139,28 @@ export type Finding = {
   recommendation?: string;
   tool?: string;
   raw_evidence?: string;
+};
+
+// Compliance Mapping Types
+export type OWASPComplianceItem = {
+  id: string;
+  name: string;
+  count: number;
+};
+
+export type CWEComplianceItem = {
+  id: string;
+  count: number;
+};
+
+export type ComplianceData = {
+  owasp_top_10: OWASPComplianceItem[];
+  cwe_top_25: CWEComplianceItem[];
+};
+
+export type ComplianceReport = {
+  project_id: string;
+  scan_id?: string;
+  compliance: ComplianceData;
+  generated_at: string;
 };

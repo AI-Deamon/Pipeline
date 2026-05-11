@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 SEVERITY_LEVELS = {"critical": 5, "high": 4, "medium": 3, "low": 2, "info": 1}

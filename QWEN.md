@@ -4,35 +4,57 @@
 
 This repository contains a **DevSecOps security scanning pipeline** with a web-based management interface. The project is organized into two main parts:
 
-1. **`/Pipeline`** - Root directory containing Jenkins pipeline configurations and analysis documentation
-2. **`/Pipeline/Agent`** - Full-stack web application (React + TypeScript + Python FastAPI backend) for managing and executing security scans
+1. **Root directory** - Contains the main application code (React frontend, Python FastAPI backend, Jenkins pipeline)
+2. **`/Agent`** - Contains only the Jenkins Jenkinsfile for the security pipeline
 
 ### Architecture
 
 ```
 Pipeline/
-├── Jenkinsfile                    # Jenkins pipeline definition (root level)
-├── security-pipeline-job-config.xml      # Jenkins job configuration (original)
-├── security-pipeline-job-config-fixed.xml # Jenkins job configuration (fixed)
-└── Agent/                         # Main application codebase
-    ├── backend/                   # Python FastAPI backend
-    ├── src/                       # React + TypeScript frontend
-    ├── docker/                    # Docker Compose configurations
-    ├── tests/                     # Test suites
-    └── verification/              # Verification scripts
+├── Agent/
+│   └── Jenkinsfile                    # Jenkins pipeline definition
+├── backend/                           # Python FastAPI backend
+│   └── app/
+│       ├── api/                       # REST API endpoints
+│       ├── core/                      # Configuration, security, database
+│       ├── models/                    # SQLAlchemy database models
+│       ├── schemas/                   # Pydantic request/response schemas
+│       ├── services/                  # Business logic
+│       ├── state/                     # State management
+│       ├── tasks/                     # Celery async tasks
+│       └── websockets/                # WebSocket managers
+├── src/                               # React + TypeScript frontend
+│   ├── components/                    # Reusable UI components
+│   ├── pages/                         # Page-level route components
+│   ├── services/                      # API client, notification service
+│   ├── hooks/                         # Custom React hooks
+│   ├── utils/                         # Utility functions
+│   └── types.ts                       # TypeScript type definitions
+├── docker/                            # Docker Compose configurations
+│   ├── docker-compose.yml             # Base configuration
+│   ├── docker-compose.dev.yml         # Development overlay
+│   ├── docker-compose.test.yml        # Test overlay
+│   ├── docker-compose.staging.yml     # Staging overlay
+│   ├── backend.Dockerfile             # Backend Docker image
+│   ├── frontend.Dockerfile            # Frontend Docker image
+│   └── nginx.conf                     # Nginx configuration for staging
+├── .env.dev                           # Development environment variables
+├── .env.test                          # Test environment variables
+├── .env.staging                       # Staging environment variables
+├── run.py                             # Cross-platform Docker runner
+└── Makefile                           # Unix command shortcuts
 ```
 
 ### Technology Stack
 
 | Layer | Technology |
 |-------|------------|
-| **Frontend** | React 19, TypeScript, Vite, TailwindCSS 4, React Router, TanStack Query |
+| **Frontend** | React 19, TypeScript, Vite 7, TailwindCSS 4, React Router 7, TanStack Query 5 |
 | **Backend** | Python FastAPI, PostgreSQL, SQLAlchemy, Celery, Redis |
-| **Testing** | Vitest, React Testing Library |
+| **Testing** | Vitest, React Testing Library, pytest |
 | **CI/CD** | Jenkins (Groovy Pipeline) |
 | **Security Tools** | Trivy, SonarQube, Nmap, OWASP ZAP, Dependency-Check |
 | **Containerization** | Docker, Docker Compose |
-| **Real-time** | WebSocket (FastAPI WebSocket) |
 
 ## Building and Running
 
@@ -56,7 +78,6 @@ The project supports three environments via Docker Compose overlays:
 
 **Using Python runner (cross-platform, recommended):**
 ```bash
-cd Agent
 python run.py dev       # Start development environment
 python run.py test      # Run test environment
 python run.py staging   # Start staging environment
@@ -65,7 +86,6 @@ python run.py down      # Stop all containers
 
 **Using Makefile (Unix-like systems):**
 ```bash
-cd Agent
 make dev
 make test
 make staging
@@ -74,7 +94,6 @@ make down
 
 **Frontend-only development:**
 ```bash
-cd Agent
 npm install
 npm run dev      # Start Vite dev server
 npm run build    # Build for production
@@ -84,8 +103,8 @@ npm run preview  # Preview production build
 
 **Testing:**
 ```bash
-cd Agent
-npm run test     # Run Vitest test suite
+npm run test     # Run Vitest test suite (frontend)
+pytest tests/    # Run Python tests (backend)
 ```
 
 ### Docker Compose Files
@@ -108,7 +127,7 @@ Key environment files:
 - `CALLBACK_TOKEN` - Jenkins callback authentication
 - `DATABASE_URL` - PostgreSQL connection string
 - `JENKINS_BASE_URL` - Jenkins server URL
-- `SCAN_TIMEOUT` - Pipeline timeout in seconds (default: 3600)
+- `SCAN_TIMEOUT` - Pipeline timeout in seconds (default: 7200)
 
 ## Jenkins Pipeline
 
@@ -116,7 +135,7 @@ The `Agent/Jenkinsfile` defines a comprehensive security scanning pipeline with 
 
 | Stage | Description | Timeout |
 |-------|-------------|---------|
-| Validate Backend Origin | Validates SCAN_ID against backend API | - |
+| Init Context | Validates SCAN_ID and parses project data | - |
 | Git Checkout | Clones target repository | - |
 | Sonar Scanner | Static code analysis | 15 min |
 | Sonar Quality Gate | Quality gate validation | 30 min |
@@ -181,8 +200,8 @@ Error details include:
 
 ### Project Structure
 
-**Frontend (`Agent/src/`):**
-- `components/` - Reusable UI components (ScanProgressBar, ErrorSuggestions, ScanErrorModal)
+**Frontend (`src/`):**
+- `components/` - Reusable UI components
 - `pages/` - Page-level components (Dashboard, ProjectControl, ScanStatus, ScanHistory)
 - `services/` - API client and notification services
 - `hooks/` - Custom React hooks (useScanWebSocket, useScanReset, useScanCancel)
@@ -190,7 +209,7 @@ Error details include:
 - `assets/` - Static assets
 - `test/` - Frontend tests
 
-**Backend (`Agent/backend/app/`):**
+**Backend (`backend/app/`):**
 - `api/` - REST API endpoints (projects, scans, auth)
 - `core/` - Core configuration, database, authentication, rate limiting
 - `models/` - SQLAlchemy database models
@@ -204,6 +223,7 @@ Error details include:
 
 - Frontend uses Vitest with React Testing Library
 - Tests co-located with source or in dedicated `tests/` directory
+- Backend uses pytest with fastapi.testclient.TestClient
 - CI runs tests in isolated Docker environment
 
 ### Key Configuration Files
@@ -244,7 +264,7 @@ Error details include:
 - `ws://localhost:8000/api/v1/ws/scans?scan_id={id}` - Subscribe to scan updates
 - `ws://localhost:8000/api/v1/ws/dashboard` - Subscribe to all scan updates
 
-## Real-time Features (Phase 3)
+## Real-time Features
 
 ### WebSocket Integration
 - Real-time scan status updates
@@ -280,7 +300,7 @@ The pipeline integrates with Kali Linux security tools:
 - **SonarQube** - Code quality and security analysis
 - **Dependency-Check** - Third-party dependency vulnerability scanning
 
-## Recent Improvements (2026-03-09)
+## Recent Improvements
 
 ### Phase 3 Implementation
 1. ✅ WebSocket real-time scan updates
@@ -298,8 +318,10 @@ The pipeline integrates with Kali Linux security tools:
 - Fixed Jenkins callback to include error details
 - Enhanced backend to store and return error information
 - Improved UI error display with failed stage highlighting
+- Fixed bcrypt/passlib compatibility with Python 3.13 (switched to argon2)
 
 ## Qwen Added Memories
-- User has a local Jenkins server ready for use with all configurations set up
-- Jenkins server URL: http://localhost:8080/job/Security-pipeline/ - requires authentication (403 Forbidden without credentials)
-- Docker staging rebuild command: `cd Agent && docker compose -f docker/docker-compose.yml -f docker/docker-compose.staging.yml --env-file .env.staging down --volumes --remove-orphans` then `up --build -d`, wait 2-3 minutes for health checks, verify with `docker compose ps` showing all containers healthy/running
+- Jenkins server is running on localhost:8080 with all configurations already set up and ready to use. The URL is http://localhost:8080/job/Security-pipeline/ and requires authentication (403 Forbidden without credentials).
+- Graphify is a codebase analysis tool located at /home/kali_linux/Pipeline/graphify-out/. It generates knowledge graphs of the codebase architecture with reports in GRAPH_REPORT.md. Key insights: 482 nodes, 877 edges, 44 communities. Main god nodes: ScanState (81 edges), ProjectDB/ScanDB (64 edges each), JenkinsClient (14 edges). Use graphify-out/GRAPH_REPORT.md for debugging and understanding codebase architecture, file organization, and structural insights.
+- Use Graphify consistently for ALL development work: before making changes, during debugging, for architectural decisions, and keep changes tracking. Always reference graphify-out/GRAPH_REPORT.md when working on the codebase to understand architecture, trace code flow, identify affected components, and track structural impact of changes.
+- ALWAYS use superpowers skills and ALWAYS use subagent-driven execution. Before any task, invoke relevant skills from the superpowers system. Delegate work to specialized subagents whenever possible instead of executing directly in the main conversation.

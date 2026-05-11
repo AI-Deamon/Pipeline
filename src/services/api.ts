@@ -124,12 +124,18 @@ export const api = {
     }
   },
   reports: {
-    getSummary: async (projectId: string) => {
-      const response = await apiClient.get(`/reports/projects/${projectId}/reports/summary`);
+    getSummary: async (projectId: string, scanId?: string) => {
+      const url = scanId
+        ? `/reports/projects/${projectId}/reports/summary?scan_id=${scanId}`
+        : `/reports/projects/${projectId}/reports/summary`;
+      const response = await apiClient.get(url);
       return response.data;
     },
-    getAll: async (projectId: string) => {
-      const response = await apiClient.get(`/reports/projects/${projectId}/reports`);
+    getAll: async (projectId: string, scanId?: string) => {
+      const url = scanId
+        ? `/reports/projects/${projectId}/reports?scan_id=${scanId}`
+        : `/reports/projects/${projectId}/reports`;
+      const response = await apiClient.get(url);
       return response.data;
     },
     getOne: async (reportId: number) => {
@@ -153,5 +159,25 @@ export const api = {
       );
       return response.data;
     },
+    getCompliance: async (projectId: string, scanId?: string) => {
+      const url = scanId
+        ? `/reports/projects/${projectId}/reports/compliance?scan_id=${scanId}`
+        : `/reports/projects/${projectId}/reports/compliance`;
+      const response = await apiClient.get(url);
+      return response.data;
+    },
+    exportUnified: async (projectId: string, format: 'html' | 'pdf' = 'html', scanId?: string, reportType: string = 'technical') => {
+      const params = new URLSearchParams();
+      params.append('format', format);
+      params.append('report_type', reportType);
+      if (scanId) {
+        params.append('scan_id', scanId);
+      }
+      const response = await apiClient.get(
+        `/reports/projects/${projectId}/reports/unified/export?${params.toString()}`,
+        { responseType: 'blob' }
+      );
+      return response.data;
+    }
   }
 };

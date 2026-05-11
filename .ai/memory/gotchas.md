@@ -105,6 +105,18 @@ Weird hacks, edge cases, and "don't touch this" notes extracted from the codebas
 **Decision:** Source code stays at root (`backend/`, `src/`, `docker/`, `tests/`) where it's git-tracked.
 **Agent/ Contains:** Only `Jenkinsfile` and `JENKINSFILE_TEST_READY.md`.
 
+### 18. Jenkinsfile → Separate Git Repo (CRITICAL)
+**Problem:** `Agent/Jenkinsfile` is in a SEPARATE Git repository (`Bhaskar-ITM/Agent`).
+**Rule:** Only push `Agent/Jenkinsfile` changes to `origin pr-49`. Do NOT push Pipeline repo changes for Jenkins updates.
+**How to push:**
+```bash
+cd /home/kali_linux/Pipeline
+git add Agent/Jenkinsfile
+git commit -m "message"
+git push origin pr-49
+```
+**Why:** `Agent/` is tracked separately from Pipeline source code.
+
 ---
 
 *Add gotchas as you discover them. Future AI will thank you.*

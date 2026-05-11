@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from app.services.reporting.parsers import (
     parse_zap_report,
     parse_depcheck_report,
     parse_nmap_findings,
+    parse_npm_audit_report,
     create_sonar_report_link,
     fetch_sonar_issues,
     calculate_severity_summary,
@@ -29,6 +31,7 @@ TOOL_PARSERS = {
     "zap": parse_zap_report,
     "dependency_check": parse_depcheck_report,
     "nmap": parse_nmap_findings,
+    "npm_audit": parse_npm_audit_report,
 }
 
 
@@ -38,18 +41,24 @@ class ReportFetcher:
     def __init__(self, jenkins_base_url: str, jenkins_build_number: str):
         self.jenkins_base_url = jenkins_base_url.rstrip("/")
         self.jenkins_build_number = jenkins_build_number
-        self.artifacts_base = f"{self.jenkins_base_url}/job/{settings.JENKINS_TOKEN}/{jenkins_build_number}/artifact/reports"
+        self.artifacts_base = f"{self.jenkins_base_url}/job/Security-pipeline/{jenkins_build_number}/artifact/reports"
 
     async def fetch_artifact(self, filename: str) -> Optional[str]:
         """Fetch a JSON artifact from Jenkins"""
         url = f"{self.artifacts_base}/{filename}"
+        auth_header = base64.b64encode(
+            f"admin:{settings.JENKINS_TOKEN}".encode()
+        ).decode()
+        headers = {"Authorization": f"Basic {auth_header}"}
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url)
+                response = await client.get(url, headers=headers)
                 if response.status_code == 200:
                     return response.text
                 else:
-                    logger.warning(f"Failed to fetch {filename}: {response.status_code}")
+                    logger.warning(
+                        f"Failed to fetch {filename}: {response.status_code}"
+                    )
         except Exception as e:
             logger.warning(f"Error fetching {filename}: {e}")
         return None
@@ -153,12 +162,15 @@ class ReportFetcher:
             ("trivy_fs", "trivy-fs.json"),
             ("trivy_image", "trivy-image.json"),
             ("zap", "zap.json"),
-            ("dependency_check", "dependency-check.json"),
+            ("dependency_check", "dependency-check-report.json"),
             ("nmap", "nmap_findings.json"),
+            ("npm_audit", "npm-audit.json"),
         ]
 
         for tool_name, filename in tool_files:
-            report = await self.fetch_and_process_tool(scan_id, project_id, tool_name, filename)
+            report = await self.fetch_and_process_tool(
+                scan_id, project_id, tool_name, filename
+            )
             if report:
                 reports.append(report)
 

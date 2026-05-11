@@ -2,233 +2,110 @@
 
 ## Project Overview
 
-DevSecOps security scanning pipeline with React/TypeScript frontend and Python FastAPI backend.
+DevSecOps security scanning pipeline: React/TypeScript frontend + Python FastAPI backend + Jenkins for scanning.
 
-## Build/Lint/Test Commands
+## Developer Commands
 
 ### Frontend (React + TypeScript + Vite)
-
 ```bash
-cd Agent
-npm install          # Install dependencies
-npm run dev          # Start Vite dev server
-npm run build        # Production build (tsc -b && vite build)
-npm run lint         # Run ESLint
-npm run preview      # Preview production build
+npm install                              # Install deps
+npm run dev                              # Start Vite dev server
+npm run build                            # Production build
+npm run lint                             # ESLint
+npm run typecheck                        # TypeScript check
 
-npx vitest run                              # Run all tests
-npx vitest run src/pages/LoginPage.test.tsx # Run single test file
-npx vitest watch                            # Run tests in watch mode
+npx vitest run                           # Run tests
+npx vitest run src/pages/LoginPage.test.tsx  # Single test
 ```
 
 ### Backend (Python FastAPI)
-
 ```bash
-cd Agent
-pip install -r backend/requirements.txt     # Install dependencies
-pytest tests/                               # Run all tests
-pytest tests/test_integration.py            # Run single test file
-pytest tests/test_integration.py::test_integration_v1  # Run single test
-pytest -v                                   # Verbose output
+pip install -r backend/requirements.txt  # Install deps
+pytest tests/                            # Run all tests
+pytest tests/test_integration.py::test_integration_v1  # Single test
+pytest -v                                # Verbose
 ```
 
 ### Docker
-
 ```bash
-cd Agent
-python run.py dev       # Development environment
-python run.py test      # Test environment (runs tests in Docker)
-python run.py staging   # Staging environment
-python run.py down      # Stop all containers
+python run.py dev        # Development
+python run.py test      # Test (runs in Docker)
+python run.py staging  # Staging (rebuilds containers)
+python run.py down     # Stop containers
 ```
 
-## Code Style Guidelines
+### Default Login (staging)
+- URL: http://localhost:5173
+- Username: `admin`
+- Password: `admin123`
 
-### Frontend (TypeScript/React)
+## Code Style
 
-**Imports:** Group: external libs → internal modules → types. Use `import type` for types.
+### TypeScript/React
+- Imports: external → internal modules → types. Use `import type` for types.
+- Types: `type` for shapes, `interface` for extensible contracts. Export from `src/types.ts`.
+- Components: default export pages, named export reusable. Use `memo()`, arrow functions.
+- Fetching: @tanstack/react-query, custom hooks, useMemo.
 
-```typescript
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '../services/api';
-import type { Project, Scan } from '../types';
-```
+### Python/FastAPI
+- Imports: stdlib → third-party → local. Use absolute imports from `app.`
+- Type hints required on all functions.
+- Naming: snake_case vars/funcs, PascalCase classes.
 
-**Types:** Use `type` for shapes, `interface` for extensible contracts. Export from `src/types.ts`. Avoid `any`.
+## Critical Gotchas (Would Agent Miss This?)
 
-**Components:** Default export pages, named export reusable. Use `memo()`, arrow functions. Set `displayName` for memoized.
+### Docker
+1. **Nginx volume mount conflict**: Don't mount `../dist:/usr/share/nginx/html:ro` in staging - it overrides built files and causes 403. Dockerfile already bakes in frontend.
+2. **Startup time**: Wait 2-3 minutes for all services to be healthy. PostgreSQL must be ready before backend.
+3. **Default admin user**: Created on startup with username=`admin`, password=`admin123`. Check `backend/app/main.py` for creation code.
 
-**Patterns:** @tanstack/react-query for fetching, custom hooks, useMemo, React Router.
+### Backend
+4. **Dual scans module**: Both `app/api/scans.py` AND `app/api/scans/` exist. Python imports resolve to `.py` file, not the directory.
+5. **One active scan per project**: Database constraint `ix_scans_project_state`. If scan stuck in RUNNING, can't start new one - use force-unlock endpoint.
+6. **Callback token validation**: In test env, validation is skipped. In prod, `CALLBACK_TOKEN` must match exactly.
+7. **Jenkins callback keys**: Backend expects `stages` not `STAGE_RESULTS`. Accepts both uppercase and lowercase error keys (`ERROR_MESSAGE`, `error_message`).
+8. **Celery task imports**: If you move task functions, update import in `app/core/celery_app.py`.
 
-**Testing:** Vitest + React Testing Library, co-located tests, vi.mock(), describe/it/expect.
+### Frontend
+9. **API key lookup order**: Reset/cancel features check `localStorage.getItem('API_KEY')` first, then `import.meta.env.VITE_API_KEY`.
+10. **WebSocket states not shown**: `useScanWebSocket` has `connected`/`connecting` but no UI indicator.
+11. **Scan progress**: Real-time updates come via WebSocket. Jenkins sends intermediate callbacks after each stage completes.
 
-### Backend (Python/FastAPI)
+### Architecture
+12. **Root vs Agent/**: Source code at root (`backend/`, `src/`, `tests/`, `docker/`). `Agent/` contains only Jenkins files - separate GitHub repo.
+13. **Git**: Don't commit `.env.*` files, secrets, or credentials.
 
-**Imports:** stdlib → third-party → local. Use absolute imports from `app.`
+### Jenkins
+14. **Jenkins URL**: http://localhost:8080/job/Security-pipeline/ - requires authentication.
+15. **Callback URL**: `http://192.168.1.101:8000` (or set via `BACKEND_URL` env var).
+16. **ZAP API endpoints**: Use `/OTHER/core/other/` not `/JSON/core/action/`.
+17. **Docker push**: Image needs username prefix like `dockerhub-user/scan-uuid:tag`.
+18. **Real-time progress**: `recordStage()` now calls `sendIntermediateCallback()` after each stage.
 
-```python
-from datetime import datetime
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
-from app.core.config import settings
-```
+## Workflow Guidelines
 
-**Models:** Pydantic BaseModel for schemas, SQLAlchemy for tables. Type hints required.
+- **Always use superpowers skills** - Before any task, invoke relevant skills from `/home/kali_linux/.config/opencode/skills/superpowers/`.
+- **Use Graphify for architecture** - Reference `graphify-out/GRAPH_REPORT.md`.
 
-**Error Handling:** HTTPException with descriptive detail and appropriate status codes.
+## API Reference
 
-**Naming:** snake_case vars/funcs, PascalCase classes, SCREAMING_SNAKE_CASE constants.
-
-**Testing:** pytest with fastapi.testclient.TestClient, unittest.mock.patch.
+### Key Endpoints
+- `POST /api/v1/auth/login` - Login (form data: username, password)
+- `POST /api/v1/auth/register` - Register
+- `GET/POST /api/v1/projects` - Projects CRUD
+- `GET/POST /api/v1/scans` - Trigger/list scans
+- `GET /api/v1/scans/{id}/results` - Scan results
+- `POST /api/v1/scans/{id}/reset` - Reset failed scan
+- `POST /api/v1/scans/{id}/cancel` - Cancel running scan
+- WebSocket: `ws://localhost:8000/api/v1/ws/scans?scan_id={id}`
 
 ## Project Structure
-
 ```
-Agent/
-├── backend/app/       # API, core, models, schemas, services, state
-├── src/              # components, pages, services, hooks, types.ts
-├── tests/            # Python tests
-├── docker/           # Docker configs
-├── package.json      # Frontend deps
-├── vitest.config.ts  # Test config
-└── tsconfig.json     # TS config
+/home/kali_linux/Pipeline/
+├── backend/app/        # FastAPI: api/, core/, models/, schemas/, services/, state/, tasks/
+├── src/               # React: components/, pages/, services/, hooks/, types.ts
+├── tests/             # Python tests
+├── docker/            # Docker configs (backend.Dockerfile, frontend.Dockerfile)
+├── Agent/             # Jenkinsfile only - separate GitHub repo
+└── .ai/memory/       # Gotchas and constraints docs
 ```
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/types.ts` | TypeScript types |
-| `src/services/api.ts` | API client |
-| `backend/app/main.py` | FastAPI entry |
-| `backend/app/core/config.py` | Settings |
-| `backend/requirements.txt` | Python deps |
-
-## Security Notes
-
-Never commit `.env.*` or secrets. Validate callback tokens on webhooks. Rate limit public endpoints.
-
-
-Let me thoroughly analyze your codebase across all pages and components before giving you a comprehensive UI/UX plan.
-
-After a deep review of all your pages, components, hooks, and services, here is a full, prioritized UI/UX design roadmap for your DevSecOps platform:
-
----
-
-## Critical Issues (Broken UX — Fix First)
-
-### 1. Scan Status Page — Invisible Results
-**Problem:** `ScanStatusPage.tsx` tries `scan.results` first, then falls back to `api.scans.getResults()`. If both return empty, the user sees *"No scan results available yet"* with zero indication of whether the scan actually ran, failed silently, or is still loading. There's no state differentiation.
-
-**Fix:**
-- Show a distinct empty state per scan state: a pulsing skeleton for `RUNNING`, a "zero stages returned" warning card for `COMPLETED` with 0 results, and a clear error card for `FAILED`
-- Add a **last-updated timestamp** next to the Refresh button so users know the data is fresh
-
-### 2. Dashboard — No Scan State Feedback Loop
-**Problem:** After triggering a scan from `ProjectControlPage`, the user is sent to `ScanStatusPage`. But if they navigate back to the Dashboard, `last_scan_state` shows "RUNNING" with a blue dot — but there's no way to click through to the active scan. The dot is decorative, not actionable.
-
-**Fix:** Make the status badge a clickable link to the most recent scan for that project.
-
-### 3. Error Modal Has No Retry Path
-**Problem:** `ScanErrorModal` shows the error and a Jenkins link, but closes without offering a "Reset & Retry" action. The reset button only exists further down `ScanStatusPage` behind a `confirm()` dialog — a browser native popup that looks broken/unprofessional.
-
-**Fix:** Move the reset/retry CTA into the modal itself. Replace `confirm()` with an inline confirmation UI.
-
----
-
-## High Impact UX Improvements
-
-### 4. Empty State Design — All Pages
-Right now every empty state is a single centered text string. These need proper treatment:
-
-| Page | Current | Needed |
-|------|---------|--------|
-| Dashboard (no projects) | `"No projects found. Create one..."` | Illustrated empty state with CTA button |
-| Scan History (no scans) | `"No scan history yet"` | Contextual empty state with "Run your first scan" CTA |
-| Scan Results (no stages) | Generic text | State-specific empty states (loading skeleton, true empty, error) |
-
-### 5. `ScanProgressBar` — Misleading Progress
-**Problem:** The progress bar calculates percentage based on `STAGE_ORDER.length` (always 11 stages), but a manual scan may only have 3 stages selected. A 3-stage manual scan shows 27% even when all 3 stages are PASS.
-
-**Fix:** Base the denominator on `selected_stages.length` if present, falling back to 11.
-
-### 6. Notification Permission — Bad Timing
-**Problem:** In `ScanStatusPage`, `notificationService.requestPermission()` fires on component mount unconditionally. Users get a browser permission prompt immediately upon viewing any scan — before they've had any reason to want notifications.
-
-**Fix:** Only request permission when a scan enters `RUNNING` state for the first time, or surface a subtle "Enable notifications" banner that the user can opt into.
-
-### 7. Sidebar — No Active Project Context
-The sidebar only has Dashboard and Create Project. When a user is deep in `/projects/:id/manual` or `/scans/:id`, there's no breadcrumb or sidebar context showing which project they're working on.
-
-**Fix:** Add a collapsible "Current Project" section to the sidebar when a project is active, with quick-links to: Project Details, Run Scan, Scan History.
-
-### 8. Header Title — Hardcoded and Incomplete
-`Layout.tsx` uses a chain of `isActive()` checks that misses most routes (e.g., `/projects/:id/history` falls through to `'Project Details'`).
-
-**Fix:** Add route matching for all routes, or use React Router's `useMatches` with route `handle` metadata to supply page titles declaratively.
-
----
-
-## UX Polish & Missing Patterns
-
-### 9. Form Validation — No Inline Feedback
-`CreateProjectPage` validates on submit only. Fields like Git URL, Target IP, and Target URL have no real-time validation. Users fill out 6+ fields and only find errors after clicking submit.
-
-**Fix:** Add per-field validation with `onBlur` + visual indicators (green checkmark / red border + helper text). Use a small IP address format hint under the Target IP field.
-
-### 10. Manual Scan — Stage Selection Has No Order Visualization
-`ManualScanPage` shows stages as a flat checklist. Users can't tell which stages depend on others (e.g., `trivy_image_scan` requires `docker_build`). The dependency validation only happens on the backend — the user discovers errors after clicking Start.
-
-**Fix:** Render stages in a visual pipeline/chain. Show dependency arrows or groupings (Source Analysis → Build → Security Testing → Network). Disable dependent stages if their prerequisite isn't selected, with a tooltip explaining why.
-
-### 11. Scan History Page — No Click-Through to Scan Detail
-`ScanHistoryPage` shows scan rows but they're not clickable. Seeing `scan_id.slice(0, 8)...` with no link is a dead-end.
-
-**Fix:** Make each row a link to `/scans/:id`. Add a status badge with color coding, and show a "retry" quick action on failed rows.
-
-### 12. `ScanProgressBar` — ETA Is Always Wrong
-The `calculateETA()` function uses hardcoded `STAGE_DURATIONS` that are unrelated to actual scan runtime. It will always show the same ETA regardless of the actual scan. This is worse than showing nothing.
-
-**Fix:** Either base ETA on `started_at` + average historical duration (from scan history), or remove the ETA entirely and replace with elapsed time ("Running for 4m 32s") which is always accurate.
-
-### 13. Loading States — Inconsistent Patterns
-Some pages use a full-screen centered spinner (`ScanStatusPage`), some use inline text (`"Loading project details..."`), and some use nothing. This creates a jarring, inconsistent feel.
-
-**Fix:** Create a `<PageSkeleton>` component with shimmer/pulse placeholders that match the actual page layout. Use it everywhere. The skeleton should mirror the shape of the content (card shapes for project cards, row shapes for tables).
-
-### 14. Login / Register — No Success Feedback on Register
-After registration, `RegisterPage` redirects to Login with a state message, but `LoginPage` only clears that message via `window.history.replaceState` after 5 seconds and never actually *shows* it to the user. The message from `location.state.message` is read but never rendered.
-
-**Fix:** Render `location.state?.message` as a green success banner at the top of the login form.
-
-### 15. Delete Project — No Undo / Toast Confirmation
-`DashboardPage` deletes a project with an inline Yes/No confirm that disappears immediately on success. If a user accidentally confirms, there's no recovery path and no feedback that it succeeded.
-
-**Fix:** Add a toast notification system (a `<Toast>` component) for all destructive and important actions. Show a toast after: project created, project deleted, scan triggered, scan cancelled, scan reset.
-
----
-
-## Nice-to-Have UX Enhancements
-
-### 16. Dark Mode
-The sidebar is already `bg-slate-900`. The palette supports it. Adding a dark mode toggle would align with the DevSecOps/developer audience.
-
-### 17. Keyboard Navigation & Accessibility
-- The confirmation modal in `ProjectControlPage` traps focus correctly (it uses `aria-modal`, `aria-labelledby`) ✅
-- But `ScanErrorModal` and the delete confirm in `DashboardPage` do not trap focus ❌
-- Add `role="status"` and `aria-live="polite"` to the scan status badge so screen readers announce state changes
-
-### 18. Mobile Responsiveness
-The sidebar is always `w-64` — on mobile this eats half the screen. Add a hamburger menu for screens below `lg` breakpoint. The scan progress grid also uses `lg:grid-cols-3` which works, but the overview stat cards (`md:grid-cols-4`) will stack awkwardly on tablet.
-
-### 19. WebSocket Connection Status Indicator
-`useScanWebSocket` has `connected` and `connecting` states but they're never surfaced in the UI. Users watching a running scan have no idea if their real-time connection is active or if they're seeing stale data.
-
-**Fix:** Add a small "Live" indicator (green pulse dot + "Live") near the Refresh button when WebSocket is connected, and a "Reconnecting…" state when it drops.
-
-### 20. API Key Setup Guidance
-`useScanReset.ts` and `useScanCancel.ts` read `localStorage.getItem('API_KEY') || import.meta.env.VITE_API_KEY`. If neither is set, the reset/cancel calls will 401. There's no guidance anywhere in the UI about this requirement.
-
-**Fix:** On first login, show a one-time setup banner: "To enable scan management features, configure your API key in Settings." Link to a Settings page or a modal where the API key can be saved to localStorage.
-

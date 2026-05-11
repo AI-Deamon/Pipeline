@@ -62,15 +62,20 @@ class ReportDetail(BaseModel):
 
 
 @router.get("/projects/{project_id}/reports", response_model=List[ReportDetail])
-def get_project_reports(project_id: str, db: Session = Depends(get_db)):
-    """Get all reports for a project"""
+def get_project_reports(
+    project_id: str,
+    scan_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Get reports for a project, optionally filtered by scan_id"""
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    reports = db.query(ScanReportDB).filter(
-        ScanReportDB.project_id == project_id
-    ).order_by(ScanReportDB.created_at.desc()).all()
+    query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+    if scan_id:
+        query = query.filter(ScanReportDB.scan_id == scan_id)
+    reports = query.order_by(ScanReportDB.created_at.desc()).all()
 
     return [
         ReportDetail(
@@ -87,15 +92,20 @@ def get_project_reports(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}/reports/summary", response_model=ReportSummary)
-def get_reports_summary(project_id: str, db: Session = Depends(get_db)):
-    """Get combined severity counts across all tools"""
+def get_reports_summary(
+    project_id: str,
+    scan_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Get combined severity counts across all tools, optionally filtered by scan_id"""
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    reports = db.query(ScanReportDB).filter(
-        ScanReportDB.project_id == project_id
-    ).all()
+    query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+    if scan_id:
+        query = query.filter(ScanReportDB.scan_id == scan_id)
+    reports = query.all()
 
     total_findings = 0
     severity = SeveritySummary()
@@ -113,15 +123,17 @@ def get_reports_summary(project_id: str, db: Session = Depends(get_db)):
 
         tool_link = r.report_url if r.tool_name == "sonar" else None
 
-        tools.append(ToolSummary(
-            tool=r.tool_name,
-            findings=findings_count,
-            critical=summary.get("critical", 0),
-            high=summary.get("high", 0),
-            medium=summary.get("medium", 0),
-            low=summary.get("low", 0),
-            link=tool_link,
-        ))
+        tools.append(
+            ToolSummary(
+                tool=r.tool_name,
+                findings=findings_count,
+                critical=summary.get("critical", 0),
+                high=summary.get("high", 0),
+                medium=summary.get("medium", 0),
+                low=summary.get("low", 0),
+                link=tool_link,
+            )
+        )
 
     return ReportSummary(
         project_id=project_id,
@@ -181,14 +193,14 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/reports/unified")
 def get_unified_report(
-    project_id: str,
-    scan_id: Optional[str] = None,
-    db: Session = Depends(get_db)
+    project_id: str, scan_id: Optional[str] = None, db: Session = Depends(get_db)
 ):
     """Get unified report combining all tools"""
     # If scan_id provided, get that scan's reports
     # Otherwise, get latest completed scan
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    current_scan_id = scan_id
 
     if scan_id:
         query = query.filter(ScanReportDB.scan_id == scan_id)
@@ -202,6 +214,7 @@ def get_unified_report(
             .first()
         )
         if latest_scan:
+            current_scan_id = latest_scan.scan_id
             reports = query.filter(ScanReportDB.scan_id == latest_scan.scan_id).all()
         else:
             reports = []
@@ -219,6 +232,7 @@ def get_unified_report(
 
     # Calculate risk score
     from app.services.reporting.risk_calculator import RiskCalculator
+
     calculator = RiskCalculator()
     risk_score = calculator.calculate(total_severity)
 
@@ -227,12 +241,16 @@ def get_unified_report(
         db.query(ScanReportDB)
         .join(ScanDB, ScanReportDB.scan_id == ScanDB.scan_id)
         .filter(ScanReportDB.project_id == project_id)
-        .filter(ScanReportDB.scan_id != (scan_id or (latest_scan.scan_id if 'latest_scan' in locals() else None)))
+        .filter(ScanReportDB.scan_id != current_scan_id)
         .filter(ScanDB.state == "COMPLETED")
         .order_by(ScanDB.finished_at.desc())
         .first()
     )
-    previous_severity = previous.severity_summary if previous else {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    previous_severity = (
+        previous.severity_summary
+        if previous
+        else {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    )
     previous_score = calculator.calculate(previous_severity)
     risk_trend = calculator.get_trend(risk_score, previous_score)
 
@@ -248,16 +266,12 @@ def get_unified_report(
             "previous_score": previous_score,
         },
         "findings": all_findings,
-        "generated_at": datetime.now(timezone.utc).isoformat()
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/projects/{project_id}/reports/trends")
-def get_report_trends(
-    project_id: str,
-    days: int = 30,
-    db: Session = Depends(get_db)
-):
+def get_report_trends(project_id: str, days: int = 30, db: Session = Depends(get_db)):
     """Get findings trends over time"""
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
@@ -265,8 +279,7 @@ def get_report_trends(
         db.query(ScanReportDB)
         .join(ScanDB, ScanReportDB.scan_id == ScanDB.scan_id)
         .filter(
-            ScanReportDB.project_id == project_id,
-            ScanDB.finished_at >= cutoff_date
+            ScanReportDB.project_id == project_id, ScanDB.finished_at >= cutoff_date
         )
         .order_by(ScanDB.finished_at)
         .all()
@@ -282,23 +295,20 @@ def get_report_trends(
         for key in trends[date_key]:
             trends[date_key][key] += severity.get(key, 0)
 
-    return [
-        {"date": date, **data}
-        for date, data in sorted(trends.items())
-    ]
+    return [{"date": date, **data} for date, data in sorted(trends.items())]
 
 
 @router.get("/projects/{project_id}/reports/compliance")
 def get_compliance_report(
-    project_id: str,
-    scan_id: Optional[str] = None,
-    db: Session = Depends(get_db)
+    project_id: str, scan_id: Optional[str] = None, db: Session = Depends(get_db)
 ):
     """Get OWASP Top 10 and CWE Top 25 compliance report"""
     from app.services.reporting.compliance_mapper import ComplianceMapper
 
     # Get findings (same logic as unified report)
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    current_scan_id = scan_id
 
     if scan_id:
         query = query.filter(ScanReportDB.scan_id == scan_id)
@@ -311,6 +321,7 @@ def get_compliance_report(
             .first()
         )
         if latest_scan:
+            current_scan_id = latest_scan.scan_id
             reports = query.filter(ScanReportDB.scan_id == latest_scan.scan_id).all()
         else:
             reports = []
@@ -318,7 +329,7 @@ def get_compliance_report(
     # Collect all findings
     all_findings = []
     for report in reports:
-        for f_dict in (report.findings or []):
+        for f_dict in report.findings or []:
             all_findings.append(f_dict)
 
     mapper = ComplianceMapper()
@@ -326,7 +337,7 @@ def get_compliance_report(
 
     return {
         "project_id": project_id,
-        "scan_id": scan_id,
+        "scan_id": current_scan_id,
         "compliance": compliance,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -338,11 +349,13 @@ def export_unified_report(
     format: str = "html",
     scan_id: Optional[str] = None,
     report_type: str = "technical",
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Export unified report as HTML or PDF"""
     # Get unified report data (similar to get_unified_report)
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
+
+    current_scan_id = scan_id
 
     if scan_id:
         query = query.filter(ScanReportDB.scan_id == scan_id)
@@ -354,6 +367,7 @@ def export_unified_report(
             .first()
         )
         if latest_scan:
+            current_scan_id = latest_scan.scan_id
             query = query.filter(ScanReportDB.scan_id == latest_scan.scan_id)
 
     reports = query.all()
@@ -361,27 +375,29 @@ def export_unified_report(
     # Collect findings into SecurityFinding objects
     all_findings = []
     for report in reports:
-        for f_dict in (report.findings or []):
-            all_findings.append(SecurityFinding(
-                id=f_dict.get("id", "unknown"),
-                tool=report.tool_name,
-                severity=f_dict.get("severity", "Info"),
-                title=f_dict.get("title", "Untitled"),
-                description=f_dict.get("description", ""),
-                cve=f_dict.get("cve"),
-                host=f_dict.get("host"),
-                port=f_dict.get("port"),
-                package=f_dict.get("package"),
-                recommendation=f_dict.get("recommendation", ""),
-                raw_evidence=f_dict.get("raw_evidence", ""),
-            ))
+        for f_dict in report.findings or []:
+            all_findings.append(
+                SecurityFinding(
+                    id=f_dict.get("id", "unknown"),
+                    tool=report.tool_name,
+                    severity=f_dict.get("severity", "Info"),
+                    title=f_dict.get("title", "Untitled"),
+                    description=f_dict.get("description", ""),
+                    cve=f_dict.get("cve"),
+                    host=f_dict.get("host"),
+                    port=f_dict.get("port"),
+                    package=f_dict.get("package"),
+                    recommendation=f_dict.get("recommendation", ""),
+                    raw_evidence=f_dict.get("raw_evidence", ""),
+                )
+            )
 
     # Get project name if available
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     project_name = project.name if project else project_id
 
     # Determine scan_id for report
-    used_scan_id = scan_id or (latest_scan.scan_id if latest_scan else "unknown")
+    used_scan_id = current_scan_id or "unknown"
 
     # Normalize report_type
     valid_types = {"executive", "technical", "compliance", "comparison"}
@@ -392,7 +408,7 @@ def export_unified_report(
         scan_id=used_scan_id,
         findings=all_findings,
         project_name=project_name,
-        report_type=rtype
+        report_type=rtype,
     )
 
     if format == "pdf":
@@ -405,10 +421,11 @@ def export_unified_report(
         ext = "html"
 
     from fastapi.responses import Response
+
     return Response(
         content=content,
         media_type=media_type,
         headers={
             "Content-Disposition": f"attachment; filename=security-report-project-{project_id}.{ext}"
-        }
+        },
     )

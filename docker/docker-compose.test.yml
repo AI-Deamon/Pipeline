@@ -1,11 +1,10 @@
-version: "3.9"
-
 services:
   backend:
     env_file:
       - ../.env.test
-    ports:
-      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://devsecops:devsecops@localhost:5433/devsecops_test
+      - REDIS_URL=redis://localhost:6379/0
     volumes:
       - ../backend:/app/backend
       - ../storage/test:/app/backend/storage/test
@@ -13,21 +12,22 @@ services:
   frontend:
     env_file:
       - ../.env.test
-    ports:
-      - "5173:8080"
-    volumes:
-      - ..:/app
-      - /app/node_modules
 
   celery_worker:
     env_file:
       - ../.env.test
+    environment:
+      - DATABASE_URL=postgresql://devsecops:devsecops@localhost:5433/devsecops_test
+      - REDIS_URL=redis://localhost:6379/0
 
   postgres:
     env_file:
       - ../.env.test
-    ports:
-      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -41,10 +41,13 @@ services:
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
+    network_mode: host
     env_file:
       - ../.env.test
     environment:
       PYTHONPATH: /app/backend
+      DATABASE_URL: postgresql://devsecops:devsecops@localhost:5433/devsecops_test
+      REDIS_URL: redis://localhost:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,4 +55,7 @@ services:
       - ../backend:/app/backend
       - ../tests:/app/backend/tests
       - ../storage/test:/app/backend/storage/test
-    command: ["pytest", "-q", "tests"]
+    command: [ "pytest", "-q", "tests" ]
+
+volumes:
+  postgres_data:
