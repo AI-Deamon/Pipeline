@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  backend:
+    env_file:
+      - ../.env.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../backend:/app/backend
+      - ../storage/dev:/app/backend/storage/dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  celery_worker:
+    env_file:
+      - ../.env.dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    env_file:
+      - ../.env.dev
+    ports:
+      - "8173:5173"
+    volumes:
+      - ..:/app
+      - /app/node_modules
+
+  postgres:
+    env_file:
+      - ../.env.dev
+    ports:
+      - "5433:5432"
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    profiles: ["optional-security"]
+    ports:
+      - "8080:8080"
+
+  kali:
+    image: kalilinux/kali-rolling
+    profiles: ["optional-security"]
+    command: ["/bin/sh", "-c", "tail -f /dev/null"]

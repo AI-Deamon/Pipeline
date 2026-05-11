@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useScanWebSocket } from "../hooks/useScanWebSocket";
 import { api } from "../services/api";
 import type { Project, ReportSummary, SeveritySummary } from "../types";
 import {
@@ -205,6 +206,42 @@ const ACTIVE_STATES = new Set(["CREATED", "QUEUED", "RUNNING"]);
 
 const DashboardPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [showApikeyBanner, setShowApikeyBanner] = useState(false);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const apiKey =
+      sessionStorage.getItem("API_KEY") || import.meta.env.VITE_API_KEY;
+    if (!apiKey) {
+      setShowApikeyBanner(true);
+    }
+  }, []);
+
+  const { connected: wsConnected } = useScanWebSocket(undefined, undefined, {
+    onMessage: (message) => {
+      console.log("Dashboard real-time update received:", message);
+      queryClient.setQueryData<Project[]>(["projects"], (oldProjects) => {
+        if (!oldProjects) return oldProjects;
+        return oldProjects.map((p) => {
+          if (p.project_id === message.project_id) {
+            if (p.last_scan_state === message.data.state && p.last_scan_id === message.scan_id) {
+              return p;
+            }
+            return {
+              ...p,
+              last_scan_state: message.data.state,
+              last_scan_id: message.scan_id,
+            };
+          }
+          return p;
+        });
+      });
+    },
+    onOpen: () => {
+      console.log("Dashboard WebSocket connected");
+    },
+  });
 
   const { data: projects = [], isLoading: loading } = useQuery({
     queryKey: ["projects"],

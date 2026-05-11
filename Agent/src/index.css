@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #00FF41;
+  --color-secondary: #0D0D0D;
+  --color-background: #000000;
+  --color-text: #E0E0E0;
+  --color-surface: #0D0D0D;
+  --color-success: #00FF41;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+
+  --font-mono: "Fira Code", monospace;
+  --font-sans: "Fira Sans", sans-serif;
+}
+
+@layer base {
+  :root {
+    --background: #000000;
+    --foreground: #E0E0E0;
+    --card: #0D0D0D;
+    --card-foreground: #E0E0E0;
+    --popover: #0D0D0D;
+    --popover-foreground: #E0E0E0;
+    --primary: #00FF41;
+    --primary-foreground: #000000;
+    --secondary: #0D0D0D;
+    --secondary-foreground: #E0E0E0;
+    --muted: #1f2937;
+    --muted-foreground: #9ca3af;
+    --accent: #1f2937;
+    --accent-foreground: #E0E0E0;
+    --destructive: #ef4444;
+    --destructive-foreground: #E0E0E0;
+    --border: #1f2937;
+    --input: #1f2937;
+    --ring: #00FF41;
+    --radius: 0.5rem;
+  }
+
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+    font-family: var(--font-sans);
+  }
+
+  body {
+    @apply bg-background text-text antialiased selection:bg-primary selection:text-background;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Focus ring consistency */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-black font-mono font-bold py-3 px-6 rounded-lg transition-all active:scale-[0.98] shadow-[0_0_10px_rgba(0,255,65,0.3)] hover:shadow-[0_0_20px_rgba(0,255,65,0.5)] disabled:opacity-50 disabled:pointer-events-none disabled:shadow-none uppercase tracking-wider text-sm border border-transparent hover:border-primary/50;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent hover:bg-white/5 text-primary border border-primary font-mono font-bold py-3 px-6 rounded-lg transition-all active:scale-[0.98] shadow-none hover:shadow-[0_0_10px_rgba(0,255,65,0.2)] disabled:opacity-50 disabled:pointer-events-none uppercase tracking-wider text-sm;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent hover:bg-white/5 text-slate-400 hover:text-white font-mono font-bold py-2 px-4 rounded-lg transition-all active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .btn-danger {
+    @apply bg-red-900/20 hover:bg-red-900/40 text-red-500 border border-red-900/50 font-mono font-bold py-3 px-6 rounded-lg transition-all active:scale-[0.98] disabled:opacity-50 uppercase tracking-wider text-sm;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 bg-white/5 border border-white/10 rounded-lg text-sm font-mono text-white transition-all outline-none focus:ring-1 focus:ring-primary focus:border-primary/50 hover:border-white/20 disabled:bg-white/5 disabled:text-slate-500 placeholder:text-slate-600;
+  }
+
+  .card-container {
+    @apply bg-surface border border-white/10 rounded-xl shadow-xl shadow-black/50 overflow-hidden backdrop-blur-sm;
+  }
+
+  /* Matrix scanline effect */
+  .scanline {
+    @apply absolute inset-0 pointer-events-none z-50 opacity-[0.03];
+    background: linear-gradient(to bottom, transparent 50%, rgba(0, 0, 0, 0.5) 50%);
+    background-size: 100% 4px;
+  }
+  
+  .glow-text {
+    text-shadow: 0 0 10px rgba(0, 255, 65, 0.5);
+  }
+}
+
+/* Custom Scrollbar for modern look */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-black;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full hover:bg-primary/50 transition-colors;
+}
