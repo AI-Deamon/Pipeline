@@ -1,0 +1,17 @@
+node_modules
+reports
+.venv
+dist
+build
+coverage
+.git
+.cache
+pytest_cache
+__pycache__
+*.db
+venv
+.env*
+!.env.test
+storage
+tmp
+temp

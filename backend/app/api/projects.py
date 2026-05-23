@@ -79,8 +79,6 @@ def list_projects(db: Session = Depends(get_db)):
                 # Convert UTC to IST (UTC+5:30)
                 dt = last_scan.created_at
                 if dt.tzinfo is None:
-                    from datetime import timezone, timedelta
-
                     dt = dt.replace(tzinfo=timezone.utc)
                 # Add 5:30 hours for IST
                 ist_dt = dt + timedelta(hours=5, minutes=30)

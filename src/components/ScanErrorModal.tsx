@@ -163,7 +163,7 @@ export function ScanErrorModal({ isOpen, onClose, error }: ScanErrorModalProps) 
             </div>
             <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl">
               <div className="text-xs text-slate-400 mb-1">Timestamp</div>
-              <div className="text-sm font-medium text-slate-700">{new Date().toLocaleTimeString()} UTC</div>
+              <div className="text-sm font-medium text-slate-700">{new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</div>
             </div>
           </div>
         </div>

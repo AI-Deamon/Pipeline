@@ -194,7 +194,7 @@ const ScanStatusPage = () => {
         >
           <RefreshCw className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`} />
         </button>
-        <span className="text-sm text-slate-400">Updated: {lastUpdated.toLocaleTimeString()}</span>
+        <span className="text-sm text-slate-400">Updated: {lastUpdated.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })}</span>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">

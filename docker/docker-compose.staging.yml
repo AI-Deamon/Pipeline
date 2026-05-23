@@ -1,0 +1,41 @@
+services:
+  backend:
+    env_file:
+      - ../.env.staging
+    environment:
+      - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
+      - REDIS_URL=redis://localhost:6379/0
+      - JENKINS_BASE_URL=http://localhost:8080
+    restart: unless-stopped
+    volumes:
+      - ../storage/staging:/app/backend/storage/staging
+
+  celery_worker:
+    env_file:
+      - ../.env.staging
+    environment:
+      - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
+      - REDIS_URL=redis://localhost:6379/0
+      - JENKINS_BASE_URL=http://localhost:8080
+    restart: unless-stopped
+
+  frontend:
+    env_file:
+      - ../.env.staging
+    restart: unless-stopped
+
+  postgres:
+    env_file:
+      - ../.env.staging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

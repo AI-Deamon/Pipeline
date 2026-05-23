@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Environment files — NEVER commit secrets
+.env
+.env.*
+!.env.example
+
+# Node / Frontend
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+dist/
+build/
+.env.local
+.env.*.local
+*.log
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AI / LLM Agent configs
+.agent/
+.agents/
+.ai/
+.claude/
+.kilo/
+.kilocode/
+.opencode/
+.qwen/
+.specify/
+.superdesign
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Temp
+*.tmp
+.cache/
+tmp/
+temp/
+
+# Docker
+*.pid
+*.seed
+*.pid.lock
+
+# Test / Coverage
+coverage/
+htmlcov/
+.coverage
+.tox/
+
+# Build outputs
+*.css.map
+*.js.map
+
+# Generated reports & scan artifacts
+reports/
+graphify-out/
+
+# Downloaded binaries
+jenkins-cli.jar
+*.jar
+
+# Storage / data
+storage/
+
+# Agent worktrees & isolated checkouts
+Agent/.agent/
+Agent/.worktrees/
+
+# Nmap scanner cache & generated targets
+backend/nmap_system/__pycache__/
+backend/nmap_system/targets.json
