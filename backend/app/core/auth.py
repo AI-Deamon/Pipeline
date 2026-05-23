@@ -16,7 +16,9 @@ def get_current_user(
     token: str | None = Security(oauth2_scheme),
     db: Session = Depends(get_db)
 ):
-    if settings.ENV == "test":
+    # Safeguard: never allow env-based auth bypass in non-test environments
+    # In test env, require explicit TEST_BYPASS_AUTH=true to enable bypass
+    if settings.ENV == "test" and settings.TEST_BYPASS_AUTH:
         return type("User", (), {"username": "test-bypass"})()
 
     # Callback endpoint has its own dedicated shared-secret guard.
@@ -51,5 +53,9 @@ def get_current_user(
 
     user = db.query(UserDB).filter(UserDB.username == token_data.username).first()
     if user is None:
-        raise credentials_exception
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer", "X-Auth-Reason": "account-deleted"},
+        )
     return user

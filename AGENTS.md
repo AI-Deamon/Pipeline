@@ -78,4 +78,7 @@ python run.py down      # Stops + removes volumes + orphans
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at `specs/001-deep-code-audit/plan.md`, the audit report at
+`specs/001-deep-code-audit/AUDIT_REPORT.md`, and the research at
+`specs/001-deep-code-audit/research.md`.
 <!-- SPECKIT END -->

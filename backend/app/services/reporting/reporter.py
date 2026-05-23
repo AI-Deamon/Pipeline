@@ -132,12 +132,15 @@ class UnifiedReportGenerator:
 """)
             for finding in self.findings:
                 severity_class = finding.severity.lower()
+                safe_title = finding.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+                safe_tool = finding.tool.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                safe_host = (finding.host or finding.package or "-").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 html_parts.append(f"""
     <tr>
         <td class="{severity_class}">{finding.severity}</td>
-        <td>{finding.title}</td>
-        <td>{finding.tool}</td>
-        <td>{finding.host or finding.package or '-'}</td>
+        <td>{safe_title}</td>
+        <td>{safe_tool}</td>
+        <td>{safe_host}</td>
     </tr>
 """)
             html_parts.append("</table></div>")

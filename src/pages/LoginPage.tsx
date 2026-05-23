@@ -8,16 +8,32 @@ import { useAuth } from '../hooks/useAuth';
 const LoginPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, isAuthenticated } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Redirect authenticated users away from login page
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
+
   const from = (location.state as { from?: Location })?.from?.pathname || '/dashboard';
 
   useEffect(() => {
+    // Handle URL query params for specific redirect reasons
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('reason');
+    if (reason === 'account-deleted') {
+      setError('Your account no longer exists. Please contact an administrator.');
+    } else if (reason === 'token-expired') {
+      setError('Your session has expired. Please log in again.');
+    }
+
     const state = location.state as { message?: string } | null;
     if (state?.message) {
       const timer = setTimeout(() => {

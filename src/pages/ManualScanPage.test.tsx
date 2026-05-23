@@ -24,18 +24,28 @@ vi.mock('../services/api', () => ({
     }
   },
   FIXED_STAGES: [
-    'Git Checkout',
-    'Sonar Scanner',
-    'Sonar Quality Gate',
-    'NPM / PIP Install',
-    'Dependency Check',
-    'Trivy FS Scan',
-    'Docker Build',
-    'Docker Push',
-    'Trivy Image Scan',
-    'Nmap Scan',
-    'ZAP Scan'
-  ]
+    'git_checkout',
+    'sonar_scanner',
+    'dependency_check',
+    'trivy_fs_scan',
+    'docker_build',
+    'docker_push',
+    'trivy_image_scan',
+    'nmap_scan',
+    'zap_scan'
+  ],
+  STAGE_DISPLAY_NAMES: {
+    'git_checkout': 'Git Checkout',
+    'sonar_scanner': 'Sonar Scanner',
+    'dependency_check': 'Dependency Check',
+    'trivy_fs_scan': 'Trivy FS Scan',
+    'docker_build': 'Docker Build',
+    'docker_push': 'Docker Push',
+    'trivy_image_scan': 'Trivy Image Scan',
+    'nmap_scan': 'Nmap Scan',
+    'zap_scan': 'ZAP Scan'
+  },
+  STAGE_DEPENDENCIES: {}
 }));
 
 describe('ManualScanPage', () => {
@@ -55,7 +65,7 @@ describe('ManualScanPage', () => {
     (api.projects.get as any).mockResolvedValue(mockProject); // eslint-disable-line @typescript-eslint/no-explicit-any
   });
 
-  it('renders all 11 stages', async () => {
+  it('renders all 9 stages', async () => {
     render(
       <QueryClientProvider client={queryClient}>
         <AuthProvider>

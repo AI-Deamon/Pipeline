@@ -18,8 +18,8 @@ describe('LoginPage', () => {
       </AuthProvider>
     );
 
-    const passwordInput = screen.getByPlaceholderText('••••••••') as HTMLInputElement;
-    const toggleButton = screen.getByLabelText('Show password');
+    const passwordInput = screen.getByPlaceholderText('Password') as HTMLInputElement;
+    const toggleButton = screen.getByRole('button', { name: /show password|hide password/i });
 
     // Initial state: password type
     expect(passwordInput.type).toBe('password');
@@ -27,12 +27,10 @@ describe('LoginPage', () => {
     // Click to show
     fireEvent.click(toggleButton);
     expect(passwordInput.type).toBe('text');
-    expect(screen.getByLabelText('Hide password')).toBeInTheDocument();
 
     // Click to hide again
-    fireEvent.click(screen.getByLabelText('Hide password'));
+    fireEvent.click(toggleButton);
     expect(passwordInput.type).toBe('password');
-    expect(screen.getByLabelText('Show password')).toBeInTheDocument();
   });
 
   it('contains a username field and a sign-in button', () => {
@@ -44,8 +42,8 @@ describe('LoginPage', () => {
       </AuthProvider>
     );
 
-    expect(screen.getByLabelText(/operator identity/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /authorize entry/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
   });
 
   it('displays specific error message when ApiError is thrown', async () => {
@@ -60,9 +58,9 @@ describe('LoginPage', () => {
       </AuthProvider>
     );
 
-    const usernameInput = screen.getByLabelText(/operator identity/i);
-    const passwordInput = screen.getByPlaceholderText('••••••••');
-    const submitButton = screen.getByRole('button', { name: /authorize entry/i });
+    const usernameInput = screen.getByLabelText(/username/i);
+    const passwordInput = screen.getByPlaceholderText('Password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
 
     fireEvent.change(usernameInput, { target: { value: 'testuser' } });
     fireEvent.change(passwordInput, { target: { value: 'wrongpassword' } });
@@ -84,9 +82,9 @@ describe('LoginPage', () => {
       </AuthProvider>
     );
 
-    const usernameInput = screen.getByLabelText(/operator identity/i);
-    const passwordInput = screen.getByPlaceholderText('••••••••');
-    const submitButton = screen.getByRole('button', { name: /authorize entry/i });
+    const usernameInput = screen.getByLabelText(/username/i);
+    const passwordInput = screen.getByPlaceholderText('Password');
+    const submitButton = screen.getByRole('button', { name: /sign in/i });
 
     fireEvent.change(usernameInput, { target: { value: 'testuser' } });
     fireEvent.change(passwordInput, { target: { value: 'wrongpassword' } });

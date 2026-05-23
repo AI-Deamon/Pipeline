@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 import json
 import logging
 
@@ -68,7 +69,7 @@ def _validate_callback_auth(callback_token: str | None):
     if settings.ENV == "test":
         return
     expected = settings.CALLBACK_TOKEN.strip()
-    if callback_token != expected:
+    if not callback_token or not hmac.compare_digest(callback_token, expected):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Invalid callback token")
 

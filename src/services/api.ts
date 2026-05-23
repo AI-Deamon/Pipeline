@@ -9,6 +9,7 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // T039: Abort requests after 30 seconds
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -30,6 +31,24 @@ apiClient.interceptors.request.use((config) => {
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response?.status === 401) {
+      // Clear all session state
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('API_KEY');
+
+      // Check for specific auth reason
+      const reason = error.response.headers?.['x-auth-reason'];
+      const params = new URLSearchParams();
+      if (reason === 'account-deleted') {
+        params.set('reason', 'account-deleted');
+      }
+
+      // Redirect to login
+      const loginPath = `/login?${params.toString()}`;
+      if (window.location.pathname !== '/login') {
+        window.location.href = loginPath;
+      }
+    }
     throw ApiError.fromAxiosError(error);
   }
 );

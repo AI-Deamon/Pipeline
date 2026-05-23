@@ -1,0 +1,21 @@
+issue  1
+
+in custom or manula scan if i seletc only sonar scan or only dpendence , only something end 
+i getting the error msg faild to start scan instedof the whay it failed error need add to start sonaer need gitcheckout stage als
+or auto select based on dependent stages like soner , dependence , or tivey ,docker, need the git chech out right if any one of them selected 
+it shoud auto select the depebdtbum scan like if i click the dependence check only auto select the git check out 
+note if it is complex mechinisem add notes or properl error msegs to handle the issue 
+
+issue 2 
+
+reportes should e visisble for only the uniques scan id items only 
+example if scan is strted with uniques id which has only dependeience scan only after scan complite i should only see the reprot reltedto dependece only 
+not combined ok all uniques scans only reportes
+
+
+issue 3 
+
+reset & retry feature  it needs to be defined here the scan is failed and erros is shown but some time scan is still active not going to failed state
+if i click reset& retry it should actualy start the scan again but it is not nessery so it should only stop the scan thas all so user can start other scan 
+
+

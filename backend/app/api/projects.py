@@ -2,12 +2,13 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.db import get_db
-from app.models.db_models import ProjectDB, ScanDB
+from app.core.auth import get_current_user
+from app.models.db_models import ProjectDB, ScanDB, UserDB
 from app.core.config import settings
 from app.api.scans.utils import _expire_scan_if_timed_out
 from app.state.scan_state import ScanState
@@ -19,6 +20,29 @@ ACTIVE_STATES = {
     ScanState.QUEUED.value,
     ScanState.RUNNING.value,
 }
+
+
+def _is_api_key_auth(request: Request) -> bool:
+    """Check if request is authenticated via API key (service account pattern)."""
+    api_key = request.headers.get("X-API-Key")
+    return bool(api_key and api_key == settings.API_KEY)
+
+
+def _get_user_id_filter(request: Request, current_user) -> str | None:
+    """Return user_id filter for queries. API-key auth sees all data (returns None)."""
+    if _is_api_key_auth(request):
+        return None  # Service account: see all data
+    if hasattr(current_user, 'id'):
+        return current_user.id
+    return None  # Fallback for test-bypass user
+
+
+def _filter_projects_by_user(query, request: Request, current_user):
+    """Apply user-level data isolation to a ProjectDB query."""
+    user_id = _get_user_id_filter(request, current_user)
+    if user_id is not None:
+        return query.filter(ProjectDB.user_id == user_id)
+    return query  # API-key auth: no filter
 
 
 def _get_last_scan_map(db: Session) -> dict[str, str]:
@@ -45,9 +69,9 @@ def _get_last_scan_map(db: Session) -> dict[str, str]:
 
 
 @router.get("/projects", response_model=list[dict])
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     last_scan_map = _get_last_scan_map(db)
-    db_projects = db.query(ProjectDB).all()
+    db_projects = _filter_projects_by_user(db.query(ProjectDB), request, current_user).all()
 
     now = datetime.now(timezone.utc)
     any_expired = False
@@ -96,8 +120,9 @@ def list_projects(db: Session = Depends(get_db)):
 
 
 @router.post("/projects", response_model=ProjectResponse)
-def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(project: ProjectCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     project_id = str(uuid.uuid4())
+    user_id = current_user.id if hasattr(current_user, 'id') else None
     db_project = ProjectDB(
         project_id=project_id,
         name=project.name,
@@ -107,6 +132,7 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
         sonar_key=project.sonar_key,
         target_ip=project.target_ip,
         target_url=str(project.target_url) if project.target_url else None,
+        user_id=user_id,
         status="CREATED",
     )
     db.add(db_project)
@@ -116,8 +142,8 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: str, db: Session = Depends(get_db)):
-    db_project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+def get_project(project_id: str, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
     last_scan = (
@@ -135,9 +161,9 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
 def update_project(
-    project_id: str, project: ProjectUpdate, db: Session = Depends(get_db)
+    project_id: str, project: ProjectUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)
 ):
-    db_project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+    db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -168,8 +194,8 @@ def update_project(
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(project_id: str, db: Session = Depends(get_db)):
-    db_project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+def delete_project(project_id: str, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail="Project not found")
     scans = db.query(ScanDB).filter(ScanDB.project_id == project_id).all()

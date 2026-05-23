@@ -85,7 +85,7 @@ const UnifiedReportPage = () => {
             <div className="w-28 h-10 bg-slate-200 rounded-lg animate-pulse" />
           </div>
         </div>
-        <div className="grid grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {[...Array(5)].map((_, i) => (
             <div key={i} className="bg-white rounded-xl border border-slate-200 p-4">
               <div className="w-16 h-8 bg-slate-200 rounded animate-pulse" />
@@ -93,7 +93,7 @@ const UnifiedReportPage = () => {
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-slate-200 p-6 h-64 animate-pulse" />
           <div className="bg-white rounded-xl border border-slate-200 p-6 h-64 animate-pulse" />
         </div>
@@ -247,7 +247,7 @@ const UnifiedReportPage = () => {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="text-3xl font-bold text-red-600">{report.severity.critical}</div>
           <div className="text-sm text-slate-500">Critical</div>
@@ -292,7 +292,7 @@ const UnifiedReportPage = () => {
        )}
 
        {/* Charts */}
-      <div className="grid grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
         <div id="Severity Distribution" className="bg-white rounded-xl border border-slate-200 p-6">
           <SeverityPieChart
             critical={report.severity.critical}
@@ -325,7 +325,7 @@ const UnifiedReportPage = () => {
           {compliance.compliance.owasp_top_10 && compliance.compliance.owasp_top_10.length > 0 && (
             <div className="mb-6">
               <h4 className="text-md font-medium text-slate-700 mb-3">OWASP Top 10 2021</h4>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {compliance.compliance.owasp_top_10.map((item) => (
                   <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                     <div>

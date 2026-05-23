@@ -86,8 +86,14 @@ class ProjectGroupingService:
         if fnmatch.fnmatch(name, pattern):
             return 100
 
-        # Try regex pattern matching
+        # Try regex pattern matching with timeout protection
         try:
+            # ReDoS prevention: limit pattern complexity
+            if len(pattern) > 200:
+                raise re.error("Pattern too complex")
+            # Check for nested quantifiers that could cause ReDoS
+            if re.search(r'(\([^)]*\))*\*|\(.*\)\*', pattern):
+                raise re.error("Potentially unsafe pattern")
             if re.search(pattern, name, re.IGNORECASE):
                 # Calculate similarity ratio for regex matches too
                 ratio = SequenceMatcher(None, pattern.lower(), name.lower()).ratio()

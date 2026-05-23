@@ -8,6 +8,16 @@
 
 **Input**: User description: "Deep code audit and bug analysis of the entire project - authentication, login, session handling, API calls, form submission, redirects, error handling, state updates, and async behavior"
 
+## Clarifications
+
+### Session 2026-05-22
+
+- Q: Should API-key-authenticated requests see all data (service account pattern) or be scoped to a user? → A: API keys see all data (service account pattern). They are used by Jenkins and automation scripts that need cross-user access.
+- Q: What accessibility standard should modals meet? → A: WCAG 2.1 AA (focus trap, Escape key, aria-modal, aria-labelledby).
+- Q: When WebSocket reconnect fails after all retry attempts, what should the UI do? → A: Fall back to polling silently; show subtle "connection lost" indicator; clear indicator when polling succeeds.
+- Q: What happens when X-Scan-Timeout exceeds the cap? → A: Silently clamp to cap AND return the actual timeout in the response header (e.g., `X-Scan-Timeout-Actual`).
+- Q: When a valid JWT points to a deleted user, what should the UX be? → A: Redirect to login with specific error message ("Account no longer exists") via `?reason=account-deleted` query param.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Authentication Flow Integrity (Priority: P1)
@@ -95,9 +105,9 @@ As a security auditor, I need all permission checks, token handling, callback va
 
 - What happens when the JWT expires mid-session (during a long scan)?
 - What happens when two browser tabs share the same sessionStorage?
-- What happens when the backend is unreachable during a WebSocket reconnect?
+- What happens when the backend is unreachable during a WebSocket reconnect? → Fall back to polling silently; show subtle "connection lost" indicator; clear when polling succeeds.
 - What happens when a scan completes but the callback payload is malformed?
-- What happens when the user's token is valid but the user no longer exists in the database?
+- What happens when the user's token is valid but the user no longer exists in the database? → Redirect to login with `?reason=account-deleted` showing "Account no longer exists" message.
 - What happens when `useMemo` triggers a state update during render?
 - What happens when the API key is embedded in the frontend bundle and extracted by an attacker?
 
@@ -119,12 +129,16 @@ As a security auditor, I need all permission checks, token handling, callback va
 - **FR-012**: System MUST use `useEffect` (not `useMemo`) for side effects in React components
 - **FR-013**: System MUST handle React Query errors globally with an error boundary
 - **FR-014**: Tests MUST match actual component implementations (selectors, labels, placeholders)
+- **FR-015**: System MUST isolate data by user — JWT-authenticated users see only their own projects, scans, and reports. API-key-authenticated requests see all data (service account pattern).
+- **FR-016**: All modals MUST meet WCAG 2.1 AA: focus trap (Tab/Shift+Tab cycles within modal), Escape key closes modal, `role="dialog"`, `aria-modal="true"`, `aria-labelledby` pointing to title.
+- **FR-017**: Scan timeout override MUST be capped at `max(SCAN_TIMEOUT * 3, 7200)` seconds. When clamped, the actual timeout MUST be returned in the `X-Scan-Timeout-Actual` response header.
+- **FR-018**: When a valid JWT references a deleted user, the system MUST return 401 and the frontend MUST redirect to login with `?reason=account-deleted` showing a specific "Account no longer exists" message.
 
 ### Key Entities
 
 - **User**: Represents an authenticated identity. Has username, hashed password, unique ID. Created on registration.
 - **JWT Token**: Signed credential containing username claim and expiry. Stored in sessionStorage. Valid for 7 days.
-- **API Key**: Static secret used for service-to-service auth. Compared against `settings.API_KEY`.
+- **API Key**: Static secret used for service-to-service auth. Compared against `settings.API_KEY`. Requests authenticated via API key bypass user-level data isolation and see all data (service account pattern).
 - **Scan**: Represents a security scan job. Tied to a project. Has state machine (QUEUED → RUNNING → COMPLETED/FAILED/CANCELLED).
 - **Callback Token**: Shared secret for Jenkins-to-backend callback authentication.
 
@@ -140,6 +154,7 @@ As a security auditor, I need all permission checks, token handling, callback va
 - **SC-006**: All async operations have explicit error handling (no unhandled promise rejections)
 - **SC-007**: Database-level constraint prevents duplicate active scans per project
 - **SC-008**: Secrets are not embedded in client-side bundles
+- **SC-009**: WebSocket connection failures degrade to polling with visible indicator; scan data continues updating
 
 ## Assumptions
 

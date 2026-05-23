@@ -20,6 +20,7 @@ class ProjectDB(Base):
     sonar_key = Column(String, nullable=True)
     target_ip = Column(String, nullable=True)
     target_url = Column(String, nullable=True)
+    user_id = Column(String, nullable=True)  # FK to users.id; nullable for migration backfill
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 

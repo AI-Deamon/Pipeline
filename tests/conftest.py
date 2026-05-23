@@ -19,6 +19,7 @@ os.environ.setdefault('API_KEY', 'test-api-key-1234567890')
 os.environ.setdefault('DEBUG', 'False')
 os.environ.setdefault('MOCK_EXECUTION', 'True')
 os.environ.setdefault('SONARQUBE_TOKEN', 'test-sonar-token-1234567890')
+os.environ.setdefault('TEST_BYPASS_AUTH', 'True')  # Enable test env auth bypass for existing tests
 
 # Import after env setup but before tests run
 from app.core.db import engine, Base

@@ -10,6 +10,7 @@ import { ScanProgressBar } from '../components/ScanProgressBar';
 import { ErrorSuggestions } from '../components/ErrorSuggestions';
 import { PageSkeleton } from '../components/PageSkeleton';
 import { useToast } from '../components/Toast';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { notificationService } from '../services/notifications';
 
 const ScanStatusPage = () => {
@@ -21,6 +22,7 @@ const ScanStatusPage = () => {
   const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showForceStopConfirm, setShowForceStopConfirm] = useState(false);
 
   const projectIdFromState = (location.state as any)?.projectId;
 
@@ -165,11 +167,7 @@ const ScanStatusPage = () => {
               {cancelMutation.isPending ? "Cancelling..." : "Cancel Scan"}
             </button>
             <button
-              onClick={() => {
-                if (confirm('Force stop this scan? This will mark it as failed and allow a new scan to start.')) {
-                  forceUnlockMutation.mutate(scanId!);
-                }
-              }}
+              onClick={() => setShowForceStopConfirm(true)}
               disabled={forceUnlockMutation.isPending}
               className="px-4 py-2 border border-amber-200 text-amber-700 hover:bg-amber-50 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-2"
             >
@@ -356,6 +354,20 @@ const ScanStatusPage = () => {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={showForceStopConfirm}
+        onClose={() => setShowForceStopConfirm(false)}
+        onConfirm={() => {
+          forceUnlockMutation.mutate(scanId!);
+          setShowForceStopConfirm(false);
+        }}
+        title="Force Stop Scan"
+        message="Force stop this scan? This will mark it as failed and allow a new scan to start."
+        confirmLabel="Force Stop"
+        variant="warning"
+        icon={<RefreshCw />}
+      />
     </div>
   );
 };

@@ -24,7 +24,8 @@ export function useScanReset() {
     },
     onSuccess: (data) => {
       // Invalidate relevant queries to refresh UI
-      queryClient.invalidateQueries({ queryKey: ['scans', data.scan_id] });
+      queryClient.invalidateQueries({ queryKey: ['scan', data.scan_id] });
+      queryClient.invalidateQueries({ queryKey: ['scan-history', data.project_id] });
       queryClient.invalidateQueries({ queryKey: ['projects', data.project_id] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
@@ -55,7 +56,8 @@ export function useScanCancel() {
     },
     onSuccess: (data) => {
       // Invalidate relevant queries to refresh UI
-      queryClient.invalidateQueries({ queryKey: ['scans', data.scan_id] });
+      queryClient.invalidateQueries({ queryKey: ['scan', data.scan_id] });
+      queryClient.invalidateQueries({ queryKey: ['scan-history'] });
       queryClient.invalidateQueries({ queryKey: ['projects'] });
     },
   });

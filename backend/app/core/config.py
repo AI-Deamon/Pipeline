@@ -14,8 +14,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     DEBUG: bool = False
     MOCK_EXECUTION: bool = False
+    TEST_BYPASS_AUTH: bool = False  # Enable auth bypass in test env (must be explicit)
     CALLBACK_TOKEN: str
     API_KEY: str
+    JWT_SECRET_KEY: str = ""  # Separate secret for JWT signing; falls back to API_KEY
     REDIS_URL: str = "redis://localhost:6379/0"
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:4173"]
     SONARQUBE_URL: str = "localhost:9000"

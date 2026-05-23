@@ -99,7 +99,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
   return (
     <ToastContext.Provider value={{ addToast }}>
       {children}
-      <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end pointer-events-none">
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col items-end pointer-events-none" aria-live="polite" aria-atomic="true">
         <div className="pointer-events-auto">
           {toasts.map((toast) => (
             <Toast key={toast.id} toast={toast} onDismiss={dismissToast} />

@@ -10,6 +10,7 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
+    Response,
     status,
 )
 from sqlalchemy.exc import IntegrityError
@@ -85,6 +86,7 @@ def list_scans(request: Request, db: Session = Depends(get_db)):
 @limiter.limit("1000/minute" if settings.ENV == "test" else "10/minute")
 def trigger_scan(
     request: Request,
+    response: Response,
     scan: ScanCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -96,7 +98,10 @@ def trigger_scan(
         raise HTTPException(status_code=400, detail=str(e))
 
     project = (
-        db.query(ProjectDB).filter(ProjectDB.project_id == scan.project_id).first()
+        db.query(ProjectDB)
+        .filter(ProjectDB.project_id == scan.project_id)
+        .with_for_update()
+        .first()
     )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -117,9 +122,15 @@ def trigger_scan(
         try:
             override_timeout = int(x_scan_timeout)
             if override_timeout > 0:
-                scan_timeout = override_timeout
+                max_timeout = max(settings.SCAN_TIMEOUT * 3, 7200)
+                actual_timeout = min(override_timeout, max_timeout)
+                scan_timeout = actual_timeout
+                if override_timeout > max_timeout:
+                    logger.info(
+                        f"Scan timeout clamped from {override_timeout}s to {max_timeout}s (max allowed)"
+                    )
                 logger.info(
-                    f"Scan timeout overridden via header: {scan_timeout} seconds ({scan_timeout / 60:.1f} minutes)"
+                    f"Scan timeout set via header: {scan_timeout} seconds ({scan_timeout / 60:.1f} minutes)"
                 )
             else:
                 logger.warning(
@@ -196,6 +207,9 @@ def trigger_scan(
         selected_stages=scan_obj.selected_stages,
         project_data=project_data,
     )
+
+    # T066: Return actual timeout in response header
+    response.headers["X-Scan-Timeout-Actual"] = str(scan_timeout)
 
     return _scan_to_response(scan_obj)
 

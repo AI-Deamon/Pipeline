@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -93,7 +93,7 @@ const ProjectReportsPage = () => {
   });
 
   // Initialize selected scan
-  useMemo(() => {
+  useEffect(() => {
     if (!selectedScanId && completedScans.length > 0) {
       const target = initialScanId && completedScans.some((s: Scan) => s.scan_id === initialScanId)
         ? initialScanId

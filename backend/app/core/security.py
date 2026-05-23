@@ -1,4 +1,5 @@
 import os
+import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from jose import JWTError, jwt
@@ -6,9 +7,17 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Since it's local DEV and we don't have a SECRET_KEY in settings, let's use API_KEY as a secret
-# In a real production setup, we'd add SECRET_KEY to .env and settings.
-SECRET_KEY = settings.API_KEY
+# Use separate JWT secret; fall back to API_KEY with warning if not configured
+if settings.JWT_SECRET_KEY:
+    SECRET_KEY = settings.JWT_SECRET_KEY
+else:
+    SECRET_KEY = settings.API_KEY
+    warnings.warn(
+        "JWT_SECRET_KEY not configured — falling back to API_KEY as JWT signing secret. "
+        "Set JWT_SECRET_KEY to limit blast radius if API_KEY is compromised.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days for convenience
 

@@ -75,21 +75,37 @@ def validate_configuration():
 
     # Create default admin user if not exists
     from app.core.db import get_db
-    from app.models.db_models import UserDB
+    from app.models.db_models import UserDB, ProjectDB
     from app.core.security import get_password_hash
     import uuid
 
     db = next(get_db())
     admin_exists = db.query(UserDB).filter(UserDB.username == "admin").first()
     if not admin_exists:
+        admin_password = os.environ.get("ADMIN_PASSWORD")
+        if not admin_password:
+            import secrets
+            admin_password = secrets.token_urlsafe(16)
+            print(f"Generated random admin password: {admin_password}")
+            print("Set ADMIN_PASSWORD env var for a known password")
         admin_user = UserDB(
             id=str(uuid.uuid4()),
             username="admin",
-            hashed_password=get_password_hash("admin123"),
+            hashed_password=get_password_hash(admin_password),
         )
         db.add(admin_user)
         db.commit()
         print("Created default admin user")
+
+    # Backfill existing projects with admin user_id (data isolation migration)
+    admin_user = db.query(UserDB).filter(UserDB.username == "admin").first()
+    if admin_user:
+        projects_without_user = db.query(ProjectDB).filter(ProjectDB.user_id == None).all()
+        if projects_without_user:
+            for project in projects_without_user:
+                project.user_id = admin_user.id
+            db.commit()
+            print(f"Backfilled {len(projects_without_user)} projects with admin user_id")
 
     # Start scan recovery background task (Phase 1.3)
     threading.Thread(target=run_recovery_task, daemon=True).start()

@@ -2,8 +2,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { api } from '../services/api';
 import type { ProjectGroup, ProjectGroupDetail } from '../types';
 import { Plus, Folder, Trash2, RefreshCw, Sparkles } from 'lucide-react';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { useToast } from '../components/Toast';
 
 const ProjectGroupsPage = () => {
+  const { addToast } = useToast();
   const [groups, setGroups] = useState<ProjectGroup[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<ProjectGroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -14,6 +17,7 @@ const ProjectGroupsPage = () => {
   const [newGroupPattern, setNewGroupPattern] = useState('');
   const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const loadGroups = useCallback(async () => {
     setLoading(true);
@@ -67,16 +71,23 @@ const ProjectGroupsPage = () => {
   };
 
   const handleDeleteGroup = async (groupId: string) => {
-    if (!confirm('Are you sure you want to delete this project group?')) return;
+    setDeleteConfirm(groupId);
+  };
 
+  const confirmDeleteGroup = async () => {
+    if (!deleteConfirm) return;
     try {
-      await api.projectGroups.delete(groupId);
-      setGroups(groups.filter(g => g.group_id !== groupId));
-      if (selectedGroup?.group_id === groupId) {
+      await api.projectGroups.delete(deleteConfirm);
+      setGroups(groups.filter(g => g.group_id !== deleteConfirm));
+      if (selectedGroup?.group_id === deleteConfirm) {
         setSelectedGroup(null);
       }
+      addToast({ type: 'success', title: 'Success', message: 'Project group deleted' });
     } catch (error) {
       console.error('Failed to delete group:', error);
+      addToast({ type: 'error', title: 'Error', message: 'Failed to delete project group' });
+    } finally {
+      setDeleteConfirm(null);
     }
   };
 
@@ -96,7 +107,7 @@ const ProjectGroupsPage = () => {
       if (selectedGroup?.group_id === groupId) {
         handleViewGroup(groupId);
       }
-      alert(`Auto-assigned ${result.assigned_count} scans`);
+      addToast({ type: 'success', title: 'Auto-Assigned', message: `Auto-assigned ${result.assigned_count} scans` });
     } catch (error) {
       console.error('Failed to auto-assign scans:', error);
     } finally {
@@ -111,7 +122,7 @@ const ProjectGroupsPage = () => {
       if (selectedGroup?.group_id === groupId) {
         handleViewGroup(groupId);
       }
-      alert(`Refreshed: ${result.total_findings} total findings, ${result.auto_assigned} new scans assigned`);
+      addToast({ type: 'success', title: 'Refreshed', message: `Refreshed: ${result.total_findings} total findings, ${result.auto_assigned} new scans assigned` });
     } catch (error) {
       console.error('Failed to refresh group:', error);
     } finally {
@@ -128,6 +139,7 @@ const ProjectGroupsPage = () => {
   }
 
   return (
+    <>
     <div className="max-w-6xl mx-auto p-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Project Groups</h1>
@@ -401,6 +413,18 @@ const ProjectGroupsPage = () => {
         </div>
       </div>
     </div>
+
+    <ConfirmModal
+      isOpen={!!deleteConfirm}
+      onClose={() => setDeleteConfirm(null)}
+      onConfirm={confirmDeleteGroup}
+      title="Delete Project Group"
+      message="Are you sure you want to delete this project group? This action cannot be undone."
+      confirmLabel="Delete"
+      variant="danger"
+      icon={<Trash2 />}
+    />
+    </>
   );
 };
 

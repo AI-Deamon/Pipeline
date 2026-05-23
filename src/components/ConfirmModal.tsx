@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -25,6 +26,8 @@ export function ConfirmModal({
   icon,
   isPending = false,
 }: ConfirmModalProps) {
+  const { ref: focusTrapRef } = useFocusTrap({ onClose });
+
   if (!isOpen) return null;
 
   const variantStyles = {
@@ -54,7 +57,7 @@ export function ConfirmModal({
   const style = variantStyles[variant];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title" ref={focusTrapRef}>
       <div
         className="absolute inset-0 bg-slate-900/80 backdrop-blur-md animate-in fade-in duration-500"
         onClick={onClose}
@@ -73,7 +76,7 @@ export function ConfirmModal({
           {icon && <div className="w-12 h-12 fill-current relative z-10">{icon}</div>}
         </div>
 
-        <h2 className="text-4xl font-black text-slate-900 tracking-tighter leading-none mb-6 uppercase" dangerouslySetInnerHTML={{ __html: title }} />
+        <h2 id="confirm-modal-title" className="text-4xl font-black text-slate-900 tracking-tighter leading-none mb-6 uppercase">{title}</h2>
         <p className="text-slate-500 font-medium leading-relaxed mb-12 italic px-4">{message}</p>
 
         <div className="flex flex-col w-full gap-4">

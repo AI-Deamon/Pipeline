@@ -1,10 +1,12 @@
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.core.db import get_db
+from app.core.auth import get_current_user
+from app.core.config import settings
 from app.models.db_models import ScanReportDB, ProjectDB, ScanDB
 from app.services.reporting.reporter import UnifiedReportGenerator
 from app.services.reporting.parsers.base import SecurityFinding
@@ -62,16 +64,38 @@ class ReportDetail(BaseModel):
     created_at: str
 
 
+def _is_api_key_auth(request: Request) -> bool:
+    """Check if request is authenticated via API key (service account pattern)."""
+    api_key = request.headers.get("X-API-Key")
+    return bool(api_key and api_key == settings.API_KEY)
+
+
+def _verify_project_ownership(db: Session, project_id: str, request: Request, current_user) -> ProjectDB:
+    """Verify the project belongs to the current user. API-key auth bypasses this check."""
+    if _is_api_key_auth(request):
+        project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return project
+    project = db.query(ProjectDB).filter(
+        ProjectDB.project_id == project_id,
+        ProjectDB.user_id == (current_user.id if hasattr(current_user, 'id') else None)
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
 @router.get("/projects/{project_id}/reports", response_model=List[ReportDetail])
 def get_project_reports(
     project_id: str,
+    request: Request,
     scan_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """Get reports for a project, optionally filtered by scan_id"""
-    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    _verify_project_ownership(db, project_id, request, current_user)
 
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
     if scan_id:
@@ -95,13 +119,13 @@ def get_project_reports(
 @router.get("/projects/{project_id}/reports/summary", response_model=ReportSummary)
 def get_reports_summary(
     project_id: str,
+    request: Request,
     scan_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """Get combined severity counts across all tools, optionally filtered by scan_id"""
-    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    _verify_project_ownership(db, project_id, request, current_user)
 
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
     if scan_id:

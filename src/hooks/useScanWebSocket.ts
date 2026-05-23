@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 export interface WebSocketMessage {
   event: string;
@@ -34,7 +34,13 @@ export interface UseWebSocketOptions {
 }
 
 /**
- * Hook for connecting to WebSocket for real-time scan updates
+ * Hook for connecting to WebSocket for real-time scan updates.
+ *
+ * Fixes applied:
+ * - T030: isManualClose reset in connect()
+ * - T032: connected state is reactive (useState)
+ * - T033: Polling fallback after reconnect exhaustion
+ * - T034: Connection timeout (fail fast if unreachable)
  */
 export function useScanWebSocket(
   scanId?: string,
@@ -55,6 +61,13 @@ export function useScanWebSocket(
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isManualClose = useRef(false);
   const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // T032: Reactive connection state
+  const [connected, setConnected] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  // T033: Polling fallback state
+  const [exhausted, setExhausted] = useState(false);
 
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
@@ -68,15 +81,31 @@ export function useScanWebSocket(
   const connect = useCallback(() => {
     if (!scanId && !projectId) return;
 
+    // T030: Reset isManualClose on each connect attempt
+    isManualClose.current = false;
+    setExhausted(false);
+
     // Build WebSocket URL with query parameters
     const wsUrl = new URL('/api/v1/ws/scans', window.location.origin);
     if (scanId) wsUrl.searchParams.set('scan_id', scanId);
     if (projectId) wsUrl.searchParams.set('project_id', projectId);
 
     const ws = new WebSocket(wsUrl.toString());
+    setConnecting(true);
+
+    // T034: Connection timeout — fail fast if unreachable
+    if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    connectTimeoutRef.current = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    }, 10000); // 10 second timeout
 
     ws.onopen = () => {
+      if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
       console.log('WebSocket connected');
+      setConnected(true);
+      setConnecting(false);
       onOpenRef.current?.();
 
       // Reset reconnect count only after 30s of stable connection
@@ -103,14 +132,21 @@ export function useScanWebSocket(
     };
 
     ws.onclose = () => {
+      if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+      setConnected(false);
+      setConnecting(false);
       console.log('WebSocket closed');
       onCloseRef.current?.();
 
-      // Auto-reconnect if not manually closed
+      // T033: Auto-reconnect with polling fallback
       if (!isManualClose.current && reconnectCountRef.current < maxReconnectAttempts) {
         reconnectCountRef.current += 1;
         console.log(`Reconnecting in ${reconnectInterval}ms (attempt ${reconnectCountRef.current}/${maxReconnectAttempts})`);
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
+      } else if (!isManualClose.current) {
+        // Exhausted all reconnect attempts — signal polling fallback
+        console.warn('WebSocket reconnect exhausted — falling back to polling');
+        setExhausted(true);
       }
     };
 
@@ -131,6 +167,9 @@ export function useScanWebSocket(
       }
       if (stableTimerRef.current) {
         clearTimeout(stableTimerRef.current);
+      }
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
       }
       if (wsRef.current) {
         wsRef.current.close();
@@ -160,8 +199,9 @@ export function useScanWebSocket(
   }, []);
 
   return {
-    connected: wsRef.current?.readyState === WebSocket.OPEN,
-    connecting: wsRef.current?.readyState === WebSocket.CONNECTING,
+    connected,
+    connecting,
+    exhausted, // T033: Signal for polling fallback
     disconnect,
   };
 }
