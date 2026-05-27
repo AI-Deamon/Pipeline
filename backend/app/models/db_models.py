@@ -45,6 +45,8 @@ class ScanDB(Base):
     error_type = Column(String, nullable=True)  # e.g., "PIPELINE_ERROR", "SECURITY_ISSUE"
     jenkins_console_url = Column(String, nullable=True)  # Direct link to Jenkins logs
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retries
+    git_commit = Column(String, nullable=True)  # Git commit SHA from build
+    git_branch = Column(String, nullable=True)  # Git branch from build
 
     # Index for faster active scan lookups
     __table_args__ = (

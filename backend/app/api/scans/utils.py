@@ -217,4 +217,6 @@ def _scan_to_response(scan_obj) -> dict:
         "results": scan_obj.stage_results,
         "error": error,
         "retry_count": scan_obj.retry_count or 0,
+        "git_commit": scan_obj.git_commit,
+        "git_branch": scan_obj.git_branch,
     }

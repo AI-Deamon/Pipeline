@@ -108,6 +108,14 @@ def scan_callback(
     if queue_id is not None:
         scan_obj.jenkins_queue_id = str(queue_id)
 
+    # Store git metadata for auditability
+    git_commit = report.get("GIT_COMMIT")
+    git_branch = report.get("GIT_BRANCH")
+    if git_commit:
+        scan_obj.git_commit = git_commit
+    if git_branch:
+        scan_obj.git_branch = git_branch
+
     if project_obj:
         project_obj.last_scan_state = scan_obj.state.value
 

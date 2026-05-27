@@ -111,14 +111,20 @@ pipeline {
 
     environment {
         // Configurable URLs — override via Jenkins global env vars or job params
-        BACKEND_URL = "${env.BACKEND_URL ?: 'http://localhost:8000'}"
-        JENKINS_URL = "${env.JENKINS_BASE_URL ?: 'http://localhost:8080'}"
-        CALLBACK_URL = "${BACKEND_URL}/api/v1/scans/${params.SCAN_ID}/callback"
-        REPORT_DIR = "reports"
+        BACKEND_URL    = "${env.BACKEND_URL ?: 'http://localhost:8000'}"
+        JENKINS_URL    = "${env.JENKINS_BASE_URL ?: 'http://localhost:8080'}"
+        CALLBACK_URL   = "${BACKEND_URL}/api/v1/scans/${params.SCAN_ID}/callback"
+        REPORT_DIR     = "reports"
+
         // Tool paths — override via Jenkins tools or env vars
-        TRIVY_PATH = "${env.TRIVY_PATH ?: 'trivy'}"
-        JAVA_HOME_DIR = "${env.JAVA_HOME_DIR ?: ''}"
-        ZAP_PORT = "${env.ZAP_PORT ?: '8090'}"
+        TRIVY_PATH     = "${env.TRIVY_PATH ?: 'trivy'}"
+        // Prefer JDK 17 for SonarQube stability (Java 21 triggers SIGSEGV on large TS repos).
+        // Set JAVA_HOME_17 in Jenkins global env to /usr/lib/jvm/java-17-openjdk-amd64
+        JAVA_HOME_DIR  = "${env.JAVA_HOME_17 ?: env.JAVA_HOME_DIR ?: ''}"
+        ZAP_PORT       = "${env.ZAP_PORT ?: '8090'}"
+
+        // npm cache — dramatically speeds up repeated npm ci calls across builds
+        npm_config_cache = "${env.WORKSPACE}/.npm-cache"
 
         // Registry config — set DOCKER_REGISTRY for private registries (e.g. ghcr.io, ecr)
         DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: ''}"
@@ -128,9 +134,9 @@ pipeline {
         // Dynamic timeout based on scan complexity (default 2 hours)
         timeout(time: params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() : 7200, unit: 'SECONDS')
         disableConcurrentBuilds()
-        skipStagesAfterUnstable()
+        // NOTE: skipStagesAfterUnstable intentionally omitted — we want all
+        //       security scan stages to run even if an earlier one goes UNSTABLE
         retry(1)
-        // Keep build logs for debugging
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
@@ -138,60 +144,20 @@ pipeline {
         stage('Init Context') {
             steps {
                 script {
-                    // Debug logging
-                    echo "=== Init Context Started ==="
-                    echo "SCAN_ID received: ${params.SCAN_ID}"
-                    echo "SCAN_MODE received: ${params.SCAN_MODE}"
-                    
-                    // Validate SCAN_ID
-                    if (!params.SCAN_ID?.trim()) {
-                        error("SCAN_ID is mandatory. Backend handshake failed.")
-                    }
-                    
-                    if (params.SCAN_ID =~ /\s/) {
-                        error("SCAN_ID must not contain spaces. Use UUID format.")
-                    }
-                    
-                    echo "SCAN_ID validation passed"
-                    
-                    // Unescape HTML entities in parameters
-                    def projectData = params.PROJECT_DATA.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
-                    def selectedStages = params.SELECTED_STAGES.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
-                    
-                    echo "Unescaped PROJECT_DATA: ${projectData}"
-                    echo "Unescaped SELECTED_STAGES: ${selectedStages}"
-                    
-                    // Parse JSON using readJSON (sandbox-safe)
-                    def projectMap = readJSON text: projectData
-                    PROJECT = new HashMap(projectMap)
-
-                    def selectedList = readJSON text: selectedStages
-                    SELECTED = new ArrayList(selectedList)
-
-                    IS_MANUAL = params.SCAN_MODE == "MANUAL"
-                    sh "mkdir -p reports"
-
-                    // Validate branch name (prevent injection)
-                    def branchName = PROJECT.branch ?: 'main'
-                    if (!(branchName ==~ /^[a-zA-Z0-9._\/-]+$/)) {
-                        error("Invalid branch name: ${branchName}")
-                    }
-
-                    // Validate Git URL (optional whitelist — set SKIP_GIT_WHITELIST=true to allow any)
-                    def gitUrl = PROJECT.git_url
-                    if (gitUrl && !env.SKIP_GIT_WHITELIST) {
-                        def allowedPrefixes = (env.GIT_ALLOWED_PREFIXES ?: 'https://github.com/,https://gitlab.com/,https://bitbucket.org/,https://gitlab.,https://gitea.,https://dev.azure.com/,https://codecommit.')
-                            .split(',').collect { it.trim() }
-                        def allowed = allowedPrefixes.any { prefix -> gitUrl.startsWith(prefix) }
-                        if (!allowed) {
-                            error("Git URL not in allowed prefixes: ${gitUrl}. Set SKIP_GIT_WHITELIST=true or configure GIT_ALLOWED_PREFIXES")
-                        }
-                    }
-
-                    echo "Parsed PROJECT: ${PROJECT}"
-                    echo "Parsed SELECTED: ${SELECTED}"
-                    echo "IS_MANUAL: ${IS_MANUAL}"
-                    echo "=== Init Context Completed ==="
+                    doInitContextSafe()
+                }
+            }
+        }
+        
+        // Clean up Docker resources to prevent disk-full from previous runs
+        stage('Docker Cleanup') {
+            steps {
+                script {
+                    sh '''
+                        echo "Cleaning up Docker resources to prevent disk exhaustion..."
+                        docker system prune -af --volumes 2>/dev/null || true
+                        echo "Docker cleanup completed."
+                    '''
                 }
             }
         }
@@ -199,235 +165,57 @@ pipeline {
         stage('Git Checkout') {
             steps {
                 script {
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: PROJECT.branch ?: 'main']],
-                        userRemoteConfigs: [[
-                            url: PROJECT.git_url,
-                            credentialsId: PROJECT.credentials_id ?: params.CRED_GITHUB
-                        ]]
-                    ])
-                    recordStage('git_checkout', 'PASS', 'Git checkout successful')
+                    doGitCheckout()
                 }
             }
         }
 
-        stage('Sonar Scanner') {
-            when { expression { shouldRun('sonar_scanner') } }
-            steps {
-                // Per-stage timeout: 15 minutes for Sonar analysis
-                timeout(time: 15, unit: 'MINUTES') {
-                    script {
-                        // Get the SonarQube Scanner tool path
-                        def scannerHome = tool 'sonar-scanner'
-
-                        try {
-                            // Use Jenkins SonarQube server configuration
-                            def projectName = PROJECT.project_name ?: params.SCAN_ID
-                            withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                                withSonarQubeEnv('sonar-server') {
-                                    withEnv(["SONAR_SCANNER_OPTS=-XX:TieredStopAtLevel=3"]) {
-                                        sh """
-                                            mkdir -p reports
-                                            ${scannerHome}/bin/sonar-scanner \
-                                              -Dsonar.projectKey="${PROJECT.sonar_key ?: params.SCAN_ID}" \
-                                              -Dsonar.projectName="${projectName}" \
-                                              -Dsonar.sourceEncoding=UTF-8 \
-                                              -Dsonar.typescript.tsconfigPath=tsconfig.json \
-                                              -Dsonar.token=\$SONAR_TOKEN \
-                                              -Dsonar.exclusions=node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js \
-                                              2>&1 | tee reports/sonar-scanner-output.log
-                                        """
-                                    }
-                                }
+        // Run Sonar Scanner and Install Dependencies in parallel after Git Checkout
+        // Sonar doesn't need dependencies; others do
+        stage('Parallel Scan & Deps') {
+            parallel {
+                stage('Sonar Scanner') {
+                    when { expression { shouldRun('sonar_scanner') } }
+                    steps {
+                        // Per-stage timeout: 20 minutes (large TS repos need more)
+                        timeout(time: 20, unit: 'MINUTES') {
+                            script {
+                                doSonarScanner()
                             }
-
-                            // Generate Sonar scan report for artifacts
-                            def timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                            writeFile file: 'reports/sonar-scanner-report.json',
-                                text: groovy.json.JsonOutput.toJson([
-                                    projectKey: PROJECT.sonar_key ?: params.SCAN_ID,
-                                    projectName: projectName,
-                                    status: 'completed',
-                                    timestamp: timestamp
-                                ])
-
-                            recordStage('sonar_scanner', 'PASS', 'Sonar scan completed')
-                        } catch (Exception e) {
-                            // Read the captured scanner output for error details
-                            def sonarLog = ""
-                            try { sonarLog = readFile('reports/sonar-scanner-output.log') } catch (_) {}
-                            def errorLines = sonarLog.split('\n').findAll {
-                                it.contains('ERROR') || it.contains('SyntaxError') || it.contains('FAILURE') || it.contains('error TS')
-                            }
-                            def errorDetail = errorLines ? errorLines.take(8).join(' | ') : "${e.message}".take(300)
-                            def trimmed = errorDetail.length() > 500 ? errorDetail.take(500) + '...' : errorDetail
-
-                            // Generate failure report
-                            def timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                            writeFile file: 'reports/sonar-scanner-report.json',
-                                text: groovy.json.JsonOutput.toJson([
-                                    projectKey: PROJECT.sonar_key ?: params.SCAN_ID,
-                                    status: 'failed',
-                                    error: trimmed,
-                                    timestamp: timestamp
-                                ])
-                            echo "⚠️  SonarQube failed: ${trimmed}"
-                            echo "   Continuing pipeline with other security scans..."
-                            recordStage('sonar_scanner', 'WARN', "SonarQube failed: ${trimmed}")
+                        }
+                    }
+                }
+                
+                stage('Install Dependencies') {
+                    when { expression { shouldRun('install_dependencies') || !IS_MANUAL } }
+                    steps {
+                        script {
+                            doInstallDependencies()
                         }
                     }
                 }
             }
         }
-
-        stage('Dependency Check') {
-            when { expression { shouldRun('dependency_check') } }
-            steps {
-                script {
-                    // Ensure report directory exists before running dependency check
-                    sh "mkdir -p reports"
-
-                    // Install npm dependencies so ODC can find Node.js vulnerabilities
-                    def installDirs = sh(
-                        script: "find . -name 'package.json' ! -path '*/node_modules/*' -exec dirname {} \\; | sort -u",
-                        returnStdout: true
-                    ).trim().split('\n').findAll { it }
-                    def npmSucceeded = 0
-                    def npmFailed = 0
-                    installDirs.each { dir ->
-                        def ok = sh(
-                            script: "cd ${dir} && npm install --package-lock-only 2>&1 && echo 'OK' || echo 'FAIL'",
-                            returnStdout: true
-                        ).trim()
-                        if (ok == 'OK') {
-                            npmSucceeded++
-                        } else {
-                            npmFailed++
-                            echo "WARNING: npm install --package-lock-only failed in ${dir}"
+        
+        // Run Dependency Check and Trivy FS Scan in parallel after dependencies are installed
+        stage('Parallel Dep Check & Trivy') {
+            parallel {
+                stage('Dependency Check') {
+                    when { expression { shouldRun('dependency_check') } }
+                    steps {
+                        script {
+                            doDependencyCheck()
                         }
                     }
-
-                    // Check for lock files ANYWHERE in workspace (not just root)
-                    def lockFileCount = sh(
-                        script: "find . -name 'package-lock.json' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
-                        returnStdout: true
-                    ).trim().toInteger()
-                    def yarnLockCount = sh(
-                        script: "find . -name 'yarn.lock' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
-                        returnStdout: true
-                    ).trim().toInteger()
-                    def hasNpmLock = lockFileCount > 0
-                    def hasYarnLock = yarnLockCount > 0
-
-                    // Build OWASP Dependency-Check arguments
-                    def scanArgs = [
-                        "--project ${params.SCAN_ID}",
-                        "--format JSON",
-                        "--format HTML",
-                        "--out reports",
-                        "--enableExperimental",
-                        '--exclude "**/node_modules/**"',
-                        '--exclude "**/.venv/**"',
-                        '--exclude "**/dist/**"',
-                        '--exclude "**/build/**"',
-                        '--exclude "**/reports/**"'
-                    ]
-
-                    // Scan lock files if they exist, else scan source files only
-                    if (hasNpmLock) {
-                        scanArgs << "--scan ./**/package-lock.json"
-                        echo "Found ${lockFileCount} package-lock.json file(s) — scanning npm dependencies"
-                    }
-                    if (hasYarnLock) {
-                        scanArgs << "--scan ./**/yarn.lock"
-                        echo "Found ${yarnLockCount} yarn.lock file(s) — scanning yarn dependencies"
-                    }
-                    if (!hasNpmLock && !hasYarnLock) {
-                        scanArgs << "--scan ."
-                        scanArgs << '--exclude "**/node_modules*/**"'
-                        def reason = npmFailed > 0 && npmSucceeded == 0
-                            ? "npm install --package-lock-only failed in ${npmFailed}/${installDirs.size()} package.json dir(s)"
-                            : installDirs.isEmpty()
-                                ? "no package.json found in workspace"
-                                : "npm install --package-lock-only succeeded but lock files not generated"
-                        echo "WARNING: No lock files found (${reason}). Dependency Check will only scan non-Node.js dependencies (pip, gradle, etc.)"
-                    }
-
-                    // Add custom exclusions from project config if available
-                    if (PROJECT.dependency_exclusions) {
-                        scanArgs << "--exclude ${PROJECT.dependency_exclusions}"
-                    }
-
-                    echo "Running OWASP Dependency-Check (${scanArgs.size()} args, NVD key masked)"
-
-                    def odcJvmCrashed = false
-                    withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
-                        def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
-                        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m -XX:+UseParallelGC -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"]
-                        if (env.JAVA_HOME_DIR) {
-                            javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
-                        }
-                        withEnv(javaEnv) {
-                            catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                                dependencyCheck additionalArguments: argsWithKey.join(' '), odcInstallation: 'OWasp'
-                            }
-                            // If catchError caught a JVM crash, reports are still on disk
-                            if (currentBuild.result == 'UNSTABLE' || currentBuild.result == 'FAILURE') {
-                                odcJvmCrashed = true
-                                echo "WARNING: ODC JVM crashed during database defrag — reports were written before crash"
-                            }
-                        }
-                    }
-                    def depSummary = "Dependency check completed"
-                    if (lockFileCount > 0 || yarnLockCount > 0) {
-                        def parts = []
-                        if (lockFileCount > 0) { parts << "${lockFileCount} npm" }
-                        if (yarnLockCount > 0) { parts << "${yarnLockCount} yarn" }
-                        depSummary = "Dependency check completed (${parts.join(' + ')} lock file(s))"
-                        if (odcJvmCrashed) {
-                            depSummary += " — ODC JVM crashed after report generation"
-                        }
-                    } else {
-                        def reason = installDirs.isEmpty()
-                            ? "no package.json found"
-                            : "npm install --package-lock-only failed"
-                        depSummary = "Dependency check completed — 0 Node.js deps analyzed (${reason})"
-                    }
-                    recordStage('dependency_check', odcJvmCrashed ? 'WARN' : 'PASS', depSummary)
-
-                    // Publish HTML report
-                    publishHTML([
-                        allowMissing: false,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: 'reports',
-                        reportFiles: 'dependency-check-report.html',
-                        reportName: 'OWASP Dependency Check'
-                    ])
                 }
-            }
-        }
-
-        stage('Trivy FS Scan') {
-            when { expression { shouldRun('trivy_fs_scan') } }
-            steps {
-                sh """
-                    if [ ! -d node_modules ]; then
-                        echo "WARNING: node_modules not found — Trivy FS will only analyze source files. Run 'npm install' for broader dependency coverage."
-                    fi
-                    ${TRIVY_PATH} fs --format json \
-                      --skip-files "reports/**" \
-                      -o reports/trivy-fs.json . > reports/trivy-fs-output.log 2>&1 || true
-                """
-                script {
-                    def trivyOutput = ""
-                    try { trivyOutput = readFile('reports/trivy-fs-output.log') } catch (_) {}
-                    def warnLines = trivyOutput.split('\n').findAll {
-                        it.contains('WARNING') || it.contains('WARN') || it.contains('error') || it.contains('Error') || it.contains('FATAL')
+                
+                stage('Trivy FS Scan') {
+                    when { expression { shouldRun('trivy_fs_scan') } }
+                    steps {
+                        script {
+                            doTrivyFsScan()
+                        }
                     }
-                    def detail = warnLines ? ' | Warnings: ' + warnLines.take(5).join(' ;; ') : ''
-                    recordStage('trivy_fs_scan', 'PASS', 'Trivy FS scan completed' + detail)
                 }
             }
         }
@@ -436,98 +224,7 @@ pipeline {
             when { expression { shouldRun('docker_build') } }
             steps {
                 script {
-                    // Find all Dockerfiles in the repository
-                    def dockerfiles = []
-                    def output = sh(
-                        script: "find . -type f \\( -name 'Dockerfile*' -o -name '*.Dockerfile' \\) ! -name '*.md' | sort",
-                        returnStdout: true
-                    ).trim()
-
-                    if (output) {
-                        dockerfiles = output.split('\n').findAll { it.trim() }
-                    }
-
-                    if (dockerfiles.isEmpty()) {
-                        echo "No Dockerfiles found - skipping Docker build"
-                        recordStage('docker_build', 'SKIPPED', 'No Dockerfiles found')
-                        return
-                    }
-
-                    echo "Found ${dockerfiles.size()} Dockerfiles: ${dockerfiles.join(', ')}"
-
-                    // Build each Dockerfile found and store results
-                    def buildResults = []
-                    def failedBuilds = []
-                    def failedDetails = []   // detailed error output per failed build
-                    def allImageTags = []
-
-                    dockerfiles.each { dockerfile ->
-                        def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(100)
-                        def imageTag = "${PROJECT.project_id ?: 'scan'}:${imageName}-${params.SCAN_ID}"
-                        // Build from repo root — Dockerfiles use paths like backend/relative to root
-                        def buildContext = '.'
-
-                        echo "Building ${dockerfile}..."
-
-                        // Capture output regardless of exit code (no try/catch)
-                        def buildOutput = sh(returnStdout: true, script: """
-                            set +e
-                            docker build -t ${imageTag} -f ${dockerfile} ${buildContext} 2>&1
-                            echo "___EXIT___\$?"
-                        """)
-                        def lines = buildOutput.split('\n')
-                        def exitLine = lines.find { it.startsWith('___EXIT___') }
-                        def exitCode = exitLine?.replace('___EXIT___', '')?.trim()
-                        def cleanOutput = lines.findAll { !it.startsWith('___EXIT___') }.join('\n')
-
-                        if (exitCode == '0') {
-                            allImageTags << imageTag
-                            buildResults << dockerfile
-                            echo "SUCCESS: ${dockerfile} built successfully"
-                        } else {
-                            failedBuilds << dockerfile
-                            // Extract relevant error lines from build output
-                            def errorLines = cleanOutput.split('\n').findAll { it.contains('error TS') || it.contains('ERROR:') || it.contains('Error ') }
-                            def detail = errorLines ? errorLines.take(8).join(' | ') : cleanOutput.take(250).replace('\n', ' ')
-                            failedDetails << "${dockerfile}: ${detail}"
-                            echo "FAILED: ${dockerfile}"
-                        }
-                    }
-
-                    // Store all image tags for later stages
-                    env.ALL_IMAGE_TAGS = allImageTags.join(',')
-                    env.DOCKERFILE_COUNT = allImageTags.size().toString()
-
-                    // Record overall stage status
-                    def errorSummary = failedDetails ? ' | Errors: ' + failedDetails.join(' ;; ') : ''
-                    if (failedBuilds.isEmpty()) {
-                        def successList = buildResults.collect { it + " - SUCCESS" }
-                        recordStage('docker_build', 'PASS', 'Built: ' + successList.join(', '))
-                    } else if (buildResults.isEmpty()) {
-                        def errorList = failedBuilds.collect { it + " - FAILED" }
-                        recordStage('docker_build', 'FAIL', 'Failed: ' + errorList.join(', ') + errorSummary)
-                    } else {
-                        def successList = buildResults.collect { it + " - SUCCESS" }
-                        def failedList = failedBuilds.collect { it + " - FAILED" }
-                        recordStage('docker_build', 'WARN', 'Succeeded: ' + successList.join(', ') + ' | Failed: ' + failedList.join(', ') + errorSummary)
-                    }
-
-                    // Generate Docker build report
-                    def reportJson = groovy.json.JsonOutput.toJson([
-                        total: dockerfiles.size(),
-                        successful: buildResults.size(),
-                        failed: failedBuilds.size(),
-                        images: allImageTags.collect { [tag: it, status: "SUCCESS"] },
-                        failures: failedBuilds.collect { [dockerfile: it, status: "FAILED"] },
-                        timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                    ])
-                    writeFile file: "reports/docker-build-report.json", text: reportJson
-
-                    // Continue pipeline even if some builds failed
-                    // Only skip Trivy Image Scan if no images were built
-                    if (allImageTags.isEmpty()) {
-                        echo "No Docker images built successfully - skipping Docker Push and Trivy Image Scan"
-                    }
+                    doDockerBuild()
                 }
             }
         }
@@ -539,69 +236,7 @@ pipeline {
                                                   usernameVariable: 'DOCKER_USER',
                                                   passwordVariable: 'DOCKER_PASS')]) {
                     script {
-                        def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
-
-                        if (allImageTags.isEmpty()) {
-                            echo "No images to push - skipping Docker push"
-                            recordStage('docker_push', 'SKIPPED', 'No images to push')
-                            return
-                        }
-
-                        def pushedImages = []
-                        def failedPushes = []
-
-                        // Determine registry prefix
-                        def dockerRegistry = env.DOCKER_REGISTRY ?: ''
-                        def registryPrefix = dockerRegistry ? "${dockerRegistry}/" : ""
-
-                        // Push each image
-                        allImageTags.each { imageTag ->
-                            def imageName = imageTag.replaceAll('[^a-zA-Z0-9/]', '-').toLowerCase()
-                            def pushTag = "${registryPrefix}${DOCKER_USER}/${imageName}".toString()
-
-                            echo "Pushing ${imageTag} as ${pushTag}"
-
-                            def pushSuccess = false
-                            try {
-                                sh "docker tag ${imageTag} ${pushTag}"
-                                def loginArgs = dockerRegistry ? "-u \"$DOCKER_USER\" --password-stdin ${dockerRegistry}" : "-u \"$DOCKER_USER\" --password-stdin"
-                                sh "echo \"$DOCKER_PASS\" | docker login ${loginArgs}"
-                                sh "docker push ${pushTag} 2>&1"
-                                pushedImages << pushTag
-                                pushSuccess = true
-                                echo "SUCCESS: ${pushTag} pushed"
-                            } catch (Exception e) {
-                                def pushError = e.message.replaceAll('denied:.*', 'denied: access forbidden — check Docker Hub credentials').take(200)
-                                failedPushes << "${pushTag} - FAILED (${pushError})"
-                                echo "FAILED: ${pushTag} — ${pushError}"
-                            }
-                        }
-
-                        // Record overall stage status
-                        if (failedPushes.isEmpty()) {
-                            def successList = pushedImages.collect { it + " - SUCCESS" }
-                            recordStage('docker_push', 'PASS', 'Pushed: ' + successList.join(', '))
-                        } else if (pushedImages.isEmpty()) {
-                            def errorList = failedPushes.collect { it + " - FAILED" }
-                            recordStage('docker_push', 'FAIL', 'Failed: ' + errorList.join(', '))
-                        } else {
-                            def successList = pushedImages.collect { it + " - SUCCESS" }
-                            def failedList = failedPushes.collect { it + " - FAILED" }
-                            recordStage('docker_push', 'WARN', 'Succeeded: ' + successList.join(', ') + ' | Failed: ' + failedList.join(', '))
-                        }
-
-                        // Generate Docker push report
-                        def pushReportJson = groovy.json.JsonOutput.toJson([
-                            total: allImageTags.size(),
-                            successful: pushedImages.size(),
-                            failed: failedPushes.size(),
-                            pushed: pushedImages.collect { [tag: it, status: "SUCCESS"] },
-                            failures: failedPushes.collect { [tag: it, status: "FAILED"] },
-                            timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                        ])
-                        writeFile file: "reports/docker-push-report.json", text: pushReportJson
-
-                        // Continue pipeline even if some pushes failed
+                        doDockerPush()
                     }
                 }
             }
@@ -611,69 +246,7 @@ pipeline {
             when { expression { shouldRun('trivy_image_scan') } }
             steps {
                 script {
-                    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
-                    
-                    if (allImageTags.isEmpty()) {
-                        echo "No images to scan - skipping Trivy image scan"
-                        recordStage('trivy_image_scan', 'SKIPPED', 'No images to scan')
-                        return
-                    }
-
-                    def scannedImages = []
-                    def scanErrors = []
-
-                    // Scan each image
-                    allImageTags.each { imageTag ->
-                        def safeTag = imageTag.toString()
-                        echo "Scanning image: ${safeTag}"
-
-                        // Derive readable filename from image tag
-                        def imageName = imageTag.replaceAll('[^a-zA-Z0-9]', '-').toLowerCase()
-                        def outputFile = "reports/trivy-image-${imageName}.json"
-
-                        def scanSuccess = false
-                        try {
-                            sh "${TRIVY_PATH} image --format json -o ${outputFile} ${safeTag} > reports/trivy-image-${imageName}.log 2>&1"
-                            scannedImages << safeTag + " - SUCCESS"
-                            scanSuccess = true
-                            echo "SUCCESS: ${safeTag} scanned"
-                        } catch (Exception e) {
-                            def trivyLog = ""
-                            try { trivyLog = readFile("reports/trivy-image-${imageName}.log") } catch (_) {}
-                            def errorLines = trivyLog.split('\n').findAll {
-                                it.contains('FATAL') || it.contains('ERROR') || it.contains('error') || it.contains('unable')
-                            }
-                            def detail = errorLines ? errorLines.take(3).join(' | ') : e.message.take(200)
-                            scanErrors << "${safeTag} - FAILED (${detail})"
-                            echo "FAILED: ${safeTag} - ${detail}"
-                        }
-                    }
-
-                    // Record overall stage status
-                    if (scanErrors.isEmpty()) {
-                        recordStage('trivy_image_scan', 'PASS', 'Scanned: ' + scannedImages.join(', '))
-                    } else if (scannedImages.isEmpty()) {
-                        recordStage('trivy_image_scan', 'FAIL', 'Failed: ' + scanErrors.join(', '))
-                    } else {
-                        recordStage('trivy_image_scan', 'WARN', 'Succeeded: ' + scannedImages.join(', ') + ' | Failed: ' + scanErrors.join(', '))
-                    }
-
-                    // Merge individual image reports into single file for fetcher
-                    sh """
-                        ls reports/trivy-image-*.json >/dev/null 2>&1 && python3 -c "
-import json, glob
-r = []
-for f in sorted(glob.glob('reports/trivy-image-*.json')):
-    try:
-        d = json.load(open(f))
-        r.extend(d.get('Results', []))
-    except Exception as e:
-        print(f'Skip {f}: {e}')
-with open('reports/trivy-image.json', 'w') as f:
-    json.dump({'Results': r}, f)
-print(f'Merged {len(r)} results')
-" || echo 'No trivy-image-*.json files to merge'
-"""
+                    doTrivyImageScan()
                 }
             }
         }
@@ -682,100 +255,7 @@ print(f'Merged {len(r)} results')
             when { expression { shouldRun('nmap_scan') } }
             steps {
                 script {
-                    if (!PROJECT.target_ip) {
-                        if (IS_MANUAL) {
-                            error("target_ip required for manual Nmap scan")
-                        }
-                        echo "SKIP: No target_ip provided"
-                        return
-                    }
-
-                    sh "mkdir -p reports"
-
-                    // Scanner files belong to the platform (not the scanned repo).
-                    // Try these sources in order: SCANNER_SRC_DIR param -> download from backend API -> bundled
-                    def scannerDir = 'nmap_scanner'
-                    sh "mkdir -p ${scannerDir}"
-
-                    def scannerFilesFound = false
-
-                    // 1) SCANNER_SRC_DIR parameter (from backend trigger)
-                    if (params.SCANNER_SRC_DIR?.trim()) {
-                        def result = sh(script: "ls ${params.SCANNER_SRC_DIR}/scanner.py 2>/dev/null", returnStatus: true)
-                        if (result == 0) {
-                            sh "cp ${params.SCANNER_SRC_DIR}/scanner.py ${params.SCANNER_SRC_DIR}/parser.py ${scannerDir}/ 2>/dev/null || true"
-                            scannerFilesFound = true
-                            echo "Copied scanner files from SCANNER_SRC_DIR: ${params.SCANNER_SRC_DIR}"
-                        }
-                    }
-
-                    // 2) Download from backend API (platform serves scanner files)
-                    if (!scannerFilesFound) {
-                        withCredentials([string(credentialsId: params.CRED_CALLBACK, variable: 'CALLBACK_TOKEN')]) {
-                            def downloadResult = sh(script: """
-                                curl -sS -f -o ${scannerDir}/scanner.py \
-                                  -H "X-Callback-Token: \$CALLBACK_TOKEN" \
-                                  "${BACKEND_URL}/api/v1/scanner/scanner.py" 2>/dev/null && \
-                                curl -sS -f -o ${scannerDir}/parser.py \
-                                  -H "X-Callback-Token: \$CALLBACK_TOKEN" \
-                                  "${BACKEND_URL}/api/v1/scanner/parser.py" 2>/dev/null && \
-                                echo "downloaded" || echo "failed"
-                            """, returnStdout: true).trim()
-                            if (downloadResult == 'downloaded') {
-                                scannerFilesFound = true
-                                echo "Downloaded scanner files from backend API"
-                            }
-                        }
-                    }
-
-                    // 3) Fallback: check workspace (for backwards compatibility)
-                    if (!scannerFilesFound) {
-                        if (fileExists('backend/nmap_system/scanner.py')) {
-                            sh "cp backend/nmap_system/scanner.py backend/nmap_system/parser.py ${scannerDir}/ 2>/dev/null || true"
-                            scannerFilesFound = true
-                            echo "Copied scanner files from workspace: backend/nmap_system/"
-                        } else if (fileExists('scanner.py')) {
-                            sh "cp scanner.py parser.py ${scannerDir}/ 2>/dev/null || true"
-                            scannerFilesFound = true
-                            echo "Copied scanner files from workspace root"
-                        }
-                    }
-
-                    if (!scannerFilesFound) {
-                        echo "SKIP: scanner files not found (tried: SCANNER_SRC_DIR, backend API, workspace)"
-                        recordStage('nmap_scan', 'SKIPPED', 'Scanner files not found')
-                        return
-                    }
-
-                    def nmapOutput = sh(returnStdout: true, script: """
-                        set +e
-                        cd ${scannerDir}
-
-                        echo '{"client":"Pipeline Auto Scan","month":"${new Date().format("MMMM yyyy")}","targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"Test"}]}' > targets.json
-
-                        python3 scanner.py 2>&1
-
-                        python3 parser.py 2>&1
-
-                        echo "___EXIT___\$?"
-                    """)
-                    def nmapLines = nmapOutput.split('\n')
-                    def nmapExitLine = nmapLines.find { it.startsWith('___EXIT___') }
-                    def nmapExitCode = nmapExitLine?.replace('___EXIT___', '')?.trim()
-                    def nmapCleanOutput = nmapLines.findAll { !it.startsWith('___EXIT___') }.join('\n')
-
-                    sh """
-                        cp ${scannerDir}/scans/*/findings.json reports/nmap_findings.json
-                        # Copy raw per-scan txt files to reports
-                        find ${scannerDir}/scans -name "*.txt" -type f -exec cp {} reports/ \\; 2>/dev/null || true
-                        echo "Nmap system scan completed"
-                    """
-
-                    def nmapErrors = nmapExitCode != '0' ? nmapCleanOutput.split('\n').findAll {
-                        it.contains('Traceback') || it.contains('Error') || it.contains('error') || it.contains('FAILED')
-                    } : []
-                    def nmapDetail = nmapErrors ? ' | Errors: ' + nmapErrors.take(5).join(' ;; ') : ''
-                    recordStage('nmap_scan', nmapExitCode == '0' ? 'PASS' : 'WARN', 'Nmap system scan completed (11 scans + parser)' + nmapDetail)
+                    doNmapSystemScan()
                 }
             }
         }
@@ -784,251 +264,7 @@ print(f'Merged {len(r)} results')
             when { expression { shouldRun('zap_scan') } }
             steps {
                 script {
-                    if (!PROJECT.target_url) {
-                        if (IS_MANUAL) {
-                            error("target_url required for manual ZAP scan")
-                        }
-                        echo "SKIP: No target_url provided"
-                        recordStage('zap_scan', 'SKIPPED', 'No target URL provided')
-                        return
-                    }
-
-                    // Check target connectivity before starting ZAP
-                    echo "Checking target URL connectivity: ${PROJECT.target_url}"
-                    def targetReachable = sh(
-                        script: "curl -s -o /dev/null --max-time 30 '${PROJECT.target_url}' && echo 'reachable' || echo 'unreachable'",
-                        returnStdout: true
-                    ).trim()
-                    if (targetReachable != 'reachable') {
-                        echo "WARNING: Target URL ${PROJECT.target_url} is unreachable from Jenkins agent"
-                        echo "ZAP requires a running target to scan — skipping ZAP scan"
-                        recordStage('zap_scan', 'WARN', "Target unreachable: ${PROJECT.target_url}")
-                        return
-                    }
-
-                    def zapPort = env.ZAP_PORT ?: '8090'
-                    def zapFailed = false
-                    def zapErrorDetail = ""
-                    withEnv(["TARGET_URL=${PROJECT.target_url}", "ZAP_PORT=${zapPort}"]) {
-                        try {
-                            sh '''
-                                set +e
-
-                                mkdir -p reports
-
-                                ZAP_PORT="${ZAP_PORT:-8090}"
-                                echo "Starting ZAP daemon on port $ZAP_PORT..."
-
-                                nohup zap.sh -daemon \
-                                    -host 0.0.0.0 \
-                                    -port "$ZAP_PORT" \
-                                    -config api.disablekey=true \
-                                    -config 'api.addrs.addr.name=.*' \
-                                    -config api.addrs.addr.regex=true > reports/zap.log 2>&1 &
-
-                                ZAP_PID=$!
-
-                                echo "ZAP PID: $ZAP_PID"
-                                echo "ZAP daemon log: reports/zap.log"
-
-                                # Pre-wait: give Java and ZAP time to fully initialise before checking
-                                echo "Pre-waiting 45s for ZAP Java process to initialise..."
-                                sleep 45
-
-                                # Check that ZAP process is still alive
-                                if ! kill -0 "$ZAP_PID" 2>/dev/null; then
-                                    echo "ZAP process died during initialisation"
-                                    echo "--- ZAP log (last 80 lines) ---"
-                                    tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
-                                    exit 1
-                                fi
-
-                                echo "Waiting for ZAP API to become ready (up to ~5 min)..."
-                                echo "Using ZAP version endpoint for health checks..."
-                                ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
-                                ZAP_READY=0
-
-                                for i in {1..60}; do
-                                    # Check process is alive
-                                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
-                                        echo "ZAP process died during wait loop"
-                                        echo "--- ZAP log (last 80 lines) ---"
-                                        tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
-                                        exit 1
-                                    fi
-
-                                    # Try version endpoint first (more reliable), fallback to root
-                                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
-                                        "${ZAP_API_BASE}/JSON/core/view/version/" 2>/dev/null)
-
-                                    if [ "$READY" = "200" ]; then
-                                        echo "ZAP is ready (via version endpoint, HTTP 200)"
-                                        ZAP_READY=1
-                                        break
-                                    fi
-
-                                    # Fallback: try root endpoint
-                                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
-                                        "${ZAP_API_BASE}/" 2>/dev/null)
-
-                                    if [ "$READY" != "000" ]; then
-                                        echo "ZAP is ready (via root endpoint, HTTP $READY)"
-                                        ZAP_READY=1
-                                        break
-                                    fi
-
-                                    echo "Check $i: $READY — retrying in 10s..."
-                                    sleep 10
-                                done
-
-                                # Final verification
-                                if [ "$ZAP_READY" != "1" ]; then
-                                    echo "ZAP failed to become ready after all retries"
-                                    echo "--- ZAP log (last 80 lines) ---"
-                                    tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
-                                    echo "--- Checking if port $ZAP_PORT is in use ---"
-                                    ss -tlnp | grep "$ZAP_PORT" 2>/dev/null || echo "(no listener on $ZAP_PORT)"
-                                    exit 1
-                                fi
-
-                                echo "Starting spider scan..."
-                                ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
-                            
-                                SPIDER_ID=$(curl -s \
-                                    "${ZAP_API_BASE}/JSON/spider/action/scan/?url=$TARGET_URL" \
-                                    | jq -r '.scan // empty')
-
-                                if [ -z "$SPIDER_ID" ] || [ "$SPIDER_ID" = "null" ]; then
-                                    echo "Failed to start spider scan"
-                                    echo "--- ZAP log (last 30 lines) ---"
-                                    tail -n 30 reports/zap.log 2>/dev/null
-                                    exit 1
-                                fi
-
-                                echo "Spider ID: $SPIDER_ID"
-
-                                # Wait for spider completion (with timeout)
-                                SPIDER_START=$(date +%s)
-                                SPIDER_TIMEOUT=600
-                                while true; do
-                                    SPIDER_ELAPSED=$(($(date +%s) - SPIDER_START))
-                                    if [ $SPIDER_ELAPSED -gt $SPIDER_TIMEOUT ]; then
-                                        echo "Spider timeout exceeded ($SPIDER_TIMEOUT s)"
-                                        exit 1
-                                    fi
-
-                                    # Check ZAP is alive
-                                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
-                                        echo "ZAP process died during spider scan"
-                                        echo "--- ZAP log (last 50 lines) ---"
-                                        tail -n 50 reports/zap.log 2>/dev/null
-                                        exit 1
-                                    fi
-
-                                    STATUS=$(curl -s \
-                                        "${ZAP_API_BASE}/JSON/spider/view/status/?scanId=$SPIDER_ID" \
-                                        | jq -r '.status // "0"')
-
-                                    echo "Spider progress: ${STATUS}%"
-
-                                    if [ "$STATUS" = "100" ]; then
-                                        break
-                                    fi
-
-                                    sleep 5
-                                done
-
-                                echo "Spider completed"
-                                echo "Waiting 15s for ZAP to process spider results..."
-                                sleep 15
-
-                                echo "Starting active scan..."
-
-                                ASCAN_ID=$(curl -s \
-                                    "${ZAP_API_BASE}/JSON/ascan/action/scan/?url=$TARGET_URL&recurse=true" \
-                                    | jq -r '.scan // empty')
-
-                                if [ -z "$ASCAN_ID" ] || [ "$ASCAN_ID" = "null" ]; then
-                                    echo "Failed to start active scan"
-                                    echo "--- ZAP log (last 30 lines) ---"
-                                    tail -n 30 reports/zap.log 2>/dev/null
-                                    exit 1
-                                fi
-
-                                echo "Active Scan ID: $ASCAN_ID"
-
-                                # Wait for active scan completion (with timeout)
-                                ASCAN_START=$(date +%s)
-                                ASCAN_TIMEOUT=1800
-                                while true; do
-                                    ASCAN_ELAPSED=$(($(date +%s) - ASCAN_START))
-                                    if [ $ASCAN_ELAPSED -gt $ASCAN_TIMEOUT ]; then
-                                        echo "Active scan timeout exceeded ($ASCAN_TIMEOUT s)"
-                                        exit 1
-                                    fi
-
-                                    # Check ZAP is alive
-                                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
-                                        echo "ZAP process died during active scan"
-                                        echo "--- ZAP log (last 50 lines) ---"
-                                        tail -n 50 reports/zap.log 2>/dev/null
-                                        exit 1
-                                    fi
-
-                                    STATUS=$(curl -s \
-                                        "${ZAP_API_BASE}/JSON/ascan/view/status/?scanId=$ASCAN_ID" \
-                                        | jq -r '.status // "0"')
-
-                                    echo "Active scan progress: ${STATUS}%"
-
-                                    if [ "$STATUS" = "100" ]; then
-                                        break
-                                    fi
-
-                                    sleep 10
-                                done
-
-                                echo "Active scan completed"
-
-                                echo "Generating reports..."
-
-                                curl -s \
-                                    "${ZAP_API_BASE}/OTHER/core/other/htmlreport/" \
-                                    -o reports/zap.html
-
-                                curl -s \
-                                    "${ZAP_API_BASE}/OTHER/core/other/jsonreport/" \
-                                    -o reports/zap.json
-
-                                if [ ! -f reports/zap.json ] || [ ! -s reports/zap.json ]; then
-                                    echo "ZAP JSON report missing or empty"
-                                    echo "--- ZAP log (last 30 lines) ---"
-                                    tail -n 30 reports/zap.log 2>/dev/null
-                                    exit 1
-                                fi
-
-                                echo "ZAP reports generated:"
-                                ls -lh reports/zap.* 2>/dev/null
-
-                                echo "Stopping ZAP..."
-                                kill $ZAP_PID 2>/dev/null || true
-                                sleep 3
-                                kill -0 "$ZAP_PID" 2>/dev/null && kill -9 $ZAP_PID 2>/dev/null || true
-                                echo "ZAP stopped"
-                            '''
-                            recordStage('zap_scan', 'PASS', 'ZAP scan completed successfully')
-                        } catch (Exception e) {
-                            def zapLog = ""
-                            try { zapLog = readFile('reports/zap.log') } catch (_) {}
-                            def errorLines = zapLog.split('\n').findAll {
-                                it.contains('ERROR') || it.contains('Exception') || it.contains('failed') || it.contains('died')
-                            }
-                            zapErrorDetail = errorLines ? errorLines.take(5).join(' | ') : e.message.take(300)
-                            def trimmed = zapErrorDetail.length() > 400 ? zapErrorDetail.take(400) + '...' : zapErrorDetail
-                            echo "ZAP scan failed: ${trimmed}"
-                            recordStage('zap_scan', 'FAIL', "ZAP scan failed: ${trimmed}")
-                        }
-                    }
+                    doZapScan()
                 }
             }
         }
@@ -1046,7 +282,15 @@ print(f'Merged {len(r)} results')
                 if (currentBuild.currentResult == 'FAILURE' || currentBuild.currentResult == 'ABORTED') {
                     def failedStage = STAGES_RESULTS ? STAGES_RESULTS.find { it.status == 'FAIL' } : null
 
-                    if (currentBuild.buildCauses?.any { it.shortDescription?.contains('Timeout') }) {
+                    def isTimeout = false
+                    try {
+                        isTimeout = currentBuild.buildCauses?.any { it.shortDescription?.contains('Timeout') }
+                    } catch (Exception _) {
+                        // buildCauses not accessible in sandboxed Jenkins — check result string instead
+                        isTimeout = currentBuild.currentResult == 'ABORTED'
+                    }
+
+                    if (isTimeout) {
                         errorType = 'TIMEOUT'
                         errorMessage = "Scan timed out after ${params.SCAN_TIMEOUT ? params.SCAN_TIMEOUT.toInteger() / 60 : 120} minutes"
                     } else if (failedStage) {
@@ -1060,6 +304,10 @@ print(f'Merged {len(r)} results')
                     jenkinsConsoleUrl = "${env.JENKINS_URL}/job/${env.JOB_NAME}/${env.BUILD_NUMBER}/console"
                 }
 
+                // Get git metadata for auditability
+                def gitCommit = sh(script: 'git rev-parse HEAD 2>/dev/null || echo "unknown"', returnStdout: true).trim()
+                def gitBranch = sh(script: 'git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"', returnStdout: true).trim()
+
                 def payload = [
                     status: currentBuild.currentResult,
                     build_number: currentBuild.number,
@@ -1069,7 +317,9 @@ print(f'Merged {len(r)} results')
                     finished_at: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
                     ERROR_MESSAGE: errorMessage ?: "Pipeline completed with status: ${currentBuild.currentResult}",
                     ERROR_TYPE: errorType ?: 'SUCCESS',
-                    JENKINS_CONSOLE_URL: jenkinsConsoleUrl
+                    JENKINS_CONSOLE_URL: jenkinsConsoleUrl,
+                    GIT_COMMIT: gitCommit,
+                    GIT_BRANCH: gitBranch
                 ]
 
                 sh script: """cat > callback.json << 'EOF'
@@ -1078,14 +328,24 @@ EOF
 """, label: 'Write callback payload'
 
                 withCredentials([string(credentialsId: params.CRED_CALLBACK, variable: 'CALLBACK_TOKEN')]) {
-                    sh """
-                        curl -sS -X POST \
-                          -H "Content-Type: application/json" \
-                          -H "X-Callback-Token: \$CALLBACK_TOKEN" \
-                          --data @callback.json \
-                          "${CALLBACK_URL}" \
-                        || echo "Callback failed"
-                    """
+                     sh """
+                          # Callback with retry logic (3 attempts)
+                          i=0
+                          while [ \$i -lt 3 ]; do
+                            i=\$((i + 1))
+                            if curl -sS -X POST \
+                                  -H "Content-Type: application/json" \
+                                  -H "X-Callback-Token: \$CALLBACK_TOKEN" \
+                                  --data @callback.json \
+                                  "${CALLBACK_URL}" > /dev/null; then
+                              echo "Callback sent successfully on attempt \$i"
+                              break
+                            else
+                              echo "Callback attempt \$i failed, retrying in 5 seconds..."
+                              sleep 5
+                            fi
+                          done
+                      """
                 }
             }
         }
@@ -1101,6 +361,840 @@ EOF
         cleanup {
             cleanWs()
         }
+    }
+}
+
+// ── Stage implementation functions ──────────────────────────────────────────
+
+def doInitContext() {
+    echo "=== Init Context Started ==="
+    echo "SCAN_ID received: ${params.SCAN_ID}"
+    echo "SCAN_MODE received: ${params.SCAN_MODE}"
+    if (!params.SCAN_ID?.trim()) {
+        error("SCAN_ID is mandatory. Backend handshake failed.")
+    }
+    if (params.SCAN_ID =~ /\s/) {
+        error("SCAN_ID must not contain spaces. Use UUID format.")
+    }
+    echo "SCAN_ID validation passed"
+    def projectData = params.PROJECT_DATA.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+    def selectedStages = params.SELECTED_STAGES.replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+    echo "Unescaped PROJECT_DATA: ${projectData}"
+    echo "Unescaped SELECTED_STAGES: ${selectedStages}"
+    def projectMap = readJSON text: projectData
+    PROJECT = new HashMap(projectMap)
+    def selectedList = readJSON text: selectedStages
+    SELECTED = new ArrayList(selectedList)
+    IS_MANUAL = params.SCAN_MODE == "MANUAL"
+    sh "mkdir -p reports"
+    def branchName = PROJECT.branch ?: 'main'
+    if (!(branchName ==~ /^[a-zA-Z0-9._\/-]+$/)) {
+        error("Invalid branch name: ${branchName}")
+    }
+    def gitUrl = PROJECT.git_url
+    if (gitUrl && !env.SKIP_GIT_WHITELIST) {
+        def allowedPrefixes = (env.GIT_ALLOWED_PREFIXES ?: 'https://github.com/,https://gitlab.com/,https://bitbucket.org/,https://gitlab.,https://gitea.,https://dev.azure.com/,https://codecommit.')
+            .split(',').collect { it.trim() }
+        def allowed = allowedPrefixes.any { prefix -> gitUrl.startsWith(prefix) }
+        if (!allowed) {
+            error("Git URL not in allowed prefixes: ${gitUrl}. Set SKIP_GIT_WHITELIST=true or configure GIT_ALLOWED_PREFIXES")
+        }
+    }
+    echo "Parsed PROJECT: ${PROJECT}"
+    echo "Parsed SELECTED: ${SELECTED}"
+    echo "IS_MANUAL: ${IS_MANUAL}"
+    echo "=== Init Context Completed ==="
+    recordStage('init_context', 'PASS', 'Init context completed successfully')
+}
+
+def doInitContextSafe() {
+    try {
+        doInitContext()
+    } catch (Exception e) {
+        recordStage('init_context', 'FAIL', "Init context failed: ${e.message?.take(200)}")
+        throw e
+    }
+}
+
+def doGitCheckout() {
+    try {
+        checkout([
+            $class: 'GitSCM',
+            branches: [[name: PROJECT.branch ?: 'main']],
+            userRemoteConfigs: [[
+                url: PROJECT.git_url,
+                credentialsId: PROJECT.credentials_id ?: params.CRED_GITHUB
+            ]],
+            extensions: [[$class: 'CloneOption', depth: 50, noTags: true, shallow: true]]
+        ])
+        recordStage('git_checkout', 'PASS', 'Git checkout successful')
+    } catch (Exception e) {
+        recordStage('git_checkout', 'FAIL', "Git checkout failed: ${e.message?.take(200)}")
+        throw e
+    }
+}
+
+def doSonarScanner() {
+    def scannerHome = tool 'sonar-scanner'
+    def projectName = PROJECT.project_name ?: params.SCAN_ID
+    def sonarJvmOpts = PROJECT.sonar_jvm_opts ?:
+        '-Xmx2g -Xms256m -XX:+UseG1GC -Xss8m -XX:TieredStopAtLevel=1'
+    def sonarExitCode = 1
+    def completed = false
+    try {
+        // Clear stale Sonar cache to prevent hash mismatch errors
+        sh(script: 'rm -rf ~/.sonar/cache/_tmp/ 2>/dev/null || true', label: 'Clear Sonar cache')
+        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+            withSonarQubeEnv('sonar-server') {
+                withEnv(["SONAR_SCANNER_OPTS=${sonarJvmOpts}"] + (env.JAVA_HOME_DIR ? ["JAVA_HOME=${env.JAVA_HOME_DIR}", "PATH+JAVA=${env.JAVA_HOME_DIR}/bin"] : [])) {
+                    nodejs('Nodejs') {
+                        sonarExitCode = sh(
+                            returnStatus: true,
+                            label: 'Run sonar-scanner',
+                            script: """
+                                set -o pipefail
+                                mkdir -p reports
+                                ${scannerHome}/bin/sonar-scanner \\
+                                  -Dsonar.projectKey=\"${PROJECT.sonar_key ?: params.SCAN_ID}\" \\
+                                  -Dsonar.projectName=\"${projectName}\" \\
+                                  -Dsonar.sources=. \\
+                                  -Dsonar.nodejs.executable=\$(which node) \\
+                                  -Dsonar.scanner.skipJreProvisioning=true \\
+                                  -Dsonar.sourceEncoding=UTF-8 \\
+                                  -Dsonar.typescript.tsconfigPath=tsconfig.json \\
+                                  -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \\
+                                  2>&1 | tee reports/sonar-scanner-output.log
+                            """
+                        )
+                    }
+                }
+            }
+        }
+    } catch (Exception e) {
+        echo "sonar-scanner threw an exception (possible JVM crash): ${e.message?.take(200)}"
+    }
+    def reportTaskExists = sh(
+        returnStatus: true,
+        script: "find . -name 'report-task.txt' 2>/dev/null | grep -q ."
+    ) == 0
+    def sonarLog = ''
+    try { sonarLog = readFile('reports/sonar-scanner-output.log') } catch (_) {}
+    def jvmCrashed = sonarLog.contains('SIGSEGV') ||
+                     sonarLog.contains('A fatal error has been detected') ||
+                     sonarLog.contains('hs_err_pid') ||
+                     sonarLog.contains('libjvm.so')
+    def timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+    if (sonarExitCode == 0 && reportTaskExists && !jvmCrashed) {
+        writeFile file: 'reports/sonar-scanner-report.json',
+            text: groovy.json.JsonOutput.toJson([
+                projectKey  : PROJECT.sonar_key ?: params.SCAN_ID,
+                projectName : projectName,
+                status      : 'completed',
+                timestamp   : timestamp
+            ])
+            completed = true
+            recordStage('sonar_scanner', 'PASS', 'Sonar scan completed -- report-task.txt confirmed')
+        } else {
+        def errorLines = sonarLog.split('\n').findAll {
+            it.contains('ERROR') || it.contains('SyntaxError') ||
+            it.contains('FAILURE') || it.contains('error TS') ||
+            it.contains('SIGSEGV') || it.contains('fatal error')
+        }
+        def errorDetail = errorLines ? errorLines.take(8).join(' | ') : 'no detail captured'
+        def trimmed = errorDetail.length() > 500 ? errorDetail.take(500) + '...' : errorDetail
+        def reason = jvmCrashed
+            ? "JVM crash (SIGSEGV) -- try Java 17 or reduce heap. Detail: ${trimmed}"
+            : !reportTaskExists
+                ? "report-task.txt missing -- scanner did not complete. Exit: ${sonarExitCode}. Detail: ${trimmed}"
+                : "sonar-scanner exited ${sonarExitCode}. Detail: ${trimmed}"
+        writeFile file: 'reports/sonar-scanner-report.json',
+            text: groovy.json.JsonOutput.toJson([
+                projectKey  : PROJECT.sonar_key ?: params.SCAN_ID,
+                status      : 'failed',
+                jvm_crashed : jvmCrashed,
+                exit_code   : sonarExitCode,
+                error       : reason,
+                timestamp   : timestamp
+            ])
+        echo "WARNING: SonarQube FAILED: ${reason}"
+        echo "   Fix: use Java 17 and ensure SONAR_SCANNER_OPTS includes -Xmx2g"
+        echo "   Continuing pipeline with other security scans..."
+        recordStage('sonar_scanner', 'WARN', "SonarQube failed: ${reason}")
+    }
+    return completed
+}
+
+def doInstallDependencies() {
+    def installDirs = sh(
+        returnStdout: true,
+        script: "find . -name 'package.json' ! -path '*/node_modules/*' -exec dirname {} \\; | sort -u"
+    ).trim().split('\n').findAll { it.trim() }
+    if (installDirs.isEmpty()) {
+        echo 'No package.json found -- skipping npm install'
+        recordStage('install_dependencies', 'SKIPPED', 'No package.json found')
+        return
+    }
+    def succeeded = []
+    def failed = []
+    installDirs.each { dir ->
+        echo "Running npm install in: ${dir}"
+        def rc = sh(
+            returnStatus: true,
+            script: """
+                cd '${dir}'
+                if [ -f package-lock.json ]; then
+                    echo "Lock file found — using npm ci"
+                    npm ci \\
+                        --prefer-offline \\
+                        --no-audit \\
+                        --no-fund \\
+                        2>&1 | tail -30
+                else
+                    echo "No lock file — falling back to npm install"
+                    npm install \\
+                        --prefer-offline \\
+                        --no-audit \\
+                        --no-fund \\
+                        --legacy-peer-deps \\
+                        2>&1 | tail -30
+                fi
+            """
+        )
+        if (rc == 0) {
+            succeeded << dir
+            echo "SUCCESS: npm install in ${dir}"
+        } else {
+            failed << dir
+            echo "WARNING: npm install failed in ${dir} (exit ${rc}) -- downstream tools will have reduced coverage"
+        }
+    }
+    def summary = "npm install: ${succeeded.size()} dir(s) succeeded"
+    if (failed) { summary += ", ${failed.size()} failed: ${failed.join(', ')}" }
+    recordStage('install_dependencies', failed.isEmpty() ? 'PASS' : 'WARN', summary)
+}
+
+def doDependencyCheck() {
+    sh "mkdir -p reports"
+    def lockFileCount = sh(
+        script: "find . -name 'package-lock.json' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
+        returnStdout: true
+    ).trim().toInteger()
+    def yarnLockCount = sh(
+        script: "find . -name 'yarn.lock' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
+        returnStdout: true
+    ).trim().toInteger()
+    def nodeModulesPresent = sh(
+        returnStatus: true,
+        script: 'find . -maxdepth 3 -type d -name node_modules 2>/dev/null | grep -q .'
+    ) == 0
+    def hasNpmLock = lockFileCount > 0
+    def hasYarnLock = yarnLockCount > 0
+    if (!nodeModulesPresent) {
+        echo 'WARNING: node_modules not found — ODC will only scan lock files. Install Dependencies stage may have failed.'
+    }
+    def scanArgs = [
+        "--project ${params.SCAN_ID}",
+        "--format JSON",
+        "--format HTML",
+        "--out reports",
+        "--enableExperimental",
+        '--exclude "**/node_modules/**"',
+        '--exclude "**/.venv/**"',
+        '--exclude "**/dist/**"',
+        '--exclude "**/build/**"',
+        '--exclude "**/reports/**"'
+    ]
+    if (hasNpmLock) {
+        scanArgs << "--scan ./**/package-lock.json"
+        echo "Found ${lockFileCount} package-lock.json file(s) — scanning npm dependencies"
+    }
+    if (hasYarnLock) {
+        scanArgs << "--scan ./**/yarn.lock"
+        echo "Found ${yarnLockCount} yarn.lock file(s) — scanning yarn dependencies"
+    }
+    if (!hasNpmLock && !hasYarnLock) {
+        scanArgs << "--scan ."
+        scanArgs << '--exclude "**/node_modules*/**"'
+        def reason = nodeModulesPresent
+            ? "node_modules present but no lock file found (unexpected)"
+            : "node_modules absent — Install Dependencies stage may have failed"
+        echo "WARNING: No lock files found (${reason}). Dependency Check will only scan non-Node.js dependencies (pip, gradle, etc.)"
+    }
+    if (PROJECT.dependency_exclusions) {
+        scanArgs << "--exclude ${PROJECT.dependency_exclusions}"
+    }
+    echo "Running OWASP Dependency-Check (${scanArgs.size()} args, NVD key masked)"
+    def odcJvmCrashed = false
+    withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
+        def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
+        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m -XX:+UseParallelGC -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"]
+        if (env.JAVA_HOME_DIR) {
+            javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
+        }
+        withEnv(javaEnv) {
+            catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                dependencyCheck additionalArguments: argsWithKey.join(' '), odcInstallation: 'OWasp'
+            }
+            if (currentBuild.result == 'UNSTABLE' || currentBuild.result == 'FAILURE') {
+                odcJvmCrashed = true
+                echo "WARNING: ODC JVM crashed during database defrag — reports were written before crash"
+            }
+        }
+    }
+    def depSummary = "Dependency check completed"
+    if (lockFileCount > 0 || yarnLockCount > 0) {
+        def parts = []
+        if (lockFileCount > 0) { parts << "${lockFileCount} npm" }
+        if (yarnLockCount > 0) { parts << "${yarnLockCount} yarn" }
+        depSummary = "Dependency check completed (${parts.join(' + ')} lock file(s))"
+        if (odcJvmCrashed) {
+            depSummary += " — ODC JVM crashed after report generation"
+        }
+    } else {
+        def reason = nodeModulesPresent
+            ? "node_modules present but no lock file detected"
+            : "node_modules absent — Install Dependencies stage may have failed or no package.json found"
+        depSummary = "Dependency check completed — 0 Node.js deps analyzed (${reason})"
+    }
+    recordStage('dependency_check', odcJvmCrashed ? 'WARN' : 'PASS', depSummary)
+    publishHTML([
+        allowMissing: false,
+        alwaysLinkToLastBuild: true,
+        keepAll: true,
+        reportDir: 'reports',
+        reportFiles: 'dependency-check-report.html',
+        reportName: 'OWASP Dependency Check'
+    ])
+}
+
+def doTrivyFsScan() {
+    def nmPresent = sh(
+        returnStatus: true,
+        script: 'find . -maxdepth 3 -type d -name node_modules 2>/dev/null | grep -q .'
+    ) == 0
+    if (!nmPresent) {
+        echo "WARNING: node_modules not found — Trivy will only scan source/lockfiles. Install Dependencies stage may have failed."
+    }
+    def trivyExit = sh(
+        returnStatus: true,
+        script: """
+            set -o pipefail
+            IGNORE_FLAG=""
+            [ -f .trivyignore ] && IGNORE_FLAG="--ignorefile .trivyignore"
+            ${TRIVY_PATH} fs \\
+              --scanners vuln,secret,misconfig \\
+              --severity HIGH,CRITICAL \\
+              --format json \\
+              \$IGNORE_FLAG \\
+              -o reports/trivy-fs.json \\
+              . 2>&1 | tee reports/trivy-fs-output.log
+            exit \$\${PIPESTATUS[0]}
+        """
+    )
+    def trivyOutput = ""
+    try { trivyOutput = readFile('reports/trivy-fs-output.log') } catch (_) {}
+    def fatalLines = trivyOutput.split('\n').findAll {
+        it.contains('FATAL') || it.contains('panic') || it.contains('Error:')
+    }
+    def warnLines = trivyOutput.split('\n').findAll {
+        it.contains('WARNING') || it.contains('WARN')
+    }
+    if (trivyExit > 1 || fatalLines) {
+        def detail = fatalLines ? fatalLines.take(3).join(' | ') : "exit code ${trivyExit}"
+        echo "WARNING: Trivy FS encountered errors: ${detail}"
+        recordStage('trivy_fs_scan', 'WARN', "Trivy FS scan had errors: ${detail}")
+    } else {
+        def detail = warnLines ? ' | Warnings: ' + warnLines.take(3).join(' ;; ') : ''
+        def coverage = nmPresent ? 'full (node_modules present)' : 'partial (no node_modules)'
+        recordStage('trivy_fs_scan', 'PASS', "Trivy FS scan completed [${coverage}]${detail}")
+    }
+}
+
+def doDockerBuild() {
+    def dockerfiles = []
+    def output = sh(
+        script: "find . -path './node_modules' -prune -o -path './.git' -prune -o -type f \\( -name 'Dockerfile*' -o -name '*.Dockerfile' \\) ! -name '*.md' -print | sort",
+        returnStdout: true
+    ).trim()
+    if (output) {
+        dockerfiles = output.split('\n').findAll { it.trim() }
+    }
+    if (dockerfiles.isEmpty()) {
+        echo "No Dockerfiles found - skipping Docker build"
+        recordStage('docker_build', 'SKIPPED', 'No Dockerfiles found')
+        return
+    }
+    echo "Found ${dockerfiles.size()} Dockerfiles: ${dockerfiles.join(', ')}"
+    def buildResults = []
+    def failedBuilds = []
+    def failedDetails = []
+    def allImageTags = []
+    dockerfiles.each { dockerfile ->
+        def imageName = dockerfile.replaceAll('^[./]+', '').replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(100)
+        def imageTag = "${PROJECT.project_id ?: 'scan'}:${imageName}-${params.SCAN_ID}"
+        def buildContext = '.'
+        echo "Building ${dockerfile}..."
+        def safeLogName = dockerfile.replaceAll('[^a-zA-Z0-9]', '-').toLowerCase().take(80)
+        def buildLogFile = "reports/docker-build-${safeLogName}.log"
+        def buildOutput = sh(returnStdout: true, script: """
+            set +e
+            DOCKER_BUILDKIT=1 docker build \
+                --progress=plain \
+                --no-cache=false \
+                -t '${imageTag}' \
+                -f '${dockerfile}' \
+                '${buildContext}' 2>&1 | tee '${buildLogFile}'
+            BUILD_EXIT=\$\${PIPESTATUS[0]}
+            docker image inspect '${imageTag}' >/dev/null 2>&1 && IMAGE_EXISTS=1 || IMAGE_EXISTS=0
+            echo "___BUILD_EXIT___\${BUILD_EXIT}"
+            echo "___IMAGE_EXISTS___\${IMAGE_EXISTS}"
+        """)
+        def lines = buildOutput.split('\n')
+        def exitLine = lines.find { it.startsWith('___BUILD_EXIT___') }
+        def exitCode = exitLine?.replace('___BUILD_EXIT___', '')?.trim()
+        def imageExistsLine = lines.find { it.startsWith('___IMAGE_EXISTS___') }
+        def imageExists = imageExistsLine?.replace('___IMAGE_EXISTS___', '')?.trim()
+        def cleanOutput = lines.findAll { !it.startsWith('___BUILD_EXIT___') && !it.startsWith('___IMAGE_EXISTS___') }.join('\n')
+        if (exitCode == '0' && imageExists == '1') {
+            allImageTags << imageTag
+            buildResults << dockerfile
+            echo "SUCCESS: ${dockerfile} built successfully"
+        } else {
+            failedBuilds << dockerfile
+            def errorLines = cleanOutput.split('\n').findAll {
+                it =~ /(?i)(error|failed|cannot|no such|permission denied|not found)/
+            }
+            def detail = errorLines
+                ? errorLines.take(10).join(' | ')
+                : cleanOutput.split('\n').takeRight(15).join(' | ')
+            failedDetails << "${dockerfile}: ${detail.take(600)}"
+            echo "FAILED: ${dockerfile}\n--- Docker build error (last lines) ---\n${cleanOutput.split('\n').takeRight(20).join('\n')}"
+        }
+    }
+    env.ALL_IMAGE_TAGS = allImageTags.join(',')
+    env.DOCKERFILE_COUNT = allImageTags.size().toString()
+    def errorSummary = failedDetails ? ' | Errors: ' + failedDetails.join(' ;; ') : ''
+    if (failedBuilds.isEmpty()) {
+        def successList = buildResults.collect { it + " - SUCCESS" }
+        recordStage('docker_build', 'PASS', 'Built: ' + successList.join(', '))
+    } else if (buildResults.isEmpty()) {
+        def errorList = failedBuilds.collect { it + " - FAILED" }
+        recordStage('docker_build', 'FAIL', 'Failed: ' + errorList.join(', ') + errorSummary)
+    } else {
+        def successList = buildResults.collect { it + " - SUCCESS" }
+        def failedList = failedBuilds.collect { it + " - FAILED" }
+        recordStage('docker_build', 'WARN', 'Succeeded: ' + successList.join(', ') + ' | Failed: ' + failedList.join(', ') + errorSummary)
+    }
+    def reportJson = groovy.json.JsonOutput.toJson([
+        total: dockerfiles.size(),
+        successful: buildResults.size(),
+        failed: failedBuilds.size(),
+        images: allImageTags.collect { [tag: it, status: "SUCCESS"] },
+        failures: failedBuilds.collect { [dockerfile: it, status: "FAILED"] },
+        timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+    ])
+    writeFile file: "reports/docker-build-report.json", text: reportJson
+    if (allImageTags.isEmpty()) {
+        echo "No Docker images built successfully - skipping Docker Push and Trivy Image Scan"
+    }
+}
+
+def doDockerPush() {
+    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
+    if (allImageTags.isEmpty()) {
+        echo "No images to push - skipping Docker push"
+        recordStage('docker_push', 'SKIPPED', 'No images to push')
+        return
+    }
+    def pushedImages = []
+    def failedPushes = []
+    def dockerRegistry = env.DOCKER_REGISTRY ?: ''
+    def registryPrefix = dockerRegistry ? "${dockerRegistry}/" : ""
+    allImageTags.each { imageTag ->
+        def imageName = imageTag.replaceAll('[^a-zA-Z0-9/]', '-').toLowerCase()
+        def pushTag = "${registryPrefix}${DOCKER_USER}/${imageName}".toString()
+        echo "Pushing ${imageTag} as ${pushTag}"
+        def pushSuccess = false
+        try {
+            sh "docker tag '${imageTag}' '${pushTag}'"
+            def regFlag = dockerRegistry ? " ${dockerRegistry}" : ""
+            sh """
+                echo "\$DOCKER_PASS" | docker login -u "\$DOCKER_USER" --password-stdin${regFlag}
+            """
+            sh "docker push '${pushTag}' 2>&1"
+            pushedImages << pushTag
+            pushSuccess = true
+            echo "SUCCESS: ${pushTag} pushed"
+        } catch (Exception e) {
+            def pushError = e.message.replaceAll('denied:.*', 'denied: access forbidden — check Docker Hub credentials').take(200)
+            failedPushes << "${pushTag} - FAILED (${pushError})"
+            echo "FAILED: ${pushTag} — ${pushError}"
+        }
+    }
+    if (failedPushes.isEmpty()) {
+        def successList = pushedImages.collect { it + " - SUCCESS" }
+        recordStage('docker_push', 'PASS', 'Pushed: ' + successList.join(', '))
+    } else if (pushedImages.isEmpty()) {
+        def errorList = failedPushes.collect { it + " - FAILED" }
+        recordStage('docker_push', 'FAIL', 'Failed: ' + errorList.join(', '))
+    } else {
+        def successList = pushedImages.collect { it + " - SUCCESS" }
+        def failedList = failedPushes.collect { it + " - FAILED" }
+        recordStage('docker_push', 'WARN', 'Succeeded: ' + successList.join(', ') + ' | Failed: ' + failedList.join(', '))
+    }
+    def pushReportJson = groovy.json.JsonOutput.toJson([
+        total: allImageTags.size(),
+        successful: pushedImages.size(),
+        failed: failedPushes.size(),
+        pushed: pushedImages.collect { [tag: it, status: "SUCCESS"] },
+        failures: failedPushes.collect { [tag: it, status: "FAILED"] },
+        timestamp: new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+    ])
+    writeFile file: "reports/docker-push-report.json", text: pushReportJson
+}
+
+def doTrivyImageScan() {
+    def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
+    if (allImageTags.isEmpty()) {
+        echo "No images to scan - skipping Trivy image scan"
+        recordStage('trivy_image_scan', 'SKIPPED', 'No images to scan')
+        return
+    }
+    def scannedImages = []
+    def scanErrors = []
+    allImageTags.each { imageTag ->
+        def safeTag = imageTag.toString()
+        echo "Scanning image: ${safeTag}"
+        def imageName = imageTag.replaceAll('[^a-zA-Z0-9]', '-').toLowerCase()
+        def outputFile = "reports/trivy-image-${imageName}.json"
+        try {
+            sh "${TRIVY_PATH} image --format json -o ${outputFile} ${safeTag} > reports/trivy-image-${imageName}.log 2>&1"
+            scannedImages << safeTag + " - SUCCESS"
+            echo "SUCCESS: ${safeTag} scanned"
+        } catch (Exception e) {
+            def trivyLog = ""
+            try { trivyLog = readFile("reports/trivy-image-${imageName}.log") } catch (_) {}
+            def errorLines = trivyLog.split('\n').findAll {
+                it.contains('FATAL') || it.contains('ERROR') || it.contains('error') || it.contains('unable')
+            }
+            def detail = errorLines ? errorLines.take(3).join(' | ') : e.message.take(200)
+            scanErrors << "${safeTag} - FAILED (${detail})"
+            echo "FAILED: ${safeTag} - ${detail}"
+        }
+    }
+    if (scanErrors.isEmpty()) {
+        recordStage('trivy_image_scan', 'PASS', 'Scanned: ' + scannedImages.join(', '))
+    } else if (scannedImages.isEmpty()) {
+        recordStage('trivy_image_scan', 'FAIL', 'Failed: ' + scanErrors.join(', '))
+    } else {
+        recordStage('trivy_image_scan', 'WARN', 'Succeeded: ' + scannedImages.join(', ') + ' | Failed: ' + scanErrors.join(', '))
+    }
+    sh """
+        ls reports/trivy-image-*.json >/dev/null 2>&1 && python3 -c \"
+import json, glob
+r = []
+for f in sorted(glob.glob('reports/trivy-image-*.json')):
+    try:
+        d = json.load(open(f))
+        r.extend(d.get('Results', []))
+    except Exception as e:
+        print(f'Skip {f}: {e}')
+with open('reports/trivy-image.json', 'w') as f:
+    json.dump({'Results': r}, f)
+print(f'Merged {len(r)} results')
+\" || echo 'No trivy-image-*.json files to merge'
+    """
+}
+
+def doNmapSystemScan() {
+    if (!PROJECT.target_ip) {
+        if (IS_MANUAL) {
+            error("target_ip required for manual Nmap scan")
+        }
+        echo "SKIP: No target_ip provided"
+        return
+    }
+    sh "mkdir -p reports"
+    def scannerDir = 'nmap_scanner'
+    sh "mkdir -p ${scannerDir}"
+    def scannerFilesFound = false
+    if (params.SCANNER_SRC_DIR?.trim()) {
+        def result = sh(script: "ls ${params.SCANNER_SRC_DIR}/scanner.py 2>/dev/null", returnStatus: true)
+        if (result == 0) {
+            sh "cp ${params.SCANNER_SRC_DIR}/scanner.py ${params.SCANNER_SRC_DIR}/parser.py ${scannerDir}/ 2>/dev/null || true"
+            scannerFilesFound = true
+            echo "Copied scanner files from SCANNER_SRC_DIR: ${params.SCANNER_SRC_DIR}"
+        }
+    }
+    if (!scannerFilesFound) {
+        withCredentials([string(credentialsId: params.CRED_CALLBACK, variable: 'CALLBACK_TOKEN')]) {
+            def downloadResult = sh(script: """
+                curl -sS -f -o ${scannerDir}/scanner.py \\
+                  -H "X-Callback-Token: \$CALLBACK_TOKEN" \\
+                  "${BACKEND_URL}/api/v1/scanner/scanner.py" 2>/dev/null && \\
+                curl -sS -f -o ${scannerDir}/parser.py \\
+                  -H "X-Callback-Token: \$CALLBACK_TOKEN" \\
+                  "${BACKEND_URL}/api/v1/scanner/parser.py" 2>/dev/null && \\
+                echo "downloaded" || echo "failed"
+            """, returnStdout: true).trim()
+            if (downloadResult == 'downloaded') {
+                scannerFilesFound = true
+                echo "Downloaded scanner files from backend API"
+            }
+        }
+    }
+    if (!scannerFilesFound) {
+        if (fileExists('backend/nmap_system/scanner.py')) {
+            sh "cp backend/nmap_system/scanner.py backend/nmap_system/parser.py ${scannerDir}/ 2>/dev/null || true"
+            scannerFilesFound = true
+            echo "Copied scanner files from workspace: backend/nmap_system/"
+        } else if (fileExists('scanner.py')) {
+            sh "cp scanner.py parser.py ${scannerDir}/ 2>/dev/null || true"
+            scannerFilesFound = true
+            echo "Copied scanner files from workspace root"
+        }
+    }
+    if (!scannerFilesFound) {
+        echo "SKIP: scanner files not found (tried: SCANNER_SRC_DIR, backend API, workspace)"
+        recordStage('nmap_scan', 'SKIPPED', 'Scanner files not found')
+        return
+    }
+    def nmapOutput = sh(returnStdout: true, script: """
+        set +e
+        cd ${scannerDir}
+        echo '{"client":"Pipeline Auto Scan","month":"${new Date().format("MMMM yyyy")}","targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"Test"}]}' > targets.json
+        python3 scanner.py 2>&1
+        python3 parser.py 2>&1
+        echo "___EXIT___\$?"
+    """)
+    def nmapLines = nmapOutput.split('\n')
+    def nmapExitLine = nmapLines.find { it.startsWith('___EXIT___') }
+    def nmapExitCode = nmapExitLine?.replace('___EXIT___', '')?.trim()
+    def nmapCleanOutput = nmapLines.findAll { !it.startsWith('___EXIT___') }.join('\n')
+    sh """
+        cp ${scannerDir}/scans/*/findings.json reports/nmap_findings.json
+        find ${scannerDir}/scans -name "*.txt" -type f -exec cp {} reports/ \\; 2>/dev/null || true
+        echo "Nmap system scan completed"
+    """
+    def nmapErrors = nmapExitCode != '0' ? nmapCleanOutput.split('\n').findAll {
+        it.contains('Traceback') || it.contains('Error') || it.contains('error') || it.contains('FAILED')
+    } : []
+    def nmapDetail = nmapErrors ? ' | Errors: ' + nmapErrors.take(5).join(' ;; ') : ''
+    recordStage('nmap_scan', nmapExitCode == '0' ? 'PASS' : 'WARN', 'Nmap system scan completed (11 scans + parser)' + nmapDetail)
+}
+
+def doZapScan() {
+    if (!PROJECT.target_url) {
+        if (IS_MANUAL) {
+            error("target_url required for manual ZAP scan")
+        }
+        echo "SKIP: No target_url provided"
+        recordStage('zap_scan', 'SKIPPED', 'No target URL provided')
+        return
+    }
+    echo "Checking target URL connectivity: ${PROJECT.target_url}"
+    def targetReachable = sh(
+        script: "curl -s -o /dev/null --max-time 30 '${PROJECT.target_url}' && echo 'reachable' || echo 'unreachable'",
+        returnStdout: true
+    ).trim()
+    if (targetReachable != 'reachable') {
+        echo "WARNING: Target URL ${PROJECT.target_url} is unreachable from Jenkins agent"
+        echo "ZAP requires a running target to scan — skipping ZAP scan"
+        recordStage('zap_scan', 'WARN', "Target unreachable: ${PROJECT.target_url}")
+        return
+    }
+    def zapPort = env.ZAP_PORT ?: '8090'
+    def zapFailed = false
+    def zapErrorDetail = ""
+    withEnv(["TARGET_URL=${PROJECT.target_url}", "ZAP_PORT=${zapPort}"]) {
+        try {
+            sh '''
+                set +e
+                mkdir -p reports
+                ZAP_PORT="${ZAP_PORT:-8090}"
+                echo "Starting ZAP daemon on port $ZAP_PORT..."
+                nohup zap.sh -daemon \
+                    -host 0.0.0.0 \
+                    -port "$ZAP_PORT" \
+                    -config api.disablekey=true \
+                    -config 'api.addrs.addr.name=.*' \
+                    -config api.addrs.addr.regex=true \
+                    -config ascan.threadPerHost=5 \
+                    -config ascan.strength=Medium \
+                    -config ascan.maxScanTimeInMs=7200000 \
+                    -J-Xmx2g -J-Xms256m > reports/zap.log 2>&1 &
+                ZAP_PID=$!
+                echo "ZAP PID: $ZAP_PID"
+                echo "ZAP daemon log: reports/zap.log"
+                echo "Pre-waiting 45s for ZAP Java process to initialise..."
+                sleep 45
+                if ! kill -0 "$ZAP_PID" 2>/dev/null; then
+                    echo "ZAP process died during initialisation"
+                    echo "--- ZAP log (last 80 lines) ---"
+                    tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
+                    exit 1
+                fi
+                echo "Waiting for ZAP API to become ready (up to ~5 min)..."
+                echo "Using ZAP version endpoint for health checks..."
+                ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
+                ZAP_READY=0
+                for i in {1..60}; do
+                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
+                        echo "ZAP process died during wait loop"
+                        echo "--- ZAP log (last 80 lines) ---"
+                        tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
+                        exit 1
+                    fi
+                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
+                        "${ZAP_API_BASE}/JSON/core/view/version/" 2>/dev/null)
+                    if [ "$READY" = "200" ]; then
+                        echo "ZAP is ready (via version endpoint, HTTP 200)"
+                        ZAP_READY=1
+                        break
+                    fi
+                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
+                        "${ZAP_API_BASE}/" 2>/dev/null)
+                    if [ "$READY" != "000" ]; then
+                        echo "ZAP is ready (via root endpoint, HTTP $READY)"
+                        ZAP_READY=1
+                        break
+                    fi
+                    echo "Check $i: $READY — retrying in 10s..."
+                    sleep 10
+                done
+                if [ "$ZAP_READY" != "1" ]; then
+                    echo "ZAP failed to become ready after all retries"
+                    echo "--- ZAP log (last 80 lines) ---"
+                    tail -n 80 reports/zap.log 2>/dev/null || echo "(no zap.log)"
+                    echo "--- Checking if port $ZAP_PORT is in use ---"
+                    ss -tlnp | grep "$ZAP_PORT" 2>/dev/null || echo "(no listener on $ZAP_PORT)"
+                    exit 1
+                fi
+                echo "Starting spider scan..."
+                ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
+                SPIDER_ID=$(curl -s \
+                    "${ZAP_API_BASE}/JSON/spider/action/scan/?url=$TARGET_URL" \
+                    | jq -r '.scan // empty')
+                if [ -z "$SPIDER_ID" ] || [ "$SPIDER_ID" = "null" ]; then
+                    echo "Failed to start spider scan"
+                    echo "--- ZAP log (last 30 lines) ---"
+                    tail -n 30 reports/zap.log 2>/dev/null
+                    exit 1
+                fi
+                echo "Spider ID: $SPIDER_ID"
+                SPIDER_START=$(date +%s)
+                SPIDER_TIMEOUT=600
+                while true; do
+                    SPIDER_ELAPSED=$(($(date +%s) - SPIDER_START))
+                    if [ $SPIDER_ELAPSED -gt $SPIDER_TIMEOUT ]; then
+                        echo "Spider timeout exceeded ($SPIDER_TIMEOUT s)"
+                        exit 1
+                    fi
+                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
+                        echo "ZAP process died during spider scan"
+                        echo "--- ZAP log (last 50 lines) ---"
+                        tail -n 50 reports/zap.log 2>/dev/null
+                        exit 1
+                    fi
+                    STATUS=$(curl -s \
+                        "${ZAP_API_BASE}/JSON/spider/view/status/?scanId=$SPIDER_ID" \
+                        | jq -r '.status // "0"')
+                    echo "Spider progress: ${STATUS}%"
+                    if [ "$STATUS" = "100" ]; then
+                        break
+                    fi
+                    sleep 5
+                done
+                echo "Spider completed"
+                echo "Waiting 15s for ZAP to process spider results..."
+                sleep 15
+                echo "Starting active scan..."
+                ASCAN_ID=$(curl -s \
+                    "${ZAP_API_BASE}/JSON/ascan/action/scan/?url=$TARGET_URL&recurse=true" \
+                    | jq -r '.scan // empty')
+                if [ -z "$ASCAN_ID" ] || [ "$ASCAN_ID" = "null" ]; then
+                    echo "Failed to start active scan"
+                    echo "--- ZAP log (last 30 lines) ---"
+                    tail -n 30 reports/zap.log 2>/dev/null
+                    exit 1
+                fi
+                echo "Active Scan ID: $ASCAN_ID"
+                ASCAN_START=$(date +%s)
+                ASCAN_TIMEOUT=7200
+                while true; do
+                    ASCAN_ELAPSED=$(($(date +%s) - ASCAN_START))
+                    if [ $ASCAN_ELAPSED -gt $ASCAN_TIMEOUT ]; then
+                        echo "Active scan timeout exceeded ($ASCAN_TIMEOUT s)"
+                        exit 1
+                    fi
+                    if ! kill -0 "$ZAP_PID" 2>/dev/null; then
+                        echo "ZAP process died during active scan"
+                        echo "--- ZAP log (last 50 lines) ---"
+                        tail -n 50 reports/zap.log 2>/dev/null
+                        exit 1
+                    fi
+                    STATUS=$(curl -s \
+                        "${ZAP_API_BASE}/JSON/ascan/view/status/?scanId=$ASCAN_ID" \
+                        | jq -r '.status // "0"')
+                    if [ "$STATUS" = "100" ]; then
+                        break
+                    fi
+                    echo "Active scan progress: ${STATUS}% (polling every 60s)"
+                    sleep 60
+                done
+                echo "Active scan completed"
+                echo "Generating reports..."
+                curl -s \
+                    "${ZAP_API_BASE}/OTHER/core/other/htmlreport/" \
+                    -o reports/zap.html
+                curl -s \
+                    "${ZAP_API_BASE}/OTHER/core/other/jsonreport/" \
+                    -o reports/zap.json
+                if [ ! -f reports/zap.json ] || [ ! -s reports/zap.json ]; then
+                    echo "ZAP JSON report missing or empty"
+                    echo "--- ZAP log (last 30 lines) ---"
+                    tail -n 30 reports/zap.log 2>/dev/null
+                    exit 1
+                fi
+                echo "ZAP reports generated:"
+                ls -lh reports/zap.* 2>/dev/null
+                echo "Stopping ZAP..."
+                # Safer cleanup: try pkill first, fall back to kill if needed
+                pkill -f zap.jar 2>/dev/null || true
+                # Give processes time to terminate gracefully
+                sleep 3
+                # Force kill any remaining zap processes
+                kill -9 $(pgrep -f zap.jar 2>/dev/null || echo "") 2>/dev/null || true
+                echo "ZAP stopped"
+            '''
+            recordStage('zap_scan', 'PASS', 'ZAP scan completed successfully')
+        } catch (Exception e) {
+            def zapLog = ""
+            try { zapLog = readFile('reports/zap.log') } catch (_) {}
+            def errorLines = zapLog.split('\n').findAll {
+                it.contains('ERROR') || it.contains('Exception') || it.contains('failed') || it.contains('died')
+            }
+            zapErrorDetail = errorLines ? errorLines.take(5).join(' | ') : e.message.take(300)
+            def trimmed = zapErrorDetail.length() > 400 ? zapErrorDetail.take(400) + '...' : zapErrorDetail
+            echo "ZAP scan failed: ${trimmed}"
+            recordStage('zap_scan', 'FAIL', "ZAP scan failed: ${trimmed}")
+        }
+    }
+}
+
+// ── Pipeline helper utilities ────────────────────────────────────────────────
+
+/**
+ * Fail the build immediately with a clear message if condition is false.
+ * Use to enforce mandatory post-conditions (e.g. required output files).
+ *
+ * Example:
+ *   validateStage(fileExists('reports/sonar-scanner-output.log'),
+ *                 "Sonar output log missing — scanner may have crashed")
+ */
+def validateStage(boolean condition, String message) {
+    if (!condition) {
+        error("[validateStage] ${message}")
     }
 }
 

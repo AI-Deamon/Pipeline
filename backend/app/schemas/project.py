@@ -59,10 +59,15 @@ class ProjectUpdate(BaseModel):
     target_url: Optional[str] = None
 
 class ProjectResponse(ProjectCreate):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
     project_id: str
     status: str = "CREATED"
     last_scan_state: Optional[str] = None
     last_scan_id: Optional[str] = None
+    user_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 # Project Group Schemas

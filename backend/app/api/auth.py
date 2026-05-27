@@ -1,7 +1,7 @@
 import uuid
 import re
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -39,7 +39,7 @@ def _validate_password_strength(password: str) -> None:
 
 @router.post("/register", response_model=User)
 @limiter.limit("5/minute")
-def register(request, user: UserCreate, db: Session = Depends(get_db)):
+def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     _validate_password_strength(user.password)
 
     # Check username collision
@@ -60,7 +60,7 @@ def register(request, user: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 @limiter.limit("10/minute")
-def login_for_access_token(request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(UserDB).filter(UserDB.username == form_data.username).first()
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

@@ -4,14 +4,14 @@ import { useState, useMemo } from 'react';
 import { api } from '../services/api';
 import { ArrowLeft, Search } from 'lucide-react';
 import { PageSkeleton } from '../components/PageSkeleton';
-import { useScanReset } from '../hooks/useScanReset';
+import { useScanForceUnlock } from '../hooks/useScanReset';
 
 export default function ScanHistoryPage() {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [confirmReset, setConfirmReset] = useState<{isOpen: boolean, scanId: string} | null>(null);
-  const resetMutation = useScanReset();
+  const forceUnlockMutation = useScanForceUnlock();
 
   const { data: history = [], isLoading, refetch } = useQuery({
     queryKey: ['scan-history', projectId],
@@ -25,9 +25,9 @@ export default function ScanHistoryPage() {
     );
   }, [history, searchTerm]);
 
-  const handleConfirmReset = () => {
+  const handleConfirmForceStop = () => {
     if (confirmReset) {
-      resetMutation.mutate(confirmReset.scanId, {
+      forceUnlockMutation.mutate(confirmReset.scanId, {
         onSuccess: () => {
           refetch();
           setConfirmReset(null);
@@ -136,7 +136,18 @@ export default function ScanHistoryPage() {
                         timeZone: 'Asia/Kolkata',
                       }) : '--'}
                     </td>
-                    <td className="px-6 py-4 text-right">
+                    <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                      {['RUNNING', 'QUEUED', 'CREATED'].includes(scan.state) && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmReset({ isOpen: true, scanId: scan.scan_id });
+                          }}
+                          className="text-sm text-amber-600 hover:text-amber-800 font-medium"
+                        >
+                          Force Stop
+                        </button>
+                      )}
                       <Link
                         to={`/scans/${scan.scan_id}`}
                         className="text-sm text-slate-600 hover:text-slate-900"
@@ -156,21 +167,21 @@ export default function ScanHistoryPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setConfirmReset(null)}></div>
           <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10">
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Reset Scan?</h3>
-            <p className="text-slate-500 text-sm mb-6">This will reset scan {confirmReset.scanId.slice(0, 8)}...</p>
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">Force Stop Scan?</h3>
+            <p className="text-slate-500 text-sm mb-6">This will mark scan {confirmReset.scanId.slice(0, 8)}... as failed so you can start a new scan.</p>
             <div className="flex gap-3">
               <button
-                onClick={handleConfirmReset}
-                disabled={resetMutation.isPending}
-                className="flex-1 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                onClick={handleConfirmForceStop}
+                disabled={forceUnlockMutation.isPending}
+                className="flex-1 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
               >
-                {resetMutation.isPending ? "Resetting..." : "Reset"}
+                {forceUnlockMutation.isPending ? "Stopping..." : "Force Stop"}
               </button>
               <button
                 onClick={() => setConfirmReset(null)}
                 className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium"
               >
-                Cancel
+                Keep
               </button>
             </div>
           </div>
