@@ -10,6 +10,7 @@ VALID_STAGES = {
     "trivy_image_scan",
     "nmap_scan",
     "zap_scan",
+    "install_dependencies",
 }
 
 STAGE_DEPENDENCIES = {

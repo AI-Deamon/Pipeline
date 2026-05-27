@@ -33,6 +33,8 @@ class ScanResponse(BaseModel):
     # New fields for Phase 1 & 2
     error: Optional[ScanError] = None
     retry_count: int = 0
+    git_commit: Optional[str] = None
+    git_branch: Optional[str] = None
 
 class ScanResultsResponse(BaseModel):
     scan_id: str

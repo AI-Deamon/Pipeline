@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 import httpx
@@ -31,10 +32,10 @@ def get_sonar_dashboard_link(sonar_key: str) -> str:
 
 
 def create_sonar_report_link(sonar_key: Optional[str]) -> Optional[str]:
-    """Create SonarQube report entry (returns link only, no parsing)"""
+    """Create SonarQube report entry (returns issues link)"""
     if not sonar_key:
         return None
-    return get_sonar_dashboard_link(sonar_key)
+    return get_sonar_issues_link(sonar_key)
 
 
 def get_sonar_issues_link(sonar_key: str) -> str:
@@ -59,6 +60,8 @@ async def fetch_sonar_issues(
 ) -> tuple[List[SecurityFinding], str]:
     """
     Fetch actual issues from SonarQube API with pagination.
+    Filters to BUG and VULNERABILITY types only (no CODE_SMELL or SECURITY_HOTSPOT).
+    Retries up to 3 times if API returns 0 issues (handles ES index lag after DB migration).
     Returns tuple of (findings list, raw JSON response string).
     """
     if not sonar_url:
@@ -76,61 +79,82 @@ async def fetch_sonar_issues(
         )
     auth = (settings.SONARQUBE_TOKEN, "") if settings.SONARQUBE_TOKEN else None
 
-    all_issues: list[dict] = []
-    findings: List[SecurityFinding] = []
-    raw_json = ""
-    page = 1
-    page_size = 500
-    total = None
+    max_retries = 3
+    retry_delay = 10
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            while total is None or len(all_issues) < total:
-                params = {
-                    "componentKeys": sonar_key,
-                    "ps": page_size,
-                    "p": page,
-                }
+    for attempt in range(max_retries):
+        all_issues: list[dict] = []
+        findings: List[SecurityFinding] = []
+        raw_json = ""
+        page = 1
+        page_size = 500
+        total = None
 
-                response = await client.get(url, params=params, auth=auth)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while total is None or len(all_issues) < total:
+                    params = {
+                        "componentKeys": sonar_key,
+                        "ps": page_size,
+                        "p": page,
+                        "types": "BUG,VULNERABILITY",
+                    }
 
-                if response.status_code != 200:
-                    logger.warning(
-                        f"SonarQube API returned {response.status_code}: {response.text}"
+                    response = await client.get(url, params=params, auth=auth)
+
+                    if response.status_code != 200:
+                        logger.warning(
+                            f"SonarQube API returned {response.status_code}: {response.text}"
+                        )
+                        break
+
+                    data = response.json()
+                    if total is None:
+                        total = data.get("total", 0)
+                        raw_json = response.text
+
+                    issues = data.get("issues", [])
+                    if not issues:
+                        break
+
+                    all_issues.extend(issues)
+                    page += 1
+
+            if total is not None and total > 0:
+                for issue in all_issues:
+                    severity = SEVERITY_MAP.get(issue.get("severity", ""), "Unknown")
+                    finding = SecurityFinding(
+                        id=f"SONAR-{issue.get('key', 'unknown')}",
+                        tool="sonar",
+                        severity=severity,
+                        title=issue.get("message", ""),
+                        description=f"Rule: {issue.get('rule', 'unknown')}",
+                        host=issue.get("component", "").split(":")[0]
+                        if issue.get("component")
+                        else "",
+                        recommendation=f"Fix according to rule {issue.get('rule', '')}",
+                        raw_evidence=str(issue),
+                        rule=issue.get("rule", ""),
+                        finding_type=issue.get("type", ""),
                     )
-                    break
+                    findings.append(finding)
+                return findings, raw_json
 
-                data = response.json()
-                if total is None:
-                    total = data.get("total", 0)
-                    raw_json = response.text
-
-                issues = data.get("issues", [])
-                if not issues:
-                    break
-
-                all_issues.extend(issues)
-                page += 1
-
-            for issue in all_issues:
-                severity = SEVERITY_MAP.get(issue.get("severity", ""), "Unknown")
-                finding = SecurityFinding(
-                    id=f"SONAR-{issue.get('key', 'unknown')}",
-                    tool="sonar",
-                    severity=severity,
-                    title=issue.get("message", ""),
-                    description=f"Rule: {issue.get('rule', 'unknown')}",
-                    host=issue.get("component", "").split(":")[0]
-                    if issue.get("component")
-                    else "",
-                    recommendation=f"Fix according to rule {issue.get('rule', '')}",
-                    raw_evidence=str(issue),
-                    rule=issue.get("rule", ""),
-                    finding_type=issue.get("type", ""),
+            if attempt < max_retries - 1:
+                logger.info(
+                    f"SonarQube returned {total} issues for {sonar_key} "
+                    f"(attempt {attempt+1}/{max_retries}), retrying in {retry_delay}s..."
                 )
-                findings.append(finding)
+                await asyncio.sleep(retry_delay)
 
-        return findings, raw_json
-    except Exception as e:
-        logger.error(f"Error fetching SonarQube issues: {e}")
-        return [], ""
+        except Exception as e:
+            logger.error(
+                f"Error fetching SonarQube issues for {sonar_key} "
+                f"(attempt {attempt+1}/{max_retries}): {e}"
+            )
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+            else:
+                return [], ""
+
+    return [], ""

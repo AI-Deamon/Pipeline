@@ -2,15 +2,11 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { describe, it, expect, vi } from 'vitest';
 import LoginPage from './LoginPage';
-import { AuthProvider, useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/useAuth';
 
-vi.mock('../hooks/useAuth', async (importOriginal) => {
-  const actual = await importOriginal();
-  return {
-    ...actual,
-    useAuth: vi.fn(),
-  };
-});
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: vi.fn(),
+}));
 
 describe('LoginPage redirect behavior', () => {
   afterEach(() => {

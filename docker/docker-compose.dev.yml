@@ -4,7 +4,7 @@ services:
       - ../.env.dev
     environment:
       - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
-      - REDIS_URL=redis://localhost:6379/0
+      - REDIS_URL=redis://localhost:6380/0
       - JENKINS_BASE_URL=http://localhost:8080
     volumes:
       - ../backend:/app/backend
@@ -15,7 +15,7 @@ services:
       - ../.env.dev
     environment:
       - DATABASE_URL=postgresql://devsecops:staging-password@localhost:5433/devsecops_staging
-      - REDIS_URL=redis://localhost:6379/0
+      - REDIS_URL=redis://localhost:6380/0
       - JENKINS_BASE_URL=http://localhost:8080
     volumes:
       - ../backend:/app/backend
@@ -41,5 +41,16 @@ services:
       timeout: 5s
       retries: 5
 
+  sonarqube:
+    env_file:
+      - ../.env.dev
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+
 volumes:
   postgres_data:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:

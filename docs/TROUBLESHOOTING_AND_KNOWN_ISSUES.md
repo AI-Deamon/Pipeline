@@ -520,6 +520,47 @@ api.interceptors.response.use(
 
 ---
 
+### 3. Git Clone Failure on Large Repositories
+
+**Symptom**: Jenkins pipeline fails at Git Checkout stage with decompression errors on large repositories.
+
+**Error**:
+```
+error: inflate: data stream error (invalid distance too far back)
+fatal: serious inflate inconsistency
+fatal: fetch-pack: invalid index-pack output
+```
+
+**Root Cause**: Full git clone attempts to fetch entire repository history (100k+ objects), which can hit zlib decompression failures due to network instability, memory pressure, or large pack files on Jenkins.
+
+**Affected File**: `Agent/Jenkinsfile` (checkout stage)
+
+**Fix Applied**: Shallow clone with depth 50 — fetches recent 50 commits instead of full history, eliminating large pack file transfers while preserving git blame data for SonarQube SCM integration.
+
+```groovy
+// Before: full clone (fetches all history)
+checkout([
+    $class: 'GitSCM',
+    branches: [[name: PROJECT.branch ?: 'main']],
+    userRemoteConfigs: [[url: PROJECT.git_url, credentialsId: PROJECT.credentials_id]]
+])
+
+// After: shallow clone (50 commits of history)
+checkout([
+    $class: 'GitSCM',
+    branches: [[name: PROJECT.branch ?: 'main']],
+    userRemoteConfigs: [[url: PROJECT.git_url, credentialsId: PROJECT.credentials_id]],
+    extensions: [[$class: 'CloneOption', depth: 50, noTags: true, shallow: true]]
+])
+```
+
+**Prevention**:
+- Depth 50 is safe for CI/CD — prevents inflate errors on large repos while keeping SCM features working
+- If inflate errors persist, reduce depth further (e.g., depth 10 or 1)
+- Monitor Jenkins agent memory and disk space for large clone operations
+
+---
+
 ## Build & Deployment Issues
 
 ### 1. TypeScript Build Errors
@@ -699,5 +740,5 @@ docker compose exec backend nslookup redis
 
 ---
 
-*Last Updated: 2026-03-02*
-*Document Version: 1.0*
+*Last Updated: 2026-05-23*
+*Document Version: 1.1*

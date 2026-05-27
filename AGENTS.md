@@ -62,7 +62,16 @@ python run.py down      # Stops + removes volumes + orphans
   - Rebuild a single service → `docker compose -f docker/docker-compose.yml -f docker/docker-compose.staging.yml up -d --build --no-deps <service>`
 - **Startup time**: 2-3 min for all Docker services. Postgres must be healthy before backend.
 - **Network mode**: `host` networking in compose — services reach each other via localhost.
+- **SonarQube port conflict**: If SonarQube runs on the host at port 9000, the Docker container will fail to start. Stop the host service first (`systemctl stop sonarqube`).
 - **No `npm run typecheck`**: Type checking happens via `npm run build` (`tsc -b`). Run `npx tsc -b` for standalone typecheck.
+- **SonarQube 26.5 upgrade complete**: Upgraded from 9.9.8 → 24.12.0 (custom ZIP) → 26.1.0 → 26.5.0.122743-community. Image tag in `docker/docker-compose.yml`. Healthcheck uses `curl`.
+- **SonarQube findings filter**: `fetch_sonar_issues()` in `backend/app/services/reporting/parsers/sonar.py` uses `types=BUG,VULNERABILITY` — drops CODE_SMELL. Includes 3-attempt retry loop with 10s delay for ES index lag after container restart.
+- **SonarQube JS/TS/CSS sensor fix**: Embedded Node.js v24 causes PostCSS crash. Fix uses Jenkins NodeJS plugin (name: `Nodejs`) with `nodejs('Nodejs')` wrapper + `-Dsonar.nodejs.executable=\$(which node)`. Never use `sonar.javascript.skip=true` — it skips all JS/TS analysis.
+- **Celery worker must be rebuilt too**: When rebuilding backend for code changes, also rebuild celery_worker — it runs `process_scan_reports_task` which calls `fetch_sonar_issues()`. Without rebuilding, old code is used.
+- **SonarQube container can die silently**: If SonarQube is down, celery_worker's fetch fails with "All connection attempts failed" and stores 0 findings. Restart with `docker compose ... up -d --no-deps sonarqube`.
+- **DOCKER_BUILDKIT=1**: Added to docker build in `Agent/Jenkinsfile` `doDockerBuild()`. Required for repos with `# syntax=docker/dockerfile:1` (e.g., open-webui).
+- **SonarQube token**: `squ_38aedbbc9186c8bf59f9e2f70d4cd2b83ca79969` — set in backend env, verified working on 26.5.
+- **Jenkins Docker build failures**: Docker build stage in pipeline fails on repos with BuildKit-only Dockerfiles. Fixed by `DOCKER_BUILDKIT=1` env var. Docker daemon itself is healthy — issue is the repo's Dockerfile, not the system.
 
 ## Style conventions
 
@@ -78,7 +87,7 @@ python run.py down      # Stops + removes volumes + orphans
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/001-deep-code-audit/plan.md`, the audit report at
-`specs/001-deep-code-audit/AUDIT_REPORT.md`, and the research at
-`specs/001-deep-code-audit/research.md`.
+at `specs/003-upgrade-sonarqube-image/plan.md`, the spec at
+`specs/003-upgrade-sonarqube-image/spec.md`, and the research at
+`specs/003-upgrade-sonarqube-image/research.md`.
 <!-- SPECKIT END -->
