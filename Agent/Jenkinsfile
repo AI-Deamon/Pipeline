@@ -117,7 +117,7 @@ pipeline {
         REPORT_DIR = "reports"
         // Tool paths — override via Jenkins tools or env vars
         TRIVY_PATH = "${env.TRIVY_PATH ?: 'trivy'}"
-        JAVA_HOME_DIR = "${env.JAVA_HOME_17 ?: env.JAVA_HOME_DIR ?: ''}"
+        JAVA_HOME_DIR = "${env.JAVA_HOME_21 ?: env.JAVA_HOME_17 ?: env.JAVA_HOME_DIR ?: ''}"
         ZAP_PORT = "${env.ZAP_PORT ?: '8090'}"
 
         // Registry config — set DOCKER_REGISTRY for private registries (e.g. ghcr.io, ecr)
