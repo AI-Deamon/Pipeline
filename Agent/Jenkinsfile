@@ -226,16 +226,19 @@ pipeline {
                             def projectName = PROJECT.project_name ?: params.SCAN_ID
                             withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                                 withSonarQubeEnv('sonar-server') {
-                                    withEnv(["SONAR_SCANNER_OPTS=-XX:TieredStopAtLevel=3"]) {
+                                    withEnv(["SONAR_SCANNER_OPTS=-Xmx2g -Xms256m -XX:+UseG1GC -Xss8m -XX:TieredStopAtLevel=1"]) {
                                         sh """
                                             mkdir -p reports
                                             ${scannerHome}/bin/sonar-scanner \
                                               -Dsonar.projectKey="${PROJECT.sonar_key ?: params.SCAN_ID}" \
                                               -Dsonar.projectName="${projectName}" \
+                                              -Dsonar.sources=. \
+                                              -Dsonar.nodejs.executable=\$(which node) \
+                                              -Dsonar.scanner.skipJreProvisioning=true \
                                               -Dsonar.sourceEncoding=UTF-8 \
                                               -Dsonar.typescript.tsconfigPath=tsconfig.json \
                                               -Dsonar.token=\$SONAR_TOKEN \
-                                              -Dsonar.exclusions=node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js \
+                                              -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \
                                               2>&1 | tee reports/sonar-scanner-output.log
                                         """
                                     }
