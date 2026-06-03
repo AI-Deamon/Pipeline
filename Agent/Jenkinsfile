@@ -458,6 +458,9 @@ pipeline {
 
                     echo "Found ${dockerfiles.size()} Dockerfiles: ${dockerfiles.join(', ')}"
 
+                    // Prune build cache before building to avoid layer corruption issues
+                    sh 'docker builder prune -f 2>&1 || true'
+
                     // Build each Dockerfile found and store results
                     def buildResults = []
                     def failedBuilds = []
@@ -472,28 +475,41 @@ pipeline {
 
                         echo "Building ${dockerfile}..."
 
-                        // Capture output regardless of exit code (no try/catch)
-                        def buildOutput = sh(returnStdout: true, script: """
-                            set +e
-                            docker build -t ${imageTag} -f ${dockerfile} ${buildContext} 2>&1
-                            echo "___EXIT___\$?"
-                        """)
-                        def lines = buildOutput.split('\n')
-                        def exitLine = lines.find { it.startsWith('___EXIT___') }
-                        def exitCode = exitLine?.replace('___EXIT___', '')?.trim()
-                        def cleanOutput = lines.findAll { !it.startsWith('___EXIT___') }.join('\n')
+                        // Build with cache first; retry with --no-cache on checksum/integrity errors
+                        def buildCacheArgs = ''
+                        for (def attempt = 0; attempt < 2; attempt++) {
+                            def buildOutput = sh(returnStdout: true, script: """
+                                set +e
+                                docker build ${buildCacheArgs} -t ${imageTag} -f ${dockerfile} ${buildContext} 2>&1
+                                echo "___EXIT___\$?"
+                            """)
+                            def lines = buildOutput.split('\n')
+                            def exitLine = lines.find { it.startsWith('___EXIT___') }
+                            def exitCode = exitLine?.replace('___EXIT___', '')?.trim()
+                            def cleanOutput = lines.findAll { !it.startsWith('___EXIT___') }.join('\n')
 
-                        if (exitCode == '0') {
-                            allImageTags << imageTag
-                            buildResults << dockerfile
-                            echo "SUCCESS: ${dockerfile} built successfully"
-                        } else {
+                            if (exitCode == '0') {
+                                allImageTags << imageTag
+                                buildResults << dockerfile
+                                echo "SUCCESS: ${dockerfile} built successfully"
+                                break
+                            }
+
+                            // Check if this is a cache corruption error
+                            def isChecksumError = cleanOutput.contains('checksum failed') || cleanOutput.contains('file integrity checksum failed')
+                            if (isChecksumError && attempt == 0) {
+                                echo "Cache corruption detected for ${dockerfile}, retrying with --no-cache..."
+                                buildCacheArgs = '--no-cache'
+                                continue
+                            }
+
+                            // Non-retriable or second attempt failed
                             failedBuilds << dockerfile
-                            // Extract relevant error lines from build output
                             def errorLines = cleanOutput.split('\n').findAll { it.contains('error TS') || it.contains('ERROR:') || it.contains('Error ') }
                             def detail = errorLines ? errorLines.take(8).join(' | ') : cleanOutput.take(250).replace('\n', ' ')
                             failedDetails << "${dockerfile}: ${detail}"
                             echo "FAILED: ${dockerfile}"
+                            break
                         }
                     }
 
