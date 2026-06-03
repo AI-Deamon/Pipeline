@@ -234,7 +234,7 @@ pipeline {
                                               -Dsonar.projectKey="${PROJECT.sonar_key ?: params.SCAN_ID}" \
                                               -Dsonar.projectName="${projectName}" \
                                               -Dsonar.sources=. \
-                                              -Dsonar.nodejs.executable=\$(which node) \
+                                              -Dsonar.nodejs.executable=/home/kali_linux/node-v20.18.0-linux-x64/bin/node \
                                               -Dsonar.scanner.skipJreProvisioning=true \
                                               -Dsonar.sourceEncoding=UTF-8 \
                                               -Dsonar.typescript.tsconfigPath=tsconfig.json \
