@@ -237,10 +237,9 @@ pipeline {
                                                -Dsonar.nodejs.executable=/home/kali_linux/node-v20.18.0-linux-x64/bin/node \
                                                -Dsonar.scanner.skipJreProvisioning=true \
                                                -Dsonar.sourceEncoding=UTF-8 \
-                                               -Dsonar.typescript.tsconfigPath=tsconfig.json \
                                                -Dsonar.token=\$SONAR_TOKEN \
                                                -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \
-                                               2>&1 | tee reports/sonar-scanner-output.log; exit \${PIPESTATUS[0]}
+                                               > reports/sonar-scanner-output.log 2>&1; cat reports/sonar-scanner-output.log
                                          """
                                      }
                                 }
