@@ -701,11 +701,12 @@ print(f'Merged {len(r)} results')
             when { expression { shouldRun('nmap_scan') } }
             steps {
                 script {
-                    if (!PROJECT.target_ip) {
+                    if (!PROJECT.target_ip?.trim()) {
                         if (IS_MANUAL) {
                             error("target_ip required for manual Nmap scan")
                         }
                         echo "SKIP: No target_ip provided"
+                        recordStage('nmap_scan', 'SKIPPED', 'No target IP')
                         return
                     }
 
@@ -803,7 +804,7 @@ print(f'Merged {len(r)} results')
             when { expression { shouldRun('zap_scan') } }
             steps {
                 script {
-                    if (!PROJECT.target_url) {
+                    if (!PROJECT.target_url?.trim()) {
                         if (IS_MANUAL) {
                             error("target_url required for manual ZAP scan")
                         }
