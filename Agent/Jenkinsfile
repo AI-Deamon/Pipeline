@@ -362,24 +362,30 @@ pipeline {
                         scanArgs << "--exclude ${PROJECT.dependency_exclusions}"
                     }
 
-                    echo "Running OWASP Dependency-Check (${scanArgs.size()} args, NVD key masked)"
+                    echo "Running OWASP Dependency-Check CLI 12.2.2 (${scanArgs.size()} args, NVD key masked)"
 
                     def odcJvmCrashed = false
                     withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
                         def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
-                        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m -XX:+UseParallelGC -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"]
+                        def odcCli = "/var/lib/jenkins/tools/org.jenkinsci.plugins.DependencyCheck.tools.DependencyCheckInstallation/OWasp/bin/dependency-check.sh"
+                        def odcData = "/var/lib/jenkins/.dependency-check-data"
+                        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m"]
                         if (env.JAVA_HOME_DIR) {
                             javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
                         }
                         withEnv(javaEnv) {
                             catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                                dependencyCheck additionalArguments: argsWithKey.join(' '), odcInstallation: 'OWasp'
+                                sh """
+                                    mkdir -p "${odcData}"
+                                    ${odcCli} ${argsWithKey.join(' ')} --data "${odcData}" 2>&1 | tee reports/dependency-check-cli.log
+                                    exit \${PIPESTATUS[0]}
+                                """
                             }
-                            // If catchError caught a JVM crash, reports are still on disk
-                            if (currentBuild.result == 'UNSTABLE' || currentBuild.result == 'FAILURE') {
-                                odcJvmCrashed = true
-                                echo "WARNING: ODC JVM crashed during database defrag — reports were written before crash"
-                            }
+                        }
+                        // Check if CLI failed (catchError marks UNSTABLE but doesn't throw)
+                        if (currentBuild.result == 'UNSTABLE' || currentBuild.result == 'FAILURE') {
+                            odcJvmCrashed = true
+                            echo "WARNING: ODC CLI returned non-zero — reports may be incomplete"
                         }
                     }
                     def depSummary = "Dependency check completed"
