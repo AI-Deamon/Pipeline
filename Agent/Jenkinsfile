@@ -328,19 +328,23 @@ pipeline {
                         scanArgs << "--exclude ${PROJECT.dependency_exclusions}"
                     }
 
-                    echo "Running OWASP Dependency-Check (${scanArgs.size()} args, NVD key masked)"
+                    echo "Running OWASP Dependency-Check CLI 12.2.2 (${scanArgs.size()} args, NVD key masked)"
 
                     try {
                         withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
-                            // Append NVD key inside withCredentials to avoid env-block credential requirement
                             def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
-                            // Use env var for JAVA_HOME and JVM memory, fall back to what's available
-                            def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"]
+                            def odcCli = "/var/lib/jenkins/tools/org.jenkinsci.plugins.DependencyCheck.tools.DependencyCheckInstallation/OWasp/bin/dependency-check.sh"
+                            def odcData = "/var/lib/jenkins/.dependency-check-data"
+                            def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m"]
                             if (env.JAVA_HOME_DIR) {
                                 javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
                             }
                             withEnv(javaEnv) {
-                                dependencyCheck additionalArguments: argsWithKey.join(' '), odcInstallation: 'OWasp'
+                                sh """
+                                    mkdir -p "${odcData}"
+                                    ${odcCli} ${argsWithKey.join(' ')} --data "${odcData}" 2>&1 | tee reports/dependency-check-cli.log
+                                    exit \${PIPESTATUS[0]}
+                                """
                             }
                         }
                         def depSummary = 'Dependency check completed'
