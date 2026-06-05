@@ -369,7 +369,8 @@ pipeline {
                         def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
                         def odcCli = "/var/lib/jenkins/tools/org.jenkinsci.plugins.DependencyCheck.tools.DependencyCheckInstallation/OWasp/bin/dependency-check.sh"
                         def odcData = "/var/lib/jenkins/.dependency-check-data"
-                        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m"]
+                        def jvmArgs = "-Xmx4g -Xms512m -XX:+UseParallelGC -XX:MaxMetaspaceSize=512m"
+                        def javaEnv = ["JAVA_OPTS=${jvmArgs}", "_JAVA_OPTIONS=${jvmArgs}"]
                         if (env.JAVA_HOME_DIR) {
                             javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
                         }
@@ -464,8 +465,8 @@ pipeline {
 
                     echo "Found ${dockerfiles.size()} Dockerfiles: ${dockerfiles.join(', ')}"
 
-                    // Prune build cache before building to avoid layer corruption issues
-                    sh 'docker builder prune -f 2>&1 || true'
+                    // Prune ALL build cache (not just dangling) to clear corrupted layers
+                    sh 'docker builder prune --all -f 2>&1 || true'
 
                     // Build each Dockerfile found and store results
                     def buildResults = []
