@@ -627,7 +627,8 @@ def doDependencyCheck() {
     def odcJvmCrashed = false
     withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
         def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
-        def javaEnv = ["JAVA_OPTS=-Xmx4g -Xms512m -XX:+UseParallelGC -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"]
+        def jvmArgs = "-Xmx4g -Xms512m -XX:+UseParallelGC -XX:MaxMetaspaceSize=512m -XX:CompileCommand=exclude,org/h2/mvstore/cache/CacheLongLIRS\\\$Segment.put"
+        def javaEnv = ["JAVA_OPTS=${jvmArgs}", "_JAVA_OPTIONS=${jvmArgs}"]
         if (env.JAVA_HOME_DIR) {
             javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
         }
@@ -1022,7 +1023,7 @@ def doZapScan() {
                     -config ascan.threadPerHost=5 \
                     -config ascan.strength=Medium \
                     -config ascan.maxScanTimeInMs=7200000 \
-                    -J-Xmx2g -J-Xms256m > reports/zap.log 2>&1 &
+                    -J-Xmx4g -J-Xms512m -J-XX:MaxMetaspaceSize=512m > reports/zap.log 2>&1 &
                 ZAP_PID=$!
                 echo "ZAP PID: $ZAP_PID"
                 echo "ZAP daemon log: reports/zap.log"
