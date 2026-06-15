@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from app.api import projects, scans, auth, reports, project_groups, scanner_tools
+from app.api import projects, scans, auth, reports, project_groups, scanner_tools, issues
+from app.api import users
 from app.websockets import router as websocket_router
 from app.core.auth import get_current_user
 from app.core.config import settings
@@ -92,13 +93,28 @@ def validate_configuration():
             id=str(uuid.uuid4()),
             username="admin",
             hashed_password=get_password_hash(admin_password),
+            role="admin",
         )
         db.add(admin_user)
         db.commit()
         print("Created default admin user")
 
-    # Backfill existing projects with admin user_id (data isolation migration)
+    # Backfill existing admin user with admin role if missing
     admin_user = db.query(UserDB).filter(UserDB.username == "admin").first()
+    if admin_user and admin_user.role is None:
+        admin_user.role = "admin"
+        db.commit()
+        print("Backfilled admin user with role='admin'")
+
+    # Backfill existing users without a role with 'developer' role
+    users_no_role = db.query(UserDB).filter(UserDB.role == None).all()
+    if users_no_role:
+        for user in users_no_role:
+            user.role = "developer"
+        db.commit()
+        print(f"Backfilled {len(users_no_role)} users with role='developer'")
+
+    # Backfill existing projects with admin user_id (data isolation migration)
     if admin_user:
         projects_without_user = db.query(ProjectDB).filter(ProjectDB.user_id == None).all()
         if projects_without_user:
@@ -142,6 +158,47 @@ app.include_router(
 app.include_router(
     project_groups.router, prefix="/api/v1", tags=["project-groups"], dependencies=protected_deps
 )
+app.include_router(
+    issues.router, prefix="/api/v1", tags=["issues"], dependencies=protected_deps
+)
+app.include_router(
+    users.router, prefix="/api/v1", tags=["users"], dependencies=protected_deps
+)
+
+
+from fastapi import Response, Header, HTTPException
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+import base64
+import secrets
+
+from app.core.config import settings
+
+
+def _require_metrics_auth(authorization: str) -> None:
+    if not authorization.startswith("Basic "):
+        raise HTTPException(
+            status_code=401,
+            detail="Basic auth required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    encoded = authorization.split(" ", 1)[1]
+    decoded = base64.b64decode(encoded).decode("utf-8", errors="ignore")
+    if ":" not in decoded:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid Basic auth",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    _, supplied = decoded.split(":", 1)
+    expected = settings.METRICS_TOKEN
+    if not expected or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Invalid metrics token")
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics(authorization: str = Header(default="")) -> Response:
+    _require_metrics_auth(authorization)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/")

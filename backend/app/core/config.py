@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     CALLBACK_TOKEN: str
     API_KEY: str
     JWT_SECRET_KEY: str = ""  # Separate secret for JWT signing; falls back to API_KEY
+    METRICS_TOKEN: str = ""  # Token required by Prometheus scrape config to access /metrics
     REDIS_URL: str = "redis://localhost:6379/0"
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:4173"]
     SONARQUBE_URL: str = "localhost:9000"

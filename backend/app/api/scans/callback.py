@@ -9,6 +9,7 @@ from app.core.db import get_db
 from app.models.db_models import ProjectDB, ScanDB
 from app.state.scan_state import ScanState
 from app.tasks.report_tasks import process_scan_reports_task
+from app.tasks.issue_tasks import migrate_scan_to_issues, auto_verify_fixed_issues, auto_verify_pending_rescans, detect_regressions
 from app.websockets.manager import manager as websocket_manager
 
 from .utils import (
@@ -140,6 +141,14 @@ def scan_callback(
             jenkins_build_number=str(build_number),
             jenkins_base_url=settings.JENKINS_BASE_URL,
         )
+
+        completed_stages = [s for s in normalized_stages if s.get("status") in ("PASSED", "PASS")]
+        for stage in completed_stages:
+            tool_name = stage["stage"]
+            migrate_scan_to_issues.delay(scan_id, scan_obj.project_id, tool_name)
+            auto_verify_fixed_issues.delay(scan_id, scan_obj.project_id, tool_name)
+            auto_verify_pending_rescans.delay(scan_id, scan_obj.project_id, tool_name)
+            detect_regressions.delay(scan_id, scan_obj.project_id, tool_name)
 
     background_tasks.add_task(
         websocket_manager.send_scan_update,

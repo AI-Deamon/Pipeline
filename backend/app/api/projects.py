@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.db import get_db
 from app.core.auth import get_current_user
-from app.models.db_models import ProjectDB, ScanDB, UserDB
+from app.core.auth import get_current_user, get_rbac
+from app.models.db_models import ProjectDB, ScanDB, UserDB, ProjectAssignmentDB
 from app.core.config import settings
 from app.api.scans.utils import _expire_scan_if_timed_out
 from app.state.scan_state import ScanState
-
+from app.services.rbac_service import get_rbac_service
 router = APIRouter()
 
 ACTIVE_STATES = {
@@ -37,12 +38,20 @@ def _get_user_id_filter(request: Request, current_user) -> str | None:
     return None  # Fallback for test-bypass user
 
 
-def _filter_projects_by_user(query, request: Request, current_user):
-    """Apply user-level data isolation to a ProjectDB query."""
-    user_id = _get_user_id_filter(request, current_user)
-    if user_id is not None:
-        return query.filter(ProjectDB.user_id == user_id)
-    return query  # API-key auth: no filter
+def _filter_projects_by_user(query, request: Request, current_user, db: Session | None = None):
+    """Apply user-level data isolation to a ProjectDB query using RBAC."""
+    if _is_api_key_auth(request):
+        return query
+    if db is not None:
+        rbac = get_rbac_service(db=db, user=current_user)
+        if rbac.is_admin:
+            return query
+        effective_ids = rbac.get_effective_project_ids()
+        if effective_ids:
+            return query.filter(ProjectDB.project_id.in_(effective_ids))
+        return query.filter(ProjectDB.project_id == "__no_access__")
+    # Fallback: no db session available, return query unfiltered
+    return query
 
 
 def _get_last_scan_map(db: Session) -> dict[str, str]:
@@ -152,11 +161,22 @@ def get_project(project_id: str, request: Request, db: Session = Depends(get_db)
         .order_by(ScanDB.created_at.desc())
         .first()
     )
-    project_data = dict(db_project.__dict__)
-    project_data.pop("_sa_instance_state", None)
-    project_data["last_scan_state"] = db_project.last_scan_state
-    project_data["last_scan_id"] = last_scan.scan_id if last_scan else None
-    return project_data
+    return ProjectResponse(
+        project_id=db_project.project_id,
+        name=db_project.name,
+        status=db_project.status,
+        last_scan_state=db_project.last_scan_state,
+        last_scan_id=last_scan.scan_id if last_scan else None,
+        user_id=db_project.user_id,
+        git_url=db_project.git_url,
+        branch=db_project.branch or "main",
+        credentials_id=db_project.credentials_id,
+        sonar_key=db_project.sonar_key,
+        target_ip=db_project.target_ip,
+        target_url=db_project.target_url,
+        created_at=db_project.created_at,
+        updated_at=db_project.updated_at,
+    )
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -215,4 +235,98 @@ def delete_project(project_id: str, request: Request, db: Session = Depends(get_
         "detail": "Project deleted successfully",
         "deleted_scans": len(scan_ids),
         "deleted_artifact_paths": deleted_artifacts,
+    }
+
+
+@router.get("/projects/{project_id}/code-snippet")
+def get_code_snippet(
+    project_id: str,
+    file: str,
+    line: int,
+    context: int = 10,
+    branch: str = "",
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return lines of code around the given line from the project's Git repo."""
+    from app.services.rbac_service import get_rbac_service
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
+        raise HTTPException(status_code=403, detail="No project access")
+
+    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    ext = Path(file).suffix.lower()
+    language_map = {
+        ".ts": "tsx", ".tsx": "tsx",
+        ".js": "javascript", ".jsx": "javascript",
+        ".py": "python", ".java": "java", ".cs": "csharp",
+        ".go": "go", ".rb": "ruby", ".rs": "rust",
+        ".kt": "kotlin", ".swift": "swift", ".php": "php",
+        ".html": "html", ".css": "css", ".scss": "scss",
+        ".json": "json", ".yaml": "yaml", ".yml": "yaml",
+        ".md": "markdown", ".sh": "bash", ".sql": "sql",
+    }
+    language = language_map.get(ext, "text")
+
+    use_branch = branch or project.branch or "main"
+    content = None
+    source = "none"
+
+    git_url = project.git_url or ""
+    try:
+        if "github.com" in git_url:
+            raw_url = git_url.replace("github.com", "raw.githubusercontent.com").replace(".git", "")
+            file_url = f"{raw_url}/{use_branch}/{file}"
+            import httpx
+            resp = httpx.get(file_url, timeout=10)
+            if resp.status_code == 200:
+                content = resp.text
+                source = "github"
+    except Exception:
+        pass
+
+    if content is None and project.git_url:
+        try:
+            from app.core.config import settings as _s
+            workspace = Path(_s.STORAGE_PATH).parent / "workspaces" / project_id
+            file_path = workspace / file
+            if file_path.exists():
+                content = file_path.read_text()
+                source = "workspace"
+        except Exception:
+            pass
+
+    if content is None:
+        raise HTTPException(status_code=404, detail="File not found in any accessible source")
+
+    lines = content.splitlines()
+    start = max(0, line - 1 - context)
+    end = min(len(lines), line - 1 + context + 1)
+    snippet_lines = lines[start:end]
+    snippet = "\n".join(snippet_lines)
+
+    git_blob_url = None
+    if "github.com" in (project.git_url or ""):
+        git_blob_url = (
+            project.git_url.replace("github.com", "github.com")
+            .replace(".git", "")
+            .replace(f"git@{", f"https://")
+        )
+        git_blob_url = f"{git_blob_url}/blob/{use_branch}/{file}#L{line}"
+
+    return {
+        "file": file,
+        "language": language,
+        "branch": use_branch,
+        "start_line": start + 1,
+        "end_line": end,
+        "highlight_line": line,
+        "content": snippet,
+        "git_url": git_blob_url,
+        "source": source,
     }

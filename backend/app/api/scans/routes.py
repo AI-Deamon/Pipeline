@@ -214,6 +214,52 @@ def trigger_scan(
     return _scan_to_response(scan_obj)
 
 
+@router.post("/scans/trigger-verify", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
+def trigger_verify_scan(
+    project_id: str,
+    tool: str,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Trigger a single-tool verification scan (issue resolution workflow)."""
+    from app.services.rbac_service import get_rbac_service
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_approve_rescan(project_id):
+        raise HTTPException(status_code=403, detail="Not authorized to trigger verify scan")
+
+    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    user_id = getattr(current_user, "username", None) or "api-key-bypass"
+    scan_id = f"verify-{tool}-{uuid.uuid4().hex[:8]}"
+    scan_obj = ScanDB(
+        scan_id=scan_id,
+        project_id=project_id,
+        state=ScanState.RUNNING,
+        scan_mode="manual",
+        selected_stages=[tool],
+    )
+    db.add(scan_obj)
+    db.commit()
+    db.refresh(scan_obj)
+
+    project_data = {
+        "project_id": project.project_id,
+        "name": project.name,
+        "git_url": project.git_url,
+        "branch": project.branch or "main",
+    }
+    try:
+        jenkins_service.trigger_scan_job(scan_obj, project_data)
+    except Exception as e:
+        logger.warning(f"Jenkins trigger failed for verify scan {scan_id}: {e}")
+
+    return _scan_to_response(scan_obj)
+
+
 @router.get("/scans/{scan_id}", response_model=ScanResponse)
 def get_scan(scan_id: str, db: Session = Depends(get_db)):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
