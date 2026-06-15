@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any, Literal
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
@@ -215,7 +215,7 @@ class UnifiedReportGenerator:
 
         doc = SimpleDocTemplate(
             buffer,
-            pagesize=letter,
+            pagesize=landscape(letter),
             rightMargin=72,
             leftMargin=72,
             topMargin=72,
@@ -258,20 +258,26 @@ class UnifiedReportGenerator:
         if self.report_type == "technical":
             # Findings table
             elements.append(Paragraph("Detailed Findings", styles['Heading2']))
-            findings_data = [["Severity", "Title", "Tool", "Host/Package"]]
+            findings_data = [[
+                Paragraph("Severity", styles["BodyText"]),
+                Paragraph("Title", styles["BodyText"]),
+                Paragraph("Tool", styles["BodyText"]),
+                Paragraph("Host/Package", styles["BodyText"])
+            ]]
             for f in self.findings:
                 findings_data.append([
-                    f.severity,
-                    f.title[:80] + ("..." if len(f.title) > 80 else ""),
-                    f.tool,
-                    f.host or f.package or "-"
+                    Paragraph(str(f.severity), styles["BodyText"]),
+                    Paragraph(str(f.title), styles["BodyText"]),
+                    Paragraph(str(f.tool), styles["BodyText"]),
+                    Paragraph(str(f.host or f.package or "-"), styles["BodyText"])
                 ])
-            findings_table = Table(findings_data, colWidths=[1*inch, 3*inch, 1.5*inch, 1.5*inch])
+            findings_table = Table(findings_data, colWidths=[0.8*inch, 4.5*inch, 1.0*inch, 1.8*inch])
             findings_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('FONTSIZE', (0, 0), (-1, -1), 8),
             ]))
             elements.append(findings_table)

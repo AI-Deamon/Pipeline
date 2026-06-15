@@ -56,11 +56,20 @@ SEVERITY_MAP = {
 
 
 async def fetch_sonar_issues(
-    sonar_key: str, sonar_url: str = None
+    sonar_key: str,
+    sonar_url: str = None,
+    issue_types: str = "BUG,VULNERABILITY",
 ) -> tuple[List[SecurityFinding], str]:
     """
     Fetch actual issues from SonarQube API with pagination.
-    Filters to BUG and VULNERABILITY types only (no CODE_SMELL or SECURITY_HOTSPOT).
+
+    Args:
+        sonar_key: SonarQube project key (e.g., "my-project")
+        sonar_url: SonarQube host (default: from settings)
+        issue_types: Comma-separated issue types to fetch.
+            Valid: BUG, VULNERABILITY, CODE_SMELL, SECURITY_HOTSPOT.
+            Default: BUG,VULNERABILITY (preserves prior behavior).
+
     Retries up to 3 times if API returns 0 issues (handles ES index lag after DB migration).
     Returns tuple of (findings list, raw JSON response string).
     """
@@ -97,7 +106,7 @@ async def fetch_sonar_issues(
                         "componentKeys": sonar_key,
                         "ps": page_size,
                         "p": page,
-                        "types": "BUG,VULNERABILITY",
+                        "types": issue_types,
                     }
 
                     response = await client.get(url, params=params, auth=auth)
@@ -122,6 +131,8 @@ async def fetch_sonar_issues(
 
             if total is not None and total > 0:
                 for issue in all_issues:
+                    component = issue.get("component", "")
+                    file_path = component.split(":", 1)[1] if ":" in component else component
                     severity = SEVERITY_MAP.get(issue.get("severity", ""), "Unknown")
                     finding = SecurityFinding(
                         id=f"SONAR-{issue.get('key', 'unknown')}",
@@ -129,13 +140,17 @@ async def fetch_sonar_issues(
                         severity=severity,
                         title=issue.get("message", ""),
                         description=f"Rule: {issue.get('rule', 'unknown')}",
-                        host=issue.get("component", "").split(":")[0]
-                        if issue.get("component")
-                        else "",
+                        host=component.split(":")[0] if component else "",
                         recommendation=f"Fix according to rule {issue.get('rule', '')}",
                         raw_evidence=str(issue),
                         rule=issue.get("rule", ""),
                         finding_type=issue.get("type", ""),
+                        line_number=issue.get("line"),
+                        file_path=file_path,
+                        effort=issue.get("effort"),
+                        tags=issue.get("tags", []) or [],
+                        sonar_status=issue.get("status"),
+                        sonar_resolution=issue.get("resolution"),
                     )
                     findings.append(finding)
                 return findings, raw_json

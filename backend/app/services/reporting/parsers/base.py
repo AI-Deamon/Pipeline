@@ -23,6 +23,14 @@ class SecurityFinding:
     raw_evidence: str = ""
     rule: str = ""
     finding_type: str = ""
+    line_number: Optional[int] = None
+    file_path: Optional[str] = None
+    effort: Optional[str] = None
+    tags: List[str] = field(default_factory=list)
+    sonar_status: Optional[str] = None
+    sonar_resolution: Optional[str] = None
+    code_snippet: Optional[str] = None
+    code_snippet_language: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -41,6 +49,14 @@ class SecurityFinding:
             "raw_evidence": self.raw_evidence,
             "rule": self.rule,
             "finding_type": self.finding_type,
+            "line_number": self.line_number,
+            "file_path": self.file_path,
+            "effort": self.effort,
+            "tags": list(self.tags),
+            "sonar_status": self.sonar_status,
+            "sonar_resolution": self.sonar_resolution,
+            "code_snippet": self.code_snippet,
+            "code_snippet_language": self.code_snippet_language,
         }
 
 
