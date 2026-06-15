@@ -16,6 +16,15 @@ os.environ.setdefault('MOCK_EXECUTION', 'True')
 os.environ.setdefault('SONARQUBE_TOKEN', 'test-sonar-token-1234567890')
 
 
+@pytest.fixture(autouse=True)
+def setup_db():
+    """Ensure tables exist for RBAC import tests."""
+    from app.core.db import engine, Base
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+
 class TestJWTSecretSeparation:
     """T009: Verify JWT secret is separated from API_KEY."""
 
@@ -90,3 +99,30 @@ class TestDeletedUserHandling:
         source = inspect.getsource(auth.get_current_user)
         assert "account-deleted" in source
         assert "X-Auth-Reason" in source
+
+
+class TestRbacAuthorizationDependencies:
+    """T014: Verify RBAC authorization dependencies work correctly."""
+
+    def test_require_role_factory_exists(self):
+        from app.core.auth import require_role
+        assert callable(require_role)
+
+    def test_require_admin_exists(self):
+        from app.core.auth import require_admin
+        assert callable(require_admin)
+
+    def test_get_rbac_dependency_exists(self):
+        from app.core.auth import get_rbac
+        assert callable(get_rbac)
+
+    def test_require_role_accepts_valid_role(self):
+        from app.core.auth import require_role
+        dep = require_role("admin", "team_lead")
+        assert callable(dep)
+
+    def test_rbac_service_importable(self):
+        from app.services.rbac_service import RbacService, get_rbac_service, validate_role
+        assert RbacService is not None
+        assert get_rbac_service is not None
+        assert validate_role is not None

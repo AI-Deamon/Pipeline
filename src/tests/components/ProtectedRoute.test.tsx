@@ -18,8 +18,12 @@ describe('ProtectedRoute', () => {
       isAuthenticated: false,
       isLoading: false,
       token: null,
+      role: null,
+      permissions: null,
+      currentUser: null,
       login: vi.fn(),
       logout: vi.fn(),
+      refreshUser: vi.fn(),
     });
 
     render(
@@ -47,8 +51,12 @@ describe('ProtectedRoute', () => {
       isAuthenticated: false,
       isLoading: true,
       token: null,
+      role: null,
+      permissions: null,
+      currentUser: null,
       login: vi.fn(),
       logout: vi.fn(),
+      refreshUser: vi.fn(),
     });
 
     const { container } = render(
@@ -68,8 +76,19 @@ describe('ProtectedRoute', () => {
       isAuthenticated: true,
       isLoading: false,
       token: 'fake-token',
+      role: 'admin' as const,
+      permissions: {
+        canManageUsers: true,
+        canManageProjectAccess: true,
+        canViewAllProjects: true,
+        canAssignIssues: true,
+        canVerifyIssues: true,
+        canUpdateAssignedIssues: true,
+      },
+      currentUser: { id: '1', username: 'admin', role: 'admin' as const },
       login: vi.fn(),
       logout: vi.fn(),
+      refreshUser: vi.fn(),
     });
 
     render(
