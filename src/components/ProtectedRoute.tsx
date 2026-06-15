@@ -1,13 +1,15 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import type { FC, ReactNode } from 'react';
+import type { Role } from '../types';
 
 interface ProtectedRouteProps {
   children: ReactNode;
+  requiredRole?: Role;
 }
 
-export const ProtectedRoute: FC<ProtectedRouteProps> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+export const ProtectedRoute: FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
+  const { isAuthenticated, isLoading, role } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -19,10 +21,12 @@ export const ProtectedRoute: FC<ProtectedRouteProps> = ({ children }) => {
   }
 
   if (!isAuthenticated) {
-    // Redirect to login page but save the location they were trying to go to
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (requiredRole && role !== requiredRole) {
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
 };
-

@@ -9,14 +9,19 @@ import {
   X,
   Trash2,
   Loader2,
+  Shield,
+  ShieldAlert,
+  User,
 } from "lucide-react";
 import { useDebounce } from "../hooks/useDebounce";
+import { useRbac } from "../hooks/useRbac";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { useToast } from "../components/Toast";
 
 const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSummaries: Record<string, ReportSummary> }) => {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
+  const { isAdmin } = useRbac();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const deleteProjectMutation = useMutation({
@@ -189,12 +194,14 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
             >
               Manage
             </Link>
+            {isAdmin && (
             <button
               onClick={() => setShowDeleteConfirm(true)}
               className="p-1.5 text-slate-400 hover:text-rose-600"
             >
               <Trash2 className="w-4 h-4" />
             </button>
+          )}
           </div>
         )}
       </td>
@@ -206,6 +213,7 @@ const ACTIVE_STATES = new Set(["CREATED", "QUEUED", "RUNNING"]);
 
 const DashboardPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const { isAdmin, canViewAllProjects } = useRbac();
 
   const { data: projects = [], isLoading: loading } = useQuery({
     queryKey: ["projects"],
@@ -270,13 +278,28 @@ const DashboardPage = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            to="/projects/create"
-            className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add Project
-          </Link>
+          {isAdmin ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+              <Shield size={12} /> Admin
+            </span>
+          ) : canViewAllProjects ? (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+              <ShieldAlert size={12} /> Team Lead
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600">
+              <User size={12} /> Developer
+            </span>
+          )}
+          {isAdmin && (
+            <Link
+              to="/projects/create"
+              className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Project
+            </Link>
+          )}
         </div>
       </header>
 
@@ -327,20 +350,24 @@ const DashboardPage = () => {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
           <Search className="w-10 h-10 text-slate-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-slate-900 mb-2">
-            {debouncedSearchTerm ? "No projects found" : "No projects yet"}
+            {debouncedSearchTerm ? "No projects found" : isAdmin ? "No projects yet" : "No projects in scope"}
           </h3>
           <p className="text-slate-500 mb-6">
             {debouncedSearchTerm
               ? `No projects matching "${debouncedSearchTerm}"`
-              : "Start by adding your first project to scan."}
+              : isAdmin
+                ? "Start by adding your first project to scan."
+                : "You don't have access to any projects. Contact an admin to get access."}
           </p>
-          <Link
-            to="/projects/create"
-            className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium inline-flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" />
-            Add Project
-          </Link>
+          {isAdmin && (
+            <Link
+              to="/projects/create"
+              className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium inline-flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Project
+            </Link>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

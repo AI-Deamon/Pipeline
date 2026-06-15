@@ -1,38 +1,48 @@
-import type { LucideIcon } from 'lucide-react';
-import { Plus } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { AlertCircle, Inbox, Loader2, WifiOff, RefreshCw } from 'lucide-react';
 
-interface EmptyStateProps {
-  icon: LucideIcon;
+type EmptyStateProps = {
+  variant?: 'empty' | 'loading' | 'error' | 'offline';
   title: string;
-  description: string;
-  actionLabel?: string;
-  onAction?: () => void;
-}
+  message?: string;
+  action?: { label: string; onClick: () => void };
+  icon?: ReactNode;
+};
 
-export function EmptyState({ icon: Icon, title, description, actionLabel, onAction }: EmptyStateProps) {
+export default function EmptyState({ variant = 'empty', title, message, action, icon }: EmptyStateProps) {
+  let defaultIcon: ReactNode;
+  let iconClass = 'text-slate-300';
+  switch (variant) {
+    case 'loading':
+      defaultIcon = <Loader2 size={48} className="animate-spin text-blue-400" />;
+      iconClass = 'text-blue-400';
+      break;
+    case 'error':
+      defaultIcon = <AlertCircle size={48} className="text-red-400" />;
+      iconClass = 'text-red-400';
+      break;
+    case 'offline':
+      defaultIcon = <WifiOff size={48} className="text-amber-500" />;
+      iconClass = 'text-amber-500';
+      break;
+    case 'empty':
+    default:
+      defaultIcon = <Inbox size={48} />;
+      break;
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center p-20 text-center bg-white border-2 border-dashed border-slate-100 rounded-[4rem] shadow-sm animate-in fade-in zoom-in duration-700 relative overflow-hidden group">
-      {/* Decorative background elements */}
-      <div className="absolute top-0 left-0 w-64 h-64 bg-slate-50/50 rounded-full blur-3xl -translate-x-32 -translate-y-32 transition-transform group-hover:scale-150 duration-1000"></div>
-      <div className="absolute bottom-0 right-0 w-64 h-64 bg-blue-50/30 rounded-full blur-3xl translate-x-32 translate-y-32 transition-transform group-hover:scale-150 duration-1000"></div>
-
-      <div className="w-32 h-32 bg-slate-50 rounded-[3rem] flex items-center justify-center mb-10 relative shadow-inner border border-slate-100/50">
-        <div className="absolute inset-0 bg-blue-100/30 rounded-[3rem] animate-ping duration-[4000ms]"></div>
-        <Icon className="w-14 h-14 text-slate-300 relative z-10 group-hover:text-blue-400 group-hover:scale-110 transition-all duration-500" />
-      </div>
-      
-      <h3 className="text-3xl font-black text-slate-900 tracking-tighter mb-4 uppercase leading-none">{title}</h3>
-      <p className="text-slate-400 text-sm font-medium max-w-sm leading-relaxed mb-12 italic">
-        {description}
-      </p>
-      
-      {actionLabel && onAction && (
+    <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center">
+      <div className={`mx-auto mb-4 ${iconClass}`}>{icon ?? defaultIcon}</div>
+      <h3 className="text-lg font-semibold text-slate-700 mb-1">{title}</h3>
+      {message && <p className="text-sm text-slate-500 mb-4">{message}</p>}
+      {action && (
         <button
-          onClick={onAction}
-          className="group px-10 py-5 btn-primary flex items-center gap-4 active:scale-95 shadow-2xl shadow-blue-200"
+          onClick={action.onClick}
+          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
         >
-          <Plus className="w-6 h-6 group-hover:rotate-90 transition-transform duration-500" />
-          <span className="uppercase tracking-[0.2em] text-[10px] font-black">{actionLabel}</span>
+          {variant === 'offline' && <RefreshCw size={14} />}
+          {action.label}
         </button>
       )}
     </div>

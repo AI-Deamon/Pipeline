@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Shield, LayoutDashboard, PlusCircle, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText } from 'lucide-react';
+import { Shield, LayoutDashboard, PlusCircle, Bug, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -111,6 +111,8 @@ const Layout = () => {
             <h3 className="px-4 text-xs font-medium text-slate-400 mb-3">Core</h3>
             <div className="space-y-1">
               <NavLink to="/dashboard" icon={LayoutDashboard}>Dashboard</NavLink>
+              <NavLink to="/my-issues" icon={Bug}>My Issues</NavLink>
+              <NavLink to="/pending-verification" icon={Shield}>Pending Verification</NavLink>
               <NavLink to="/projects/create" icon={PlusCircle}>New Project</NavLink>
               <NavLink to="/users" icon={Shield}>Users</NavLink>
               <NavLink to="/settings" icon={Key}>API Settings</NavLink>

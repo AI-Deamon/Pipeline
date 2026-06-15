@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Project, Scan, ScanStage, ScanMode, StageId, ProjectGroup, ProjectGroupDetail, ProjectGroupCreate } from '../types';
+import type { Project, Scan, ScanStage, ScanMode, StageId, ProjectGroup, ProjectGroupDetail, ProjectGroupCreate, OverviewResponse, ToolIssuesResponse, MyIssuesResponse, IssueCreatePayload, IssueResponse, IssueAssignPayload, IssueStatusPayload, CommentResponse, IssueHistoryResponse, CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment } from '../types';
 import { ApiError } from '../utils/apiError';
 
 const API_BASE_URL = '/api/v1';
@@ -75,7 +75,11 @@ export const api = {
         email: email || `${username}@example.com`
       });
       return response.data;
-    }
+    },
+    me: async (): Promise<CurrentUser> => {
+      const response = await apiClient.get('/auth/me');
+      return response.data;
+    },
   },
   projects: {
     list: async (): Promise<Project[]> => {
@@ -243,5 +247,149 @@ export const api = {
       const response = await apiClient.delete(`/project-groups/${groupId}/assignments/${scanId}`);
       return response.data;
     },
-  }
+  },
+  issues: {
+    create: async (data: IssueCreatePayload): Promise<IssueResponse> => {
+      const response = await apiClient.post('/issues', data);
+      return response.data;
+    },
+    get: async (issueId: number): Promise<IssueResponse> => {
+      const response = await apiClient.get(`/issues/${issueId}`);
+      return response.data;
+    },
+    assign: async (issueId: number, data: IssueAssignPayload): Promise<IssueResponse> => {
+      const response = await apiClient.post(`/issues/${issueId}/assign`, data);
+      return response.data;
+    },
+    transition: async (issueId: number, data: IssueStatusPayload): Promise<IssueResponse> => {
+      const response = await apiClient.post(`/issues/${issueId}/transition`, data);
+      return response.data;
+    },
+    getProjectOverview: async (projectId: string): Promise<OverviewResponse> => {
+      const response = await apiClient.get(`/issues/projects/${projectId}/overview`);
+      return response.data;
+    },
+    getToolIssues: async (projectId: string, toolName: string, page?: number, pageSize?: number, findingType?: string): Promise<ToolIssuesResponse> => {
+      const params = new URLSearchParams();
+      if (page !== undefined) params.append('page', String(page));
+      if (pageSize !== undefined) params.append('page_size', String(pageSize));
+      if (findingType !== undefined) params.append('finding_type', findingType);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiClient.get(`/issues/projects/${projectId}/tools/${toolName}${query}`);
+      return response.data;
+    },
+    getMyIssues: async (page?: number, pageSize?: number): Promise<MyIssuesResponse> => {
+      const params = new URLSearchParams();
+      if (page !== undefined) params.append('page', String(page));
+      if (pageSize !== undefined) params.append('page_size', String(pageSize));
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiClient.get(`/issues/my${query}`);
+      return response.data;
+    },
+    getCodeSnippet: async (
+      projectId: string,
+      params: { file: string; line: number; context?: number; branch?: string }
+    ): Promise<{
+      file: string;
+      language: string;
+      branch: string;
+      start_line: number;
+      end_line: number;
+      highlight_line: number;
+      content: string;
+      git_url: string | null;
+      source: string;
+    }> => {
+      const search = new URLSearchParams();
+      search.append('file', params.file);
+      search.append('line', String(params.line));
+      if (params.context !== undefined) search.append('context', String(params.context));
+      if (params.branch) search.append('branch', params.branch);
+      const response = await apiClient.get(
+        `/projects/${projectId}/code-snippet?${search.toString()}`
+      );
+      return response.data;
+    },
+    requestRescan: async (issueId: number, data: { fix_note: string; commit_sha?: string }) => {
+      const response = await apiClient.post(`/issues/${issueId}/request-rescan`, data);
+      return response.data;
+    },
+    editRescanRequest: async (id: number, data: { fix_note: string; version: number }) => {
+      const response = await apiClient.patch(`/rescan-requests/${id}`, data);
+      return response.data;
+    },
+    cancelRescanRequest: async (id: number, data: { version: number }) => {
+      const response = await apiClient.delete(`/rescan-requests/${id}`, { data });
+      return response.data;
+    },
+    approveRescan: async (issueId: number, data: { reviewer_note?: string }) => {
+      const response = await apiClient.post(`/issues/${issueId}/approve-rescan`, data);
+      return response.data;
+    },
+    triggerVerifyScan: async (issueId: number, note: string) => {
+      const response = await apiClient.post(`/issues/${issueId}/trigger-verify-scan`, { note });
+      return response.data;
+    },
+    getPendingVerification: async (params?: {
+      project_id?: string;
+      status?: string;
+      page?: number;
+    }) => {
+      const search = new URLSearchParams();
+      if (params?.project_id) search.append('project_id', params.project_id);
+      if (params?.status) search.append('status', params.status);
+      if (params?.page) search.append('page', String(params.page));
+      const query = search.toString() ? `?${search.toString()}` : '';
+      const response = await apiClient.get(`/issues/pending-verification${query}`);
+      return response.data;
+    },
+    getRawFixNote: async (id: number) => {
+      const response = await apiClient.get(`/fix-notes/${id}/raw`);
+      return response.data;
+    },
+    addComment: async (issueId: number, message: string): Promise<CommentResponse> => {
+      const response = await apiClient.post(`/issues/${issueId}/comments`, { message });
+      return response.data;
+    },
+    getHistory: async (issueId: number): Promise<IssueHistoryResponse> => {
+      const response = await apiClient.get(`/issues/${issueId}/history`);
+      return response.data;
+    },
+  },
+  rbac: {
+    getUsers: async (role?: string): Promise<CurrentUser[]> => {
+      const params = new URLSearchParams();
+      if (role) params.append('role', role);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiClient.get(`/users${query}`);
+      return response.data;
+    },
+    updateUserRole: async (userId: string, role: string): Promise<CurrentUser> => {
+      const response = await apiClient.patch(`/users/${userId}/role`, { role });
+      return response.data;
+    },
+    getProjectAccess: async (userId: string): Promise<UserAccess> => {
+      const response = await apiClient.get(`/users/${userId}/project-access`);
+      return response.data;
+    },
+    grantProjectAccess: async (userId: string, scopeType: string, scopeId: string): Promise<ProjectAccessAssignment> => {
+      const response = await apiClient.post(`/users/${userId}/project-access`, {
+        scope_type: scopeType,
+        scope_id: scopeId,
+      });
+      return response.data;
+    },
+    revokeProjectAccess: async (userId: string, assignmentId: number): Promise<void> => {
+      await apiClient.delete(`/users/${userId}/project-access/${assignmentId}`);
+    },
+    getAccessChanges: async (targetUserId?: string, actorId?: string, changeType?: string): Promise<AccessChange[]> => {
+      const params = new URLSearchParams();
+      if (targetUserId) params.append('target_user_id', targetUserId);
+      if (actorId) params.append('actor_id', actorId);
+      if (changeType) params.append('change_type', changeType);
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await apiClient.get(`/access-changes${query}`);
+      return response.data;
+    },
+  },
 };

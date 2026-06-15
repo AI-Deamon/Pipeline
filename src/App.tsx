@@ -22,6 +22,10 @@ const DocsPage = lazy(() => import('./pages/DocsPage'));
 const ProjectReportsPage = lazy(() => import('./pages/ProjectReportsPage'));
 const UnifiedReportPage = lazy(() => import('./pages/UnifiedReportPage'));
 const ProjectGroupsPage = lazy(() => import('./pages/ProjectGroupsPage'));
+const ProjectOverviewPage = lazy(() => import('./pages/ProjectOverviewPage'));
+const ToolDetailViewPage = lazy(() => import('./pages/ToolDetailViewPage'));
+const MyIssuesPage = lazy(() => import('./pages/MyIssuesPage'));
+const PendingVerificationPage = lazy(() => import('./pages/PendingVerificationPage'));
 
 // Loading component for lazy-loaded routes
 const PageLoader = () => (
@@ -143,21 +147,55 @@ function App() {
                   }
                 />
                <Route
-                 path="/users"
-                 element={
-                   <Suspense fallback={<PageLoader />}>
-                     <UserManagementPage />
-                   </Suspense>
-                 }
-               />
+                  path="/users"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <ProtectedRoute requiredRole="admin">
+                        <UserManagementPage />
+                      </ProtectedRoute>
+                    </Suspense>
+                  }
+                />
                <Route
-                 path="/docs"
-                 element={
-                   <Suspense fallback={<PageLoader />}>
-                     <DocsPage />
-                   </Suspense>
-                 }
-               />
+                  path="/docs"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <DocsPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/issues"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <ProjectOverviewPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/issues/:toolName"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <ToolDetailViewPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/my-issues"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <MyIssuesPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/pending-verification"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <PendingVerificationPage />
+                    </Suspense>
+                  }
+                />
             </Route>
             </Routes>
           </ErrorBoundary>
