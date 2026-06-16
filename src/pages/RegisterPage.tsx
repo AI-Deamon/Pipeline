@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { api } from '../services/api';
+import { ApiError } from '../utils/apiError';
 
 const RegisterPage = () => {
   const navigate = useNavigate();
@@ -21,10 +22,7 @@ const RegisterPage = () => {
         state: { message: 'Registration successful! Please sign in.' } 
       });
     } catch (err: unknown) {
-      const errorMessage = err && typeof err === 'object' && 'response' in err 
-        ? (err.response as { data?: { detail?: string } })?.data?.detail 
-        : 'Registration failed.';
-      setError(errorMessage || 'Registration failed.');
+      setError(ApiError.getErrorMessage(err, 'Registration failed.'));
     } finally {
       setIsLoading(false);
     }
@@ -63,6 +61,7 @@ const RegisterPage = () => {
               required
               autoFocus
               disabled={isLoading}
+              autoComplete="username"
             />
           </div>
 
@@ -80,6 +79,7 @@ const RegisterPage = () => {
                 placeholder="At least 8 characters"
                 required
                 disabled={isLoading}
+                autoComplete="new-password"
               />
               <button
                 type="button"
