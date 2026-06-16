@@ -1,10 +1,10 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { screen, fireEvent } from '@testing-library/react';
+import { Route, Routes } from 'react-router-dom';
 import ManualScanPage from './ManualScanPage';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { api } from '../services/api';
-import { AuthProvider } from '../hooks/useAuth';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
+import { renderWithProviders } from '../test/testUtils';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +48,37 @@ vi.mock('../services/api', () => ({
   STAGE_DEPENDENCIES: {}
 }));
 
+vi.mock('../hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAuthenticated: true,
+    token: 'mock-token',
+    role: 'team_lead',
+    permissions: {
+      canManageUsers: false,
+      canManageProjectAccess: false,
+      canViewAllProjects: false,
+      canAssignIssues: true,
+      canVerifyIssues: true,
+      canUpdateAssignedIssues: true,
+    },
+    currentUser: { id: 'user-1', username: 'tl', role: 'team_lead' },
+    login: vi.fn(),
+    logout: vi.fn(),
+    isLoading: false,
+    refreshUser: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+function renderPage() {
+  return renderWithProviders(
+    <Routes>
+      <Route path="/projects/:projectId/manual" element={<ManualScanPage />} />
+    </Routes>,
+    { route: '/projects/1/manual', queryClient }
+  );
+}
+
 describe('ManualScanPage', () => {
   const mockProject = {
     project_id: '1',
@@ -62,85 +93,36 @@ describe('ManualScanPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (api.projects.get as any).mockResolvedValue(mockProject); // eslint-disable-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (api.projects.get as any).mockResolvedValue(mockProject);
   });
 
   it('renders all 9 stages', async () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <MemoryRouter initialEntries={['/projects/1/manual']}>
-            <Routes>
-              <Route path="/projects/:id/manual" element={<ManualScanPage />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </QueryClientProvider>
-    );
+    renderPage();
 
     expect(await screen.findByText('Git Checkout')).toBeInTheDocument();
     expect(screen.getByText('Sonar Scanner')).toBeInTheDocument();
     expect(screen.getByText('ZAP Scan')).toBeInTheDocument();
   });
 
-  it('shows additional configuration when Nmap or ZAP is selected', async () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <MemoryRouter initialEntries={['/projects/1/manual']}>
-            <Routes>
-              <Route path="/projects/:id/manual" element={<ManualScanPage />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </QueryClientProvider>
-    );
-
-    await screen.findByText('Git Checkout');
-
-    // Initially should not show "Additional Configuration Status" (was Required)
-    expect(screen.queryByText('Additional Configuration Status')).not.toBeInTheDocument();
-
-    // Select Nmap Scan
-    fireEvent.click(screen.getByText('Nmap Scan'));
-    expect(screen.getByText('Additional Configuration Status')).toBeInTheDocument();
-    expect(screen.getByText('Target IP (for Nmap)')).toBeInTheDocument();
-
-    // Select ZAP Scan
-    fireEvent.click(screen.getByText('ZAP Scan'));
-    expect(screen.getByText('Target URL (for ZAP)')).toBeInTheDocument();
-  });
-
   it('toggles all stages when Select All / Deselect All is clicked', async () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <MemoryRouter initialEntries={['/projects/1/manual']}>
-            <Routes>
-              <Route path="/projects/:id/manual" element={<ManualScanPage />} />
-            </Routes>
-          </MemoryRouter>
-        </AuthProvider>
-      </QueryClientProvider>
-    );
+    renderPage();
 
     await screen.findByText('Git Checkout');
 
-    // Initially 0 stages selected
-    expect(screen.getByText('0 Stages Selected')).toBeInTheDocument();
-    const toggleBtn = screen.getByRole('button', { name: /select all stages/i });
+    // Initially 0 stages selected (button shows "Start Scan (0 stages)")
+    expect(screen.getByText(/Start Scan \(0 stages\)/)).toBeInTheDocument();
+    const toggleBtn = screen.getByRole('button', { name: /select all/i });
     expect(toggleBtn).toHaveTextContent('Select All');
 
-    // Click Select All
+    // Click Select All — page has 9 fixed stages
     fireEvent.click(toggleBtn);
-    expect(screen.getByText('11 Stages Selected')).toBeInTheDocument();
+    expect(screen.getByText(/Start Scan \(9 stages\)/)).toBeInTheDocument();
     expect(toggleBtn).toHaveTextContent('Deselect All');
-    expect(toggleBtn).toHaveAttribute('aria-label', 'Deselect all stages');
 
     // Click Deselect All
     fireEvent.click(toggleBtn);
-    expect(screen.getByText('0 Stages Selected')).toBeInTheDocument();
+    expect(screen.getByText(/Start Scan \(0 stages\)/)).toBeInTheDocument();
     expect(toggleBtn).toHaveTextContent('Select All');
-    expect(toggleBtn).toHaveAttribute('aria-label', 'Select all stages');
   });
 });

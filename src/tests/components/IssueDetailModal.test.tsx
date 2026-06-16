@@ -1,8 +1,31 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { vi, beforeEach, afterEach, test, expect, describe } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import IssueDetailModal from '../../components/IssueDetailModal';
 import { api } from '../../services/api';
+import { renderWithProviders } from '../../test/testUtils';
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAuthenticated: true,
+    token: 'mock-token',
+    role: 'team_lead',
+    permissions: {
+      canManageUsers: false,
+      canManageProjectAccess: false,
+      canViewAllProjects: false,
+      canAssignIssues: true,
+      canVerifyIssues: true,
+      canUpdateAssignedIssues: true,
+    },
+    currentUser: { id: 'user-1', username: 'tl', role: 'team_lead' },
+    login: vi.fn(),
+    logout: vi.fn(),
+    isLoading: false,
+    refreshUser: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 
 describe('IssueDetailModal', () => {
   const originalGet = api.issues.get;
@@ -60,10 +83,9 @@ describe('IssueDetailModal', () => {
 
   function renderModal(issueId = 1) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <IssueDetailModal issueId={issueId} onClose={vi.fn()} />
-      </QueryClientProvider>
+    return renderWithProviders(
+      <IssueDetailModal issueId={issueId} onClose={vi.fn()} />,
+      { queryClient },
     );
   }
 
@@ -82,20 +104,20 @@ describe('IssueDetailModal', () => {
 
   test('renders assign button for open issue', async () => {
     renderModal();
-    expect(await screen.findByText('Assign')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /assign/i })).toBeInTheDocument();
   });
 
   test('shows assign input on button click', async () => {
     renderModal();
-    fireEvent.click(await screen.findByText('Assign'));
+    fireEvent.click(await screen.findByRole('button', { name: /^assign$/i }));
     expect(screen.getByPlaceholderText('Username...')).toBeInTheDocument();
   });
 
   test('calls assign mutation', async () => {
     renderModal();
-    fireEvent.click(await screen.findByText('Assign'));
+    fireEvent.click(await screen.findByRole('button', { name: /^assign$/i }));
     fireEvent.change(screen.getByPlaceholderText('Username...'), { target: { value: 'dev-user' } });
-    fireEvent.click(screen.getByText('Assign'));
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
     await waitFor(() => {
       expect(api.issues.assign).toHaveBeenCalledWith(1, { assignee_id: 'dev-user' });
     });
@@ -104,26 +126,26 @@ describe('IssueDetailModal', () => {
   test('shows Start Working for assigned issue', async () => {
     api.issues.get = vi.fn().mockResolvedValue({ ...mockIssue, status: 'assigned', assignee_id: 'user-1' });
     renderModal();
-    expect(await screen.findByText('Start Working')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /start working/i })).toBeInTheDocument();
   });
 
   test('shows Mark Fixed for in_progress issue', async () => {
     api.issues.get = vi.fn().mockResolvedValue({ ...mockIssue, status: 'in_progress', assignee_id: 'user-1' });
     renderModal();
-    expect(await screen.findByText('Mark Fixed')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /mark fixed/i })).toBeInTheDocument();
   });
 
   test('shows Verify and Reject for fixed issue', async () => {
     api.issues.get = vi.fn().mockResolvedValue({ ...mockIssue, status: 'fixed', assignee_id: 'user-1' });
     renderModal();
-    expect(await screen.findByText('Verify')).toBeInTheDocument();
-    expect(screen.getByText('Reject')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^verify$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^reject$/i })).toBeInTheDocument();
   });
 
   test('calls transition mutation', async () => {
     api.issues.get = vi.fn().mockResolvedValue({ ...mockIssue, status: 'assigned', assignee_id: 'user-1' });
     renderModal();
-    fireEvent.click(await screen.findByText('Start Working'));
+    fireEvent.click(await screen.findByRole('button', { name: /start working/i }));
     await waitFor(() => {
       expect(api.issues.transition).toHaveBeenCalledWith(1, { status: 'in_progress' });
     });

@@ -91,7 +91,8 @@ describe('LoginPage', () => {
     fireEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Invalid credentials. Please verify your identity and try again.')).toBeInTheDocument();
+      // For non-ApiError failures, the page falls back to a generic message
+      expect(screen.getByText('Invalid credentials.')).toBeInTheDocument();
     });
   });
 });
