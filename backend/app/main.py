@@ -74,6 +74,8 @@ def validate_configuration():
     # Initialize DB schema
     Base.metadata.create_all(bind=engine)
 
+    _run_schema_migrations(engine)
+
     # Create default admin user if not exists
     from app.core.db import get_db
     from app.models.db_models import UserDB, ProjectDB
@@ -204,3 +206,27 @@ def metrics(authorization: str = Header(default="")) -> Response:
 @app.get("/")
 def read_root():
     return {"message": "DevSecOps Control Plane is live (via PostgreSQL)"}
+
+
+def _run_schema_migrations(engine) -> None:
+    """Apply idempotent ALTER TABLE migrations for columns added after initial release.
+
+    `create_all` only creates tables that do not exist — it does NOT add new columns
+    to existing tables. This function backfills schema gaps discovered during E2E
+    verification (spec 010) so fresh stacks and existing stacks converge on the
+    same schema without manual SQL.
+
+    All statements use `IF NOT EXISTS` so they are safe to run on every boot.
+    """
+    from sqlalchemy import text
+
+    statements = [
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'developer'",
+        "ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS migration_status VARCHAR(20) DEFAULT 'pending'",
+    ]
+    try:
+        with engine.begin() as conn:
+            for stmt in statements:
+                conn.execute(text(stmt))
+    except Exception as exc:  # noqa: BLE001
+        print(f"Schema migration skipped/failed: {exc}")
