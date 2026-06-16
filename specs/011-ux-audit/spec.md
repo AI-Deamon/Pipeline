@@ -97,7 +97,7 @@ As a developer, I want Critical and Serious findings converted into tracked issu
 
 ### Measurable Outcomes
 
-- **SC-001**: The audit covers all 19 pages in `src/pages/` (excluding test files). A page is "covered" if it has a section in the report, even if the section is "No issues found".
+- **SC-001**: The audit covers all 19 pages in `src/pages/` (excluding test files). A page is "covered" if it has a section in the report, even if the section is "No issues found". If the 30-minute budget is exhausted before all 19 pages are audited, the report includes a "Coverage Gaps" section listing the unaudited pages; pages already audited are kept at full depth.
 - **SC-002**: The audit produces at least 25 findings across all 19 pages (an average of ~1.3 per page, accounting for the fact that some pages will have more issues).
 - **SC-003**: Each finding has a severity tag and a remediation with specific code-level guidance.
 - **SC-004**: The executive summary shows severity counts and a UX health score.
@@ -115,3 +115,9 @@ As a developer, I want Critical and Serious findings converted into tracked issu
 - "WCAG 2.1 AA" is the compliance target. Level AAA is out of scope for v1.
 - Mobile responsiveness is evaluated by reading CSS/Tailwind class usage, not by running the app in a mobile viewport (no Playwright or browser automation in v1).
 - The audit is performed in English; UI microcopy is reviewed in English (the existing locale).
+
+## Clarifications
+
+### Session 2026-06-16
+
+- Q: When time runs short (or pages are unusually complex), what is the audit's completion policy? → A: Ship partial report with coverage gap flagged. Pages already audited are kept at full depth; pages not audited appear in a "Coverage Gaps" section in the report. This prioritizes depth over breadth and is honest about what was/wasn't reviewed.

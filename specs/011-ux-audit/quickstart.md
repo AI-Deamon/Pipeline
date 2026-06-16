@@ -23,7 +23,7 @@ A one-time UX audit of the Sentinel DevSecOps platform frontend. The audit evalu
 
 2. **Executive Summary** — top 5 most impactful findings. Read these first.
 
-3. **Per-Page Sections** — each of the 19 pages has a section listing its findings. Find your page → fix its findings.
+3. **Per-Page Sections** — each of the 19 pages has a section listing its findings. Find your page → fix its findings. If the audit ran out of time, a "Coverage Gaps" section at the end of the report lists pages that were NOT audited (depth over breadth: audited pages are kept at full quality).
 
 4. **Each finding** has:
    - **Severity tag** (`[CRITICAL]`, `[SERIOUS]`, `[MODERATE]`, `[MINOR]`)
@@ -72,6 +72,15 @@ The audit is re-runnable. Re-running overwrites the previous report.
 5. Compare to the previous report via `git diff` to see what changed.
 
 **Automation** (out of scope for v1): the audit could be triggered by a script that walks `src/pages/` and runs the 8-category evaluation. This is a future improvement.
+
+## Coverage Gaps
+
+If the report includes a "Coverage Gaps" section, it means the audit ran out of the 30-minute budget before reaching all 19 pages. The pages listed there have NOT been audited. To complete the audit:
+
+1. Re-run the audit (the gap shrinks; eventually disappears on repeat runs).
+2. Or manually inspect the gap pages using the same 8 categories from `research.md`.
+
+A coverage gap does NOT invalidate the report — audited pages are kept at full quality. The gap is just honest accounting of what wasn't reviewed.
 
 ## What's NOT in scope
 

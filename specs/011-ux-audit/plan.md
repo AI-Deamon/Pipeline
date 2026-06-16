@@ -16,7 +16,7 @@ Produce a comprehensive UX audit of the Sentinel DevSecOps platform frontend. Th
 **Testing**: N/A (audit is a deliverable, not code). Validation: report covers all 19 pages, severity counts match findings, file committed to branch.
 **Target Platform**: Sentinel frontend (React 19 + TypeScript + Vite + Tailwind CSS + lucide-react)
 **Project Type**: Web application (frontend audit only)
-**Performance Goals**: Audit completes within 30 minutes (SC-006); report reads in ≤15 minutes
+**Performance Goals**: Audit completes within 30 minutes (SC-006); report reads in ≤15 minutes. **Completion policy**: if budget is exhausted before all 19 pages are audited, ship partial report with explicit "Coverage Gaps" section listing unaudited pages; already-audited pages stay at full depth (clarification 2026-06-16).
 **Constraints**: Read-only against `src/` (FR-009); no new dependencies; markdown only
 **Scale/Scope**: 19 pages × 8 evaluation categories = up to 152 finding slots; expected 25+ findings per SC-002
 
