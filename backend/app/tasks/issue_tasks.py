@@ -290,7 +290,7 @@ def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
             except Exception:
                 pass
 
-        from app.services.metrics import VERIFICATIONS_TOTAL
+        from app.metrics import VERIFICATIONS_TOTAL
         if verified:
             VERIFICATIONS_TOTAL.labels(verdict="verified").inc(verified)
         if rejected:

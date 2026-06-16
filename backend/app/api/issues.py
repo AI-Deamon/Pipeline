@@ -110,6 +110,84 @@ def get_project_metrics(
     return MetricsResponse(**metrics)
 
 
+@router.get("/issues/pending-verification", response_model=PendingVerificationResponse)
+def get_pending_verification(
+    request: Request,
+    project_id: str | None = None,
+    status: str = "pending",
+    page: int = 1,
+    page_size: int = 25,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from app.services.cache import cache_get, cache_set
+    cache_key = f"pending_verification:{project_id or 'all'}:{status}:p{page}:s{page_size}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+    rbac = get_rbac_service(db=db, user=current_user)
+    effective_ids = rbac.get_effective_project_ids() if not rbac.is_admin else None
+    if rbac.is_developer:
+        user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
+        q = (
+            db.query(RescanRequestDB)
+            .filter(
+                RescanRequestDB.status == status,
+                RescanRequestDB.requested_by == user_id,
+            )
+        )
+    else:
+        q = db.query(RescanRequestDB).filter(RescanRequestDB.status == status)
+        if effective_ids is not None and effective_ids:
+            q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
+                IssueDB.project_id.in_(effective_ids)
+            )
+    if project_id:
+        q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
+            IssueDB.project_id == project_id
+        )
+    total = q.count()
+    rows = q.order_by(RescanRequestDB.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
+    groups_map: dict[str, dict] = {}
+    from app.models.db_models import ProjectDB
+    for r in rows:
+        issue_obj = service.get_by_id(db, r.issue_id)
+        if not issue_obj:
+            continue
+        pid = issue_obj.project_id
+        if pid not in groups_map:
+            proj = db.query(ProjectDB).filter(ProjectDB.project_id == pid).first()
+            groups_map[pid] = {"project_id": pid, "project_name": proj.name if proj else pid, "items": []}
+        from datetime import datetime, timezone
+        # Handle both naive and aware datetimes from DB
+        created_at = r.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - created_at).total_seconds() / 60
+        groups_map[pid]["items"].append({
+            "rescan_request_id": r.id,
+            "issue_id": r.issue_id,
+            "issue_title": issue_obj.title,
+            "issue_severity": issue_obj.severity,
+            "tool": issue_obj.tool_name,
+            "requested_by": r.requested_by,
+            "requested_by_name": r.requested_by,
+            "fix_note": r.fix_note,
+            "commit_sha": r.commit_sha,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "fix_elapsed_minutes": int(elapsed),
+        })
+    response = PendingVerificationResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        groups=list(groups_map.values()),
+    )
+    cache_set(cache_key, response.model_dump(), ttl_seconds=5)
+    return response
+
+
 @router.get("/issues/{issue_id}", response_model=IssueResponse)
 def get_issue(
     issue_id: int,
@@ -301,8 +379,8 @@ def approve_rescan(
     rescan.version = rescan.version + 1
     from datetime import datetime, timezone
     rescan.updated_at = datetime.now(timezone.utc)
-    import uuid as _uuid
-    rescan.scan_id = f"verify-{issue.tool_name}-{_uuid.uuid4().hex[:8]}"
+    # scan_id is left NULL here. It will be set by /trigger-verify-scan which
+    # creates the actual scans row in the same transaction.
     db.commit()
     db.refresh(rescan)
     try:
@@ -312,14 +390,14 @@ def approve_rescan(
                 "issue_id": issue_id,
                 "rescan_request_id": rescan.id,
                 "approved_by": user_id,
-                "scan_id": rescan.scan_id,
+                "scan_id": None,
             },
         )
     except Exception:
         pass
     return {
         "rescan_request": RescanRequestResponse.model_validate(rescan),
-        "scan": {"scan_id": rescan.scan_id, "project_id": issue.project_id, "tool": issue.tool_name, "state": "PENDING"},
+        "scan": {"scan_id": None, "project_id": issue.project_id, "tool": issue.tool_name, "state": "PENDING"},
     }
 
 
@@ -345,78 +423,6 @@ def trigger_verify_scan(
     }
 
 
-@router.get("/issues/pending-verification", response_model=PendingVerificationResponse)
-def get_pending_verification(
-    request: Request,
-    project_id: str | None = None,
-    status: str = "pending",
-    page: int = 1,
-    page_size: int = 25,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    from app.services.cache import cache_get, cache_set
-    cache_key = f"pending_verification:{project_id or 'all'}:{status}:p{page}:s{page_size}"
-    cached = cache_get(cache_key)
-    if cached is not None:
-        return cached
-    rbac = get_rbac_service(db=db, user=current_user)
-    effective_ids = rbac.get_effective_project_ids() if not rbac.is_admin else None
-    if rbac.is_developer:
-        user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
-        q = (
-            db.query(RescanRequestDB)
-            .filter(
-                RescanRequestDB.status == status,
-                RescanRequestDB.requested_by == user_id,
-            )
-        )
-    else:
-        q = db.query(RescanRequestDB).filter(RescanRequestDB.status == status)
-        if effective_ids is not None and effective_ids:
-            q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
-                IssueDB.project_id.in_(effective_ids)
-            )
-    if project_id:
-        q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
-            IssueDB.project_id == project_id
-        )
-    total = q.count()
-    rows = q.order_by(RescanRequestDB.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    groups_map: dict[str, dict] = {}
-    from app.models.db_models import ProjectDB
-    for r in rows:
-        issue_obj = service.get_by_id(db, r.issue_id)
-        if not issue_obj:
-            continue
-        pid = issue_obj.project_id
-        if pid not in groups_map:
-            proj = db.query(ProjectDB).filter(ProjectDB.project_id == pid).first()
-            groups_map[pid] = {"project_id": pid, "project_name": proj.name if proj else pid, "items": []}
-        from datetime import datetime, timezone
-        elapsed = (datetime.now(timezone.utc) - r.created_at).total_seconds() / 60
-        groups_map[pid]["items"].append({
-            "rescan_request_id": r.id,
-            "issue_id": r.issue_id,
-            "issue_title": issue_obj.title,
-            "issue_severity": issue_obj.severity,
-            "tool": issue_obj.tool_name,
-            "requested_by": r.requested_by,
-            "requested_by_name": r.requested_by,
-            "fix_note": r.fix_note,
-            "commit_sha": r.commit_sha,
-            "status": r.status,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "fix_elapsed_minutes": int(elapsed),
-        })
-    response = PendingVerificationResponse(
-        total=total,
-        page=page,
-        page_size=page_size,
-        groups=list(groups_map.values()),
-    )
-    cache_set(cache_key, response.model_dump(), ttl_seconds=5)
-    return response
 
 
 @router.patch("/rescan-requests/{request_id}", response_model=RescanRequestResponse)
