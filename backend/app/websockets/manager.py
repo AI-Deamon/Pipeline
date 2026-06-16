@@ -117,6 +117,17 @@ class ConnectionManager:
         await self.broadcast_to_project(project_id, message)
         await self.broadcast_global(message)
 
+    async def broadcast_issue_event(self, event_type: str, issue_id: int, project_id: str, data: dict):
+        """Broadcast issue-related events to project and global subscribers."""
+        message = {
+            "event": event_type,
+            "issue_id": issue_id,
+            "project_id": project_id,
+            "data": data,
+        }
+        await self.broadcast_to_project(project_id, message)
+        await self.broadcast_global(message)
+
 
 # Global connection manager instance
 manager = ConnectionManager()

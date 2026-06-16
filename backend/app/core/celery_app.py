@@ -9,6 +9,7 @@ celery_app = Celery(
         "app.tasks.jenkins_tasks",
         "app.tasks.report_tasks",
         "app.tasks.cleanup_tasks",
+        "app.tasks.issue_tasks",
     ],
 )
 
