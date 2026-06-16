@@ -12,6 +12,7 @@ import { PageSkeleton } from '../components/PageSkeleton';
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { notificationService } from '../services/notifications';
+import type { Scan, ScanStage } from '../types';
 
 const ScanStatusPage = () => {
   const { scanId } = useParams();
@@ -24,7 +25,7 @@ const ScanStatusPage = () => {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showForceStopConfirm, setShowForceStopConfirm] = useState(false);
 
-  const projectIdFromState = (location.state as any)?.projectId;
+  const projectIdFromState = (location.state as { projectId?: string } | null)?.projectId;
 
   const toggleStage = (stageId: string) => {
     setExpandedStages(prev => ({ ...prev, [stageId]: !prev[stageId] }));
@@ -38,7 +39,7 @@ const ScanStatusPage = () => {
       return { scan, stages: scan?.results || [] };
     },
     refetchInterval: (query) => {
-      const data = query.state.data as any;
+      const data = query.state.data as { scan: Scan; stages: ScanStage[] } | undefined;
       if (data?.scan && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.scan.state)) {
         return false;
       }
@@ -51,10 +52,11 @@ const ScanStatusPage = () => {
   const stages = scanData?.stages || [];
 
   useEffect(() => {
-    if (scan?.state === 'FAILED' && (scan as any)?.error) {
+    if (scan?.state === 'FAILED' && scan?.error) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowErrorModal(true);
     }
-  }, [scan?.state]);
+  }, [scan]);
 
   const cancelMutation = useScanCancel();
   const forceUnlockMutation = useScanForceUnlock();
@@ -63,7 +65,7 @@ const ScanStatusPage = () => {
 
   useScanWebSocket(scanId, undefined, {
     onMessage: (message) => {
-      const prevState = (queryClient.getQueryData(['scan', scanId]) as any)?.scan?.state;
+      const prevState = (queryClient.getQueryData(['scan', scanId]) as { scan: Scan; stages: ScanStage[] } | undefined)?.scan?.state;
       const newState = message.data?.state;
 
       queryClient.setQueryData(['scan', scanId], {
@@ -96,6 +98,7 @@ const ScanStatusPage = () => {
 
   useEffect(() => {
     if (scanData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastUpdated(new Date());
     }
   }, [scanData]);
@@ -205,7 +208,7 @@ const ScanStatusPage = () => {
         />
       </div>
 
-      {scan && scan.state === 'FAILED' && (scan as any)?.error && (
+      {scan && scan.state === 'FAILED' && scan?.error && (
         <div className="bg-rose-50 border border-rose-200 rounded-xl p-6 mb-6">
           <div className="flex items-center gap-4 mb-4">
             <div className="w-10 h-10 bg-rose-100 rounded-xl flex items-center justify-center">
@@ -226,13 +229,13 @@ const ScanStatusPage = () => {
           <div className="bg-white rounded-lg p-4 border border-rose-100 mb-4">
             <div className="text-sm font-medium text-slate-700 mb-2">Error Message:</div>
             <p className="text-sm text-slate-600 font-mono bg-slate-50 p-3 rounded-lg overflow-x-auto">
-              {(scan as any).error.message}
+              {scan.error.message}
             </p>
           </div>
 
-          {(scan as any).error.jenkins_console_url && (
+          {scan.error.jenkins_console_url && (
             <a 
-              href={(scan as any).error.jenkins_console_url}
+              href={scan.error.jenkins_console_url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm text-rose-700 hover:text-rose-800 font-medium"
@@ -242,8 +245,8 @@ const ScanStatusPage = () => {
             </a>
           )}
           <ErrorSuggestions 
-            errorType={(scan as any).error.error_type} 
-            errorMessage={(scan as any).error.message}
+            errorType={scan.error.error_type} 
+            errorMessage={scan.error.message}
             stage={stages.find(s => s.status.toLowerCase().includes('fail'))?.stage}
           />
         </div>
@@ -327,7 +330,7 @@ const ScanStatusPage = () => {
       <ScanErrorModal
         isOpen={showErrorModal}
         onClose={() => setShowErrorModal(false)}
-        error={(scan as any)?.error || null}
+        error={scan?.error || null}
       />
 
       {showCancelConfirm && (

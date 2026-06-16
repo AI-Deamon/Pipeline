@@ -1,10 +1,34 @@
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { Outlet, Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Shield, LayoutDashboard, PlusCircle, Bug, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText } from 'lucide-react';
+import { Shield, LayoutDashboard, PlusCircle, Bug, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText, type LucideIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { Breadcrumbs } from './Breadcrumbs';
 import { api } from '../services/api';
+
+interface NavLinkProps {
+  to: string;
+  icon: LucideIcon;
+  isActive: boolean;
+  onNavigate: () => void;
+  children: ReactNode;
+}
+
+const NavLink = ({ to, icon: Icon, isActive, onNavigate, children }: NavLinkProps) => (
+  <Link
+    to={to}
+    onClick={onNavigate}
+    className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+      isActive
+        ? 'bg-slate-900 text-white shadow-md'
+        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+    }`}
+  >
+    <Icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} />
+    <span className="font-medium text-sm">{children}</span>
+  </Link>
+);
 
 const Layout = () => {
   const navigate = useNavigate();
@@ -32,6 +56,7 @@ const Layout = () => {
   const currentProject = projectData ? { id: projectData.project_id, name: projectData.name } : undefined;
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMobileMenuOpen(false);
   }, [location.pathname]);
 
@@ -42,21 +67,7 @@ const Layout = () => {
 
   const isActive = (path: string) => location.pathname === path;
   const showProjectContext = currentProject !== undefined;
-
-  const NavLink = ({ to, icon: Icon, children }: { to: string; icon: any; children: React.ReactNode }) => (
-    <Link
-      to={to}
-      onClick={() => setIsMobileMenuOpen(false)}
-      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-        isActive(to) 
-          ? 'bg-slate-900 text-white shadow-md' 
-          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-      }`}
-    >
-      <Icon className={`w-5 h-5 ${isActive(to) ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} />
-      <span className="font-medium text-sm">{children}</span>
-    </Link>
-  );
+  const handleNavClick = () => setIsMobileMenuOpen(false);
 
   return (
     <div className="min-h-screen bg-[#fafafa] flex flex-col md:flex-row">
@@ -110,13 +121,13 @@ const Layout = () => {
           <div>
             <h3 className="px-4 text-xs font-medium text-slate-400 mb-3">Core</h3>
             <div className="space-y-1">
-              <NavLink to="/dashboard" icon={LayoutDashboard}>Dashboard</NavLink>
-              <NavLink to="/my-issues" icon={Bug}>My Issues</NavLink>
-              <NavLink to="/pending-verification" icon={Shield}>Pending Verification</NavLink>
-              <NavLink to="/projects/create" icon={PlusCircle}>New Project</NavLink>
-              <NavLink to="/users" icon={Shield}>Users</NavLink>
-              <NavLink to="/settings" icon={Key}>API Settings</NavLink>
-              <NavLink to="/docs" icon={BookOpen}>Docs</NavLink>
+              <NavLink to="/dashboard" icon={LayoutDashboard} isActive={isActive('/dashboard')} onNavigate={handleNavClick}>Dashboard</NavLink>
+              <NavLink to="/my-issues" icon={Bug} isActive={isActive('/my-issues')} onNavigate={handleNavClick}>My Issues</NavLink>
+              <NavLink to="/pending-verification" icon={Shield} isActive={isActive('/pending-verification')} onNavigate={handleNavClick}>Pending Verification</NavLink>
+              <NavLink to="/projects/create" icon={PlusCircle} isActive={isActive('/projects/create')} onNavigate={handleNavClick}>New Project</NavLink>
+              <NavLink to="/users" icon={Shield} isActive={isActive('/users')} onNavigate={handleNavClick}>Users</NavLink>
+              <NavLink to="/settings" icon={Key} isActive={isActive('/settings')} onNavigate={handleNavClick}>API Settings</NavLink>
+              <NavLink to="/docs" icon={BookOpen} isActive={isActive('/docs')} onNavigate={handleNavClick}>Docs</NavLink>
             </div>
           </div>
 
@@ -132,10 +143,10 @@ const Layout = () => {
                   <div className="text-[10px] text-slate-400 font-mono mt-0.5 truncate">{currentProject?.id}</div>
                 </div>
                 <div className="space-y-1 pt-1">
-                  <NavLink to={`/projects/${currentProject?.id}`} icon={Activity}>Controls</NavLink>
-                  <NavLink to={`/projects/${currentProject?.id}/history`} icon={History}>Scan History</NavLink>
-                  <NavLink to={`/projects/${currentProject?.id}/manual`} icon={Settings}>Configure</NavLink>
-                  <NavLink to={`/projects/${currentProject?.id}/reports`} icon={FileText}>Reports</NavLink>
+                  <NavLink to={`/projects/${currentProject?.id}`} icon={Activity} isActive={isActive(`/projects/${currentProject?.id}`)} onNavigate={handleNavClick}>Controls</NavLink>
+                  <NavLink to={`/projects/${currentProject?.id}/history`} icon={History} isActive={isActive(`/projects/${currentProject?.id}/history`)} onNavigate={handleNavClick}>Scan History</NavLink>
+                  <NavLink to={`/projects/${currentProject?.id}/manual`} icon={Settings} isActive={isActive(`/projects/${currentProject?.id}/manual`)} onNavigate={handleNavClick}>Configure</NavLink>
+                  <NavLink to={`/projects/${currentProject?.id}/reports`} icon={FileText} isActive={isActive(`/projects/${currentProject?.id}/reports`)} onNavigate={handleNavClick}>Reports</NavLink>
                 </div>
               </div>
             </div>

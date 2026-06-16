@@ -55,6 +55,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
       setCurrentUser(null);
     }
     setIsLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Periodic expiry check for mid-session expiration (T024)

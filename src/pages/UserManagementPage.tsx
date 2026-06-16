@@ -26,6 +26,7 @@ const UserManagementPage = () => {
       return;
     }
     loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManageUsers]);
 
   const loadUsers = async () => {

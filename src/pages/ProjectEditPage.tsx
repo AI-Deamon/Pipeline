@@ -31,7 +31,7 @@ const ProjectEditPage = () => {
         } else {
           setProject(data);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         setError(ApiError.getErrorMessage(err, 'Failed to load project'));
       } finally {
         setLoading(false);
@@ -59,7 +59,7 @@ const ProjectEditPage = () => {
       const updated = await api.projects.update(projectId, values);
       setProject(updated);
       return `Project "${updated.name}" updated successfully!`;
-    } catch (err: any) {
+    } catch (err: unknown) {
       throw new Error(ApiError.getErrorMessage(err, 'Update failed'));
     }
   };

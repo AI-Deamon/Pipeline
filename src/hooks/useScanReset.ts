@@ -1,11 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
+import type { ScanError } from '../types';
 
-export interface ScanError {
-  message: string;
-  error_type?: string;
-  jenkins_console_url?: string;
-}
+export type { ScanError };
 
 export interface ScanResetResult {
   status: string;

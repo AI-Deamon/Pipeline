@@ -23,16 +23,16 @@ const SeverityPieChart: React.FC<SeverityPieChartProps> = ({ critical, high, med
     { name: 'Low', value: low },
   ].filter(item => item.value > 0);
 
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: any) => {
-    if (percent === 0) return null;
+  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: { cx: number; cy: number; midAngle?: number; innerRadius: number; outerRadius: number; percent?: number; name?: string }) => {
+    if (!percent || percent === 0) return null;
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    const x = cx + radius * Math.cos(-(midAngle ?? 0) * RADIAN);
+    const y = cy + radius * Math.sin(-(midAngle ?? 0) * RADIAN);
 
     return (
       <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central">
-        {`${name} ${(percent * 100).toFixed(0)}%`}
+        {`${name ?? ''} ${(percent * 100).toFixed(0)}%`}
       </text>
     );
   };

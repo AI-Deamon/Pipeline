@@ -103,6 +103,7 @@ function useElapsedTime(startedAt?: string, finishedAt?: string) {
 
     // If scan hasn't started yet, show 00:00
     if (!startedAt) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setElapsed('00:00');
       return;
     }
@@ -176,6 +177,7 @@ function useInitializationTime(startedAt?: string, isRunning?: boolean, hasStage
 
   useEffect(() => {
     if (!startedAt || !isRunning || hasStages) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSeconds(0);
       return;
     }

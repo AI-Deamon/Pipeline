@@ -108,18 +108,18 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
                 <span>{issue.assignee_id}</span>
               </div>
             )}
-            {(issue as any).file_path && (
+            {issue.file_path && (
               <div className="col-span-2">
                 <span className="text-slate-400 block text-xs">File</span>
                 <div className="flex items-center gap-1.5 font-mono text-xs">
                   <FileCode size={12} className="text-slate-400" />
-                  <span>{(issue as any).file_path}</span>
-                  {(issue as any).line_number && (
-                    <span className="text-slate-400">:{(issue as any).line_number}</span>
+                  <span>{issue.file_path}</span>
+                  {issue.line_number && (
+                    <span className="text-slate-400">:{issue.line_number}</span>
                   )}
-                  {(issue as any).git_url && (
+                  {issue.git_url && (
                     <a
-                      href={(issue as any).git_url}
+                      href={issue.git_url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="ml-2 text-blue-600 hover:underline inline-flex items-center gap-0.5"
@@ -144,11 +144,11 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
                 <span className="font-mono text-xs">{issue.rule}</span>
               </div>
             )}
-            {((issue as any).tags && (issue as any).tags.length > 0) && (
+            {(issue.tags && issue.tags.length > 0) && (
               <div className="col-span-2">
                 <span className="text-slate-400 block text-xs">Tags</span>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {((issue as any).tags as string[]).map((tag) => (
+                  {issue.tags.map((tag) => (
                     <span key={tag} className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
                       <Tag size={10} /> {tag}
                     </span>
@@ -172,14 +172,14 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
             </div>
           )}
 
-          {(issue as any).file_path && (issue as any).line_number && (
+          {issue.file_path && issue.line_number && (
             <CodeSnippet
               snippet={issue.code_snippet ?? null}
-              language={(issue as any).code_snippet_language}
-              highlightLine={(issue as any).line_number}
-              startLine={Math.max(1, (issue as any).line_number - 10)}
-              file={(issue as any).file_path}
-              gitUrl={(issue as any).git_url}
+              language={issue.code_snippet_language}
+              highlightLine={issue.line_number}
+              startLine={Math.max(1, issue.line_number - 10)}
+              file={issue.file_path}
+              gitUrl={issue.git_url}
             />
           )}
         </div>

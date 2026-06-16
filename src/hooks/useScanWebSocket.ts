@@ -62,6 +62,7 @@ export function useScanWebSocket(
   const isManualClose = useRef(false);
   const stableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<() => void>(() => {});
 
   // T032: Reactive connection state
   const [connected, setConnected] = useState(false);
@@ -70,12 +71,16 @@ export function useScanWebSocket(
   const [exhausted, setExhausted] = useState(false);
 
   const onMessageRef = useRef(onMessage);
+  // eslint-disable-next-line react-hooks/refs
   onMessageRef.current = onMessage;
   const onErrorRef = useRef(onError);
+  // eslint-disable-next-line react-hooks/refs
   onErrorRef.current = onError;
   const onOpenRef = useRef(onOpen);
+  // eslint-disable-next-line react-hooks/refs
   onOpenRef.current = onOpen;
   const onCloseRef = useRef(onClose);
+  // eslint-disable-next-line react-hooks/refs
   onCloseRef.current = onClose;
 
   const connect = useCallback(() => {
@@ -142,7 +147,7 @@ export function useScanWebSocket(
       if (!isManualClose.current && reconnectCountRef.current < maxReconnectAttempts) {
         reconnectCountRef.current += 1;
         console.log(`Reconnecting in ${reconnectInterval}ms (attempt ${reconnectCountRef.current}/${maxReconnectAttempts})`);
-        reconnectTimerRef.current = setTimeout(connect, reconnectInterval);
+        reconnectTimerRef.current = setTimeout(() => { connectRef.current(); }, reconnectInterval);
       } else if (!isManualClose.current) {
         // Exhausted all reconnect attempts — signal polling fallback
         console.warn('WebSocket reconnect exhausted — falling back to polling');
@@ -152,6 +157,10 @@ export function useScanWebSocket(
 
     wsRef.current = ws;
   }, [scanId, projectId, reconnectInterval, maxReconnectAttempts]);
+
+  // Keep connectRef pointing at the latest connect() so onclose can call it
+  // eslint-disable-next-line react-hooks/refs
+  connectRef.current = connect;
 
   // Connect on mount
   useEffect(() => {

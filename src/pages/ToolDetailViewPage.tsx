@@ -144,8 +144,8 @@ const ToolDetailViewPage = () => {
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-500 font-mono">
                     {(() => {
-                      const fp = (issue as any).file_path;
-                      const ln = (issue as any).line_number;
+                      const fp = issue.file_path;
+                      const ln = issue.line_number;
                       if (fp && ln) return `${fp.split('/').pop()}:${ln}`;
                       if (fp) return fp.split('/').pop();
                       return <span className="text-slate-300">—</span>;

@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
-import type { RescanRequestResponse } from '../types';
 
 export function useEditRescanRequest() {
   const qc = useQueryClient();
@@ -51,7 +50,7 @@ export function useRequestRescan() {
       fix_note: string;
       commit_sha?: string;
     }) => api.issues.requestRescan(issueId, { fix_note, commit_sha }),
-    onSuccess: (_data: RescanRequestResponse) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending-verification'] });
       qc.invalidateQueries({ queryKey: ['issue'] });
       qc.invalidateQueries({ queryKey: ['tool-issues'] });

@@ -4,10 +4,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { useScanCancel } from './useScanReset';
 import { useScanWebSocket } from './useScanWebSocket';
+import type { Scan, ScanStage } from '../types';
 
 export interface ScanData {
-  scan: any;
-  stages: any[];
+  scan: Scan | undefined;
+  stages: ScanStage[];
 }
 
 export function useScanStatus() {
@@ -45,10 +46,11 @@ export function useScanStatus() {
   const stages = scanData?.stages || [];
 
   useEffect(() => {
-    if (scan?.state === 'FAILED' && (scan as any)?.error) {
+    if (scan?.state === 'FAILED') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowErrorModal(true);
     }
-  }, [scan?.state]);
+  }, [scan]);
 
   const cancelMutation = useScanCancel();
 
@@ -65,6 +67,7 @@ export function useScanStatus() {
 
   useEffect(() => {
     if (scanData) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastUpdated(new Date());
     }
   }, [scanData]);

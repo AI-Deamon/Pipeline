@@ -96,8 +96,9 @@ export const ProjectForm = ({
       if (message) {
         setSuccessMessage(message);
       }
-    } catch (err: any) {
-      setError(err?.message || 'Project update failed. Check server logs.');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Project update failed. Check server logs.';
+      setError(message);
     } finally {
       setIsLoading(false);
     }

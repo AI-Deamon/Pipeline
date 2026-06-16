@@ -105,7 +105,7 @@ const CreateProjectPage = () => {
       setTimeout(() => {
         navigate(`/projects/${project.project_id}`);
       }, 1500);
-    } catch (err: any) {
+    } catch (err: unknown) {
       addToast({
         type: 'error',
         title: 'Creation Failed',

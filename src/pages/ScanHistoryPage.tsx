@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { ArrowLeft, Search } from 'lucide-react';
 import { PageSkeleton } from '../components/PageSkeleton';
 import { useScanForceUnlock } from '../hooks/useScanReset';
+import type { Scan } from '../types';
 
 export default function ScanHistoryPage() {
   const { projectId } = useParams();
@@ -20,7 +21,7 @@ export default function ScanHistoryPage() {
   });
 
   const filteredHistory = useMemo(() => {
-    return history.filter((scan: any) => 
+    return history.filter((scan: Scan) => 
       scan.scan_id.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [history, searchTerm]);
@@ -113,7 +114,7 @@ export default function ScanHistoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredHistory.map((scan: any) => {
+              {filteredHistory.map((scan: Scan) => {
                 const status = getStatusBadge(scan.state);
                 return (
                   <tr

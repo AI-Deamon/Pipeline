@@ -25,6 +25,12 @@ export type Project = {
   last_scan_time?: string;
 };
 
+export type ScanError = {
+  message: string;
+  error_type?: string;
+  jenkins_console_url?: string;
+};
+
 export type Scan = {
   scan_id: string;
   project_id: string;
@@ -38,6 +44,7 @@ export type Scan = {
   retry_count?: number | string;
   jenkins_build_number?: number | string;
   jenkins_queue_id?: string;
+  error?: ScanError;
 };
 
 // Report Summary Types
