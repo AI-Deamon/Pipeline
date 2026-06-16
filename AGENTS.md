@@ -114,5 +114,5 @@ python run.py down      # Stops + removes volumes + orphans
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/010-e2e-verification/VERIFICATION_REPORT.md
+at specs/011-ux-audit/plan.md
 <!-- SPECKIT END -->
