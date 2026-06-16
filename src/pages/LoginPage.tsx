@@ -101,6 +101,7 @@ const LoginPage = () => {
               required
               autoFocus
               disabled={isLoading}
+              autoComplete="username"
             />
           </div>
 
@@ -118,6 +119,7 @@ const LoginPage = () => {
                 placeholder="Password"
                 required
                 disabled={isLoading}
+                autoComplete="current-password"
               />
               <button
                 type="button"
