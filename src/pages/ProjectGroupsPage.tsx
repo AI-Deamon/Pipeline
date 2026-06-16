@@ -122,7 +122,7 @@ const ProjectGroupsPage = () => {
       if (selectedGroup?.group_id === groupId) {
         handleViewGroup(groupId);
       }
-      addToast({ type: 'success', title: 'Refreshed', message: `Refreshed: ${result.total_findings} total findings, ${result.auto_assigned} new scans assigned` });
+      addToast({ type: 'success', title: 'Refreshed', message: result.message || `Group refreshed (${result.refreshed_count} projects)` });
     } catch (error) {
       console.error('Failed to refresh group:', error);
     } finally {

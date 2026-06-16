@@ -1,7 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
-import { ArrowLeft, BarChart3, Bug, Lock } from 'lucide-react';
+import { ArrowLeft, BarChart3, Bug } from 'lucide-react';
 import ToolCard from '../components/ToolCard';
 import { AccessDenied } from '../components/AccessDenied';
 import { ApiError } from '../utils/apiError';
