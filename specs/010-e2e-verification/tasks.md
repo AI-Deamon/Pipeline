@@ -85,3 +85,10 @@
 - Multi-tenant scenarios
 - Disaster recovery
 - Security penetration testing
+
+## Defects Found (To Be Filed as Follow-up Tasks)
+
+- [ ] D1 [HIGH] Install `@testing-library/dom` as dev dependency: `npm install --save-dev @testing-library/dom`
+- [ ] D2 [HIGH] Re-run `npx vitest run` and `npx tsc -b` to verify both defects resolved
+- [ ] D3 [MEDIUM] Consider adding a pre-commit hook that runs `npx tsc -b` to catch prod TS errors
+- [ ] D4 [LOW] Add `pytest` to the test scope explicitly in `package.json` or doc (currently not in any test script)
