@@ -1,29 +1,28 @@
 # CONTEXT.md
 
-## 1. THE GATEKEEPER
+## The Silo Rule
 
-Archer is siloed by work folder. The agent drops into the room that matches the user's intent and executes — no project archaeology, no library lookups, no manual cross-referencing.
+Sentinel is siloed by work type. Drop into the correct room, read its CONTEXT.md, execute — never load files from a different room unless the task explicitly crosses a boundary.
 
-## 2. INTENT ROUTING TABLE
+`AGENTS.md` is the only always-loaded file. Each room's `CONTEXT.md` defines its own load/skip budget.
 
-| User Intent | Target Room | Target Context File |
-|-------------|-------------|---------------------|
-| Write spec, plan, or tasks | Planning | `specs/CONTEXT.md` |
-| Implement backend code | Coding | `backend/CONTEXT.md` |
-| Implement frontend code | Coding | `src/CONTEXT.md` |
-| Add or run pytest | Coding | `tests/CONTEXT.md` |
-| Edit the Jenkinsfile/pipeline | Coding | `Agent/CONTEXT.md` |
-| Edit compose/infrastructure | Coding | `docker/CONTEXT.md` |
-| Build the Jenkins image | Coding | `docker/jenkins/CONTEXT.md` |
-| Configure the Postgres image | Coding | `docker/postgres/CONTEXT.md` |
-| Read reference documentation | Reference | `docs/CONTEXT.md` |
+## Intent Routing
 
-## 3. THE SILO POLICY
+| If the user wants to... | Go to | Read |
+|-------------------------|-------|------|
+| Add or fix a backend API endpoint | `backend/` | CONTEXT.md |
+| Wire a Celery task or fix a parser | `backend/` | CONTEXT.md |
+| Fix a UI bug or add a React component | `src/` | CONTEXT.md |
+| Write or fix a backend pytest test | `tests/` | CONTEXT.md |
+| Write or fix a frontend Vitest test | `src/tests/` | CONTEXT.md |
+| Edit docker-compose, Dockerfiles, or infra | `docker/` | CONTEXT.md |
+| Edit Jenkinsfile or pipeline stages | `Agent/` | CONTEXT.md |
+| Write a feature spec or implementation plan | `specs/` | CONTEXT.md |
+| Read or edit API/Docker/flow documentation | `docs/` | CONTEXT.md |
 
-NEVER load data from Room A while working in Room B unless the user explicitly requests it. `AGENTS.md` is the only always-loaded file (the static map). Each room's `CONTEXT.md` defines what to load and what to skip.
+## First Move (SOP)
 
-## 4. THE FIRST MOVE (SOP)
-
-1. **Identify intent** — map the user's request to the Routing Table above
-2. **Teleport** — read only the target room's `CONTEXT.md`
-3. **Execute** — follow that room's Process; use its Hard Rules as guardrails
+1. Identify intent — match to the routing table above
+2. Teleport — read only the target room's CONTEXT.md
+3. Execute — follow that room's process and hard rules
+4. Never load Room A files while working in Room B

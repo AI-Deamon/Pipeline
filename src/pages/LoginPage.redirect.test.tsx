@@ -18,8 +18,19 @@ describe('LoginPage redirect behavior', () => {
       isAuthenticated: true,
       isLoading: false,
       token: 'fake-token',
+      role: 'admin' as const,
+      permissions: {
+        canManageUsers: true,
+        canManageProjectAccess: true,
+        canViewAllProjects: true,
+        canAssignIssues: true,
+        canVerifyIssues: true,
+        canUpdateAssignedIssues: true,
+      },
+      currentUser: { id: '1', username: 'admin', role: 'admin' as const },
       login: vi.fn(),
       logout: vi.fn(),
+      refreshUser: vi.fn(),
     });
 
     render(

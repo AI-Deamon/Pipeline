@@ -71,19 +71,22 @@ def _is_api_key_auth(request: Request) -> bool:
 
 
 def _verify_project_ownership(db: Session, project_id: str, request: Request, current_user) -> ProjectDB:
-    """Verify the project belongs to the current user. API-key auth bypasses this check."""
+    """Verify the project belongs to the current user or user has RBAC access. API-key auth bypasses this check."""
     if _is_api_key_auth(request):
         project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
         return project
-    project = db.query(ProjectDB).filter(
-        ProjectDB.project_id == project_id,
-        ProjectDB.user_id == (current_user.id if hasattr(current_user, 'id') else None)
-    ).first()
+    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    from app.services.rbac_service import get_rbac_service
+    rbac = get_rbac_service(db=db, user=current_user)
+    if rbac.is_admin:
+        return project
+    if rbac.has_project_access(project_id):
+        return project
+    raise HTTPException(status_code=404, detail="Project not found")
 
 
 @router.get("/projects/{project_id}/reports", response_model=List[ReportDetail])

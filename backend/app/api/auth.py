@@ -11,6 +11,9 @@ from app.core.rate_limit import limiter
 from app.models.db_models import UserDB
 from app.schemas.user import UserCreate, User
 from app.schemas.token import Token
+from app.core.auth import get_current_user
+from app.schemas.rbac import CurrentUserResponse
+from app.services.rbac_service import get_rbac_service
 
 router = APIRouter()
 
@@ -74,3 +77,18 @@ def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestFor
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.get("/me", response_model=CurrentUserResponse)
+def get_current_user_info(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    rbac = get_rbac_service(db=db, user=current_user)
+    return CurrentUserResponse(
+        id=str(current_user.id),
+        username=str(current_user.username),
+        role=str(current_user.role),
+        permissions=rbac.permissions,
+    )

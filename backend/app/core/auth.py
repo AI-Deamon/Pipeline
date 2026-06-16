@@ -8,6 +8,7 @@ from app.core import security
 from app.core.db import get_db
 from app.models.db_models import UserDB
 from app.schemas.token import TokenData
+from app.services.rbac_service import get_rbac_service
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
@@ -19,7 +20,7 @@ def get_current_user(
     # Safeguard: never allow env-based auth bypass in non-test environments
     # In test env, require explicit TEST_BYPASS_AUTH=true to enable bypass
     if settings.ENV == "test" and settings.TEST_BYPASS_AUTH:
-        return type("User", (), {"username": "test-bypass"})()
+        return type("User", (), {"username": "test-bypass", "role": "admin", "id": "bypass-id"})()
 
     # Callback endpoint has its own dedicated shared-secret guard.
     if request.url.path.endswith("/callback"):
@@ -59,3 +60,34 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer", "X-Auth-Reason": "account-deleted"},
         )
     return user
+
+
+def require_role(*roles: str):
+    """Dependency factory: require the current user to have one of the given roles."""
+    def dependency(
+        request: Request,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+    ):
+        rbac = get_rbac_service(db=db, user=current_user)
+        if rbac.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Required role: {', '.join(roles)}",
+            )
+        return current_user
+    return dependency
+
+
+def require_admin():
+    """Shortcut: require admin role."""
+    return require_role("admin")
+
+
+def get_rbac(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Dependency: inject RbacService for the current user."""
+    return get_rbac_service(db=db, user=current_user)
