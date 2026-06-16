@@ -9,6 +9,7 @@ from app.core.auth import get_current_user
 from app.core.db import get_db
 from app.models.db_models import UserDB
 from app.models.db_models import ProjectAssignmentDB
+from app.models.db_models import IssueDB
 from app.schemas.rbac import (
     AccessChangeResponse,
     CurrentUserResponse,
@@ -203,6 +204,88 @@ def revoke_project_access(
         target_user_id=user_id,
         change_type="scope_revoked",
         before_value=scope_desc,
+    )
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete a user account.
+
+    Safety rules (in order):
+    1. Caller must be admin (existing RBAC gate).
+    2. Cannot delete yourself — would lock you out of the next request.
+    3. Cannot delete the last remaining admin — would leave the system
+       with no admin to manage other users.
+    4. Cannot delete a user with open assigned issues (409 Conflict) —
+       reassign or close those issues first. The error body includes the
+       issue count so the UI can surface a specific message.
+    5. Cascades: project access rows (ProjectAssignmentDB) are deleted
+       in the same transaction. The access-changes audit log is kept
+       (target_user_id is a string FK with no cascade constraint).
+    """
+    rbac = _get_rbac(request, db, current_user)
+    if not rbac.can_manage_users():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    target_user = db.query(UserDB).filter(UserDB.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # "Last admin" check fires first so the more diagnostic error wins:
+    # "promote another admin, then come back" is more actionable than
+    # "you can't delete yourself" (which the admin already knows).
+    if str(target_user.role) == "admin":
+        admin_count = (
+            db.query(UserDB).filter(UserDB.role == "admin").count()
+        )
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete the last admin account",
+            )
+
+    if str(target_user.id) == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account",
+        )
+
+    open_issue_count = (
+        db.query(IssueDB)
+        .filter(
+            IssueDB.assignee_id == user_id,
+            IssueDB.status.in_(["open", "assigned", "in_progress"]),
+        )
+        .count()
+    )
+    if open_issue_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"User has {open_issue_count} open assigned issue(s). "
+                "Reassign or close them before deleting."
+            ),
+        )
+
+    deleted_username = str(target_user.username)
+
+    # Cascade: remove all project access rows for this user.
+    db.query(ProjectAssignmentDB).filter(
+        ProjectAssignmentDB.user_id == user_id
+    ).delete(synchronize_session=False)
+
+    db.delete(target_user)
+    db.commit()
+
+    rbac.log_access_change(
+        target_user_id=user_id,
+        change_type="user_deleted",
+        before_value=deleted_username,
     )
 
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../components/Toast';
@@ -23,6 +23,7 @@ vi.mock('../../services/api', () => ({
       }),
       grantProjectAccess: vi.fn().mockResolvedValue({ id: 2, scopeType: 'project', scopeId: 'proj-2' }),
       revokeProjectAccess: vi.fn().mockResolvedValue(undefined),
+      deleteUser: vi.fn().mockResolvedValue(undefined),
       getAccessChanges: vi.fn().mockResolvedValue([
         { id: 1, actorId: '1', targetUserId: '2', changeType: 'role_changed', beforeValue: 'developer', afterValue: 'team_lead', changedAt: '2026-06-09T00:00:00Z' },
       ]),
@@ -101,6 +102,56 @@ describe('UserManagementPage', () => {
     fireEvent.click(shieldButtons[0]);
     await waitFor(() => {
       expect(screen.getByText(/Change Role:/)).toBeInTheDocument();
+    });
+  });
+
+  it('does not render a Delete button for the admin user', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('dev1')).toBeInTheDocument();
+    });
+    // The Delete button uses aria-label "Delete user <username>" — find the
+    // ones for non-admin users and verify no "Delete user admin" exists.
+    const allDeleteButtons = screen.queryAllByRole('button', { name: /delete user/i });
+    const labels = allDeleteButtons.map(b => b.getAttribute('aria-label'));
+    expect(labels).not.toContain('Delete user admin');
+    // Non-admin users get a Delete button.
+    expect(labels).toEqual(
+      expect.arrayContaining(['Delete user lead1', 'Delete user dev1'])
+    );
+  });
+
+  it('opens the delete confirmation modal when Delete is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('lead1')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete user lead1' }));
+    // ConfirmModal renders the title in an <h2 id="confirm-modal-title">. The
+    // user list also shows "lead1" (in the username cell), so we use a heading
+    // role to scope the assertion to the modal.
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => {
+      expect(within(dialog).getByRole('heading', { name: 'Delete User?' })).toBeInTheDocument();
+      expect(within(dialog).getByText(/lead1/)).toBeInTheDocument();
+    });
+  });
+
+  it('calls api.rbac.deleteUser and shows success toast on confirm', async () => {
+    const { api } = await import('../../services/api');
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('dev1')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete user dev1' }));
+    // The per-row Delete button (aria-label="Delete user dev1") and the
+    // modal's confirm button (text="Delete User") both match /delete user/i.
+    // Scope the second lookup to inside the dialog to avoid the ambiguity.
+    const dialog = await screen.findByRole('dialog');
+    const confirmBtn = within(dialog).getByRole('button', { name: 'Delete User' });
+    fireEvent.click(confirmBtn);
+    await waitFor(() => {
+      expect(api.rbac.deleteUser).toHaveBeenCalledWith('3');
     });
   });
 });

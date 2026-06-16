@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Users, Plus, Trash2, LogOut, Shield, UserCog, History } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { useRbac } from '../hooks/useRbac';
 import { api } from '../services/api';
+import { ApiError } from '../utils/apiError';
 import type { CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment } from '../types';
 
 const UserManagementPage = () => {
@@ -19,6 +21,8 @@ const UserManagementPage = () => {
   const [newScopeType, setNewScopeType] = useState<'project' | 'project_group'>('project');
   const [newScopeId, setNewScopeId] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<{ assignmentId: number; scopeDesc: string } | null>(null);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<{ userId: string; username: string } | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
 
   useEffect(() => {
     if (!canManageUsers) {
@@ -100,6 +104,29 @@ const UserManagementPage = () => {
     }
   };
 
+  const handleDeleteUser = async () => {
+    if (!confirmDeleteUser) return;
+    setIsDeletingUser(true);
+    try {
+      await api.rbac.deleteUser(confirmDeleteUser.userId);
+      addToast({
+        type: 'success',
+        title: 'User Deleted',
+        message: `User "${confirmDeleteUser.username}" has been removed.`,
+      });
+      setConfirmDeleteUser(null);
+      loadUsers();
+    } catch (err: unknown) {
+      addToast({
+        type: 'error',
+        title: 'Delete Failed',
+        message: ApiError.getErrorMessage(err, 'Failed to delete user.'),
+      });
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   if (!canManageUsers) return null;
 
   return (
@@ -176,6 +203,16 @@ const UserManagementPage = () => {
                   >
                     <UserCog className="w-4 h-4" />
                   </button>
+                  {user.username !== 'admin' && (
+                    <button
+                      onClick={() => setConfirmDeleteUser({ userId: user.id, username: user.username })}
+                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
+                      title="Delete User"
+                      aria-label={`Delete user ${user.username}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -316,6 +353,26 @@ const UserManagementPage = () => {
           </div>
         </div>
       )}
+
+      {/* Confirm user-delete modal — uses the accessible ConfirmModal
+          component (focus trap + role="dialog" + aria-modal) instead of
+          an inline div, addressing audit finding F-005. */}
+      <ConfirmModal
+        isOpen={!!confirmDeleteUser}
+        onClose={() => setConfirmDeleteUser(null)}
+        onConfirm={handleDeleteUser}
+        title="Delete User?"
+        message={
+          confirmDeleteUser
+            ? `This will permanently delete user "${confirmDeleteUser.username}" and revoke all their project access. This action cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete User"
+        cancelLabel="Cancel"
+        variant="danger"
+        icon={<Trash2 />}
+        isPending={isDeletingUser}
+      />
     </div>
   );
 };

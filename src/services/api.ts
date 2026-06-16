@@ -68,11 +68,10 @@ export const api = {
       });
       return response.data;
     },
-    register: async (username: string, password: string, email?: string): Promise<{ username: string }> => {
+    register: async (username: string, password: string): Promise<{ username: string }> => {
       const response = await apiClient.post('/auth/register', {
         username,
         password,
-        email: email || `${username}@example.com`
       });
       return response.data;
     },
@@ -363,6 +362,9 @@ export const api = {
       const query = params.toString() ? `?${params.toString()}` : '';
       const response = await apiClient.get(`/users${query}`);
       return response.data;
+    },
+    deleteUser: async (userId: string): Promise<void> => {
+      await apiClient.delete(`/users/${userId}`);
     },
     updateUserRole: async (userId: string, role: string): Promise<CurrentUser> => {
       const response = await apiClient.patch(`/users/${userId}/role`, { role });
