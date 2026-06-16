@@ -115,4 +115,8 @@ python run.py down      # Stops + removes volumes + orphans
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
 at specs/011-ux-audit/plan.md
+
+The completed UX audit (49 findings, score 0/100) is at
+specs/011-ux-audit/audit-report.md — open it before starting any frontend
+refactor to understand the Critical/Serious issues.
 <!-- SPECKIT END -->
