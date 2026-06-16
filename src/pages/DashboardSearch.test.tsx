@@ -1,10 +1,9 @@
-import { render, screen, fireEvent, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { screen, fireEvent, act } from "@testing-library/react";
 import DashboardPage from "./DashboardPage";
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import { api } from "../services/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ToastProvider } from "../components/Toast";
+import { QueryClient } from "@tanstack/react-query";
+import { renderWithProviders } from "../test/testUtils";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,15 +40,7 @@ describe("DashboardPage Search", () => {
   });
 
   it("filters projects based on search term after debounce", async () => {
-    render(
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <DashboardPage />
-          </MemoryRouter>
-        </QueryClientProvider>
-      </ToastProvider>,
-    );
+    renderWithProviders(<DashboardPage />, { queryClient });
 
     // Initial load - need to wait for the promise to resolve AND the timers to run
     await act(async () => {
@@ -82,15 +73,7 @@ describe("DashboardPage Search", () => {
   });
 
   it('shows "No matches found" message after debounce', async () => {
-    render(
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <DashboardPage />
-          </MemoryRouter>
-        </QueryClientProvider>
-      </ToastProvider>,
-    );
+    renderWithProviders(<DashboardPage />, { queryClient });
 
     await act(async () => {
       vi.advanceTimersByTime(100);
@@ -113,15 +96,7 @@ describe("DashboardPage Search", () => {
   });
 
   it('clears search when "Clear search" button is clicked', async () => {
-    render(
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <MemoryRouter>
-            <DashboardPage />
-          </MemoryRouter>
-        </QueryClientProvider>
-      </ToastProvider>,
-    );
+    renderWithProviders(<DashboardPage />, { queryClient });
 
     await act(async () => {
       vi.advanceTimersByTime(100);
