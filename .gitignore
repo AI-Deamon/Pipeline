@@ -94,3 +94,6 @@ Agent/.worktrees/
 # Nmap scanner cache & generated targets
 backend/nmap_system/__pycache__/
 backend/nmap_system/targets.json
+
+# Agent skills (created during opencode sessions)
+skills/
