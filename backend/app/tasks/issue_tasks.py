@@ -276,7 +276,7 @@ def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
                 verified += 1
 
             try:
-                from app.websockets.manager import websocket_manager
+                from app.websockets.manager import manager as websocket_manager
                 websocket_manager.broadcast_event(
                     "rescan_verification_complete",
                     {

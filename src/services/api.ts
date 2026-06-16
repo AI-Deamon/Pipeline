@@ -231,7 +231,7 @@ export const api = {
       const response = await apiClient.post(`/project-groups/${groupId}/auto-assign`);
       return response.data;
     },
-    refresh: async (groupId: string, autoReassign: boolean = true): Promise<any> => {
+    refresh: async (groupId: string, autoReassign: boolean = true): Promise<{ status: string; message: string; refreshed_count: number }> => {
       const response = await apiClient.post(`/project-groups/${groupId}/refresh?auto_reassign=${autoReassign}`);
       return response.data;
     },

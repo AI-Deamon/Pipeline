@@ -312,12 +312,10 @@ def get_code_snippet(
 
     git_blob_url = None
     if "github.com" in (project.git_url or ""):
-        git_blob_url = (
-            project.git_url.replace("github.com", "github.com")
-            .replace(".git", "")
-            .replace(f"git@{", f"https://")
-        )
-        git_blob_url = f"{git_blob_url}/blob/{use_branch}/{file}#L{line}"
+        clean = project.git_url.replace(".git", "")
+        if clean.startswith("git@github.com:"):
+            clean = clean.replace("git@github.com:", "https://github.com/", 1)
+        git_blob_url = f"{clean}/blob/{use_branch}/{file}#L{line}"
 
     return {
         "file": file,

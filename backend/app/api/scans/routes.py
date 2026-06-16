@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.rate_limit import limiter
+from app.core.auth import get_current_user
 from app.models.db_models import ProjectDB, ScanDB
 from app.schemas.scan import (
     ScanCancelResponse,

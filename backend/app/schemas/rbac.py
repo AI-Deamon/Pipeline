@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 
@@ -21,8 +21,7 @@ class ProjectAccessResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserAccessResponse(BaseModel):
@@ -39,8 +38,7 @@ class AccessChangeResponse(BaseModel):
     after_value: Optional[str] = None
     changed_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserWithRole(BaseModel):
@@ -49,8 +47,7 @@ class UserWithRole(BaseModel):
     role: str
     project_assignments: list[ProjectAccessResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CurrentUserResponse(BaseModel):

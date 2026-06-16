@@ -7,7 +7,7 @@ from app.services.issue_service import IssueService
 from app.services.rbac_service import get_rbac_service
 from app.services import rescan_service
 from app.services.fix_note_sanitizer import sanitize as sanitize_fix_note
-from app.services.metrics import RESCAN_REQUESTS_TOTAL, RESCAN_VERIFICATIONS_TOTAL
+from app.metrics import RESCAN_REQUESTS_TOTAL, VERIFICATIONS_TOTAL as RESCAN_VERIFICATIONS_TOTAL
 from app.schemas.issue import (
     IssueCreate,
     IssueAssignRequest,
@@ -29,7 +29,7 @@ from app.schemas.issue import (
 )
 from app.models.db_models import RescanRequestDB, IssueDB
 from app.state.issue_state import IssueState
-from app.websockets.manager import websocket_manager
+from app.websockets.manager import manager as websocket_manager
 
 router = APIRouter()
 service = IssueService()

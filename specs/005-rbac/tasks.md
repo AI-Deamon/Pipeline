@@ -134,10 +134,10 @@
 
 **Purpose**: Address test infrastructure bugs and lint issues discovered during the verification pass.
 
-- [ ] T055 Fix `test_issues_rbac.py` fixture — `IssueDB` not registered with `Base` before `create_all`, causing `no such table: issues`. Move `IssueDB` import before `Base.metadata.create_all()` call in `tests/test_issues_rbac.py`
-- [ ] T056 Fix SQLite "database is locked" errors when running `pytest tests/` in parallel — conftest.py uses shared `test.db` for all test files, causing concurrent write contention. Use unique database URL per test file or `:memory:` with shared cache
-- [ ] T057 Fix lint error `@typescript-eslint/no-explicit-any` in `src/services/api.ts:234` — replace `any` with proper type
-- [ ] T058 Fix Pydantic V2 deprecation warnings — replace `class Config` with `model_config = ConfigDict(...)` in `backend/app/schemas/user.py` and `backend/app/schemas/rbac.py`
+- [X] T055 Fix `test_issues_rbac.py` fixture — `IssueDB` not registered with `Base` before `create_all`, causing `no such table: issues`. Move `IssueDB` import before `Base.metadata.create_all()` call in `tests/test_issues_rbac.py`
+- [X] T056 Fix SQLite "database is locked" errors when running `pytest tests/` in parallel — conftest.py uses shared `test.db` for all test files, causing concurrent write contention. Use unique database URL per test file or `:memory:` with shared cache
+- [X] T057 Fix lint error `@typescript-eslint/no-explicit-any` in `src/services/api.ts:234` — replace `any` with proper type
+- [X] T058 Fix Pydantic V2 deprecation warnings — replace `class Config` with `model_config = ConfigDict(...)` in `backend/app/schemas/user.py` and `backend/app/schemas/rbac.py`
 
 ---
 
