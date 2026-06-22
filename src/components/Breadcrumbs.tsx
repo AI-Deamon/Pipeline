@@ -2,6 +2,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { ChevronRight, Home } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
+import { STAGE_DISPLAY_NAMES, type StageId } from '../types';
 
 interface BreadcrumbsProps {
   projectName?: string;
@@ -36,15 +37,17 @@ export const Breadcrumbs = ({ projectName }: BreadcrumbsProps) => {
       {pathnames.length > 0 && (
         <>
           <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          
+
           {pathnames[0] === 'projects' && pathnames[1] === 'create' ? (
             <span className="text-slate-900">New Project</span>
+          ) : pathnames[0] === 'issues' && pathnames.length === 1 ? (
+            <span className="text-slate-900">Issues</span>
           ) : activeProjectId ? (
             <>
               <Link to={`/projects/${activeProjectId}`} className="hover:text-blue-600 transition-colors text-slate-900">
                 {displayProjectName}
               </Link>
-              
+
               {pathnames.includes('manual') && (
                 <>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
@@ -58,11 +61,33 @@ export const Breadcrumbs = ({ projectName }: BreadcrumbsProps) => {
                   <span className="text-slate-900">Edit Project</span>
                 </>
               )}
-              
+
               {pathnames.includes('history') && (
                 <>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
                   <span className="text-slate-900">Scan Archive</span>
+                </>
+              )}
+
+              {pathnames.includes('issues') && pathnames[0] === 'projects' && (
+                <>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                  <Link
+                    to={`/projects/${activeProjectId}/issues`}
+                    className="hover:text-blue-600 transition-colors text-slate-900"
+                  >
+                    Issues
+                  </Link>
+                </>
+              )}
+
+              {pathnames[2] === 'issues' && pathnames[3] && (
+                <>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                  <span className="text-slate-900">
+                    {STAGE_DISPLAY_NAMES[pathnames[3] as StageId] ||
+                      (pathnames[3].charAt(0).toUpperCase() + pathnames[3].slice(1))}
+                  </span>
                 </>
               )}
 

@@ -74,10 +74,10 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     return () => clearInterval(interval);
   }, [token]);
 
-  const login = (newToken: string) => {
+  const login = useCallback((newToken: string) => {
     sessionStorage.setItem('token', newToken);
     setToken(newToken);
-  };
+  }, []);
 
   const refreshUser = useCallback(async () => {
     if (!token) return;

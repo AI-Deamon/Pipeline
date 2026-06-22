@@ -102,55 +102,47 @@ def _normalize_stage(stage: dict) -> dict:
     }
 
 
+def _validate_artifact_url(artifact_url):
+    if artifact_url is None:
+        return
+    if not isinstance(artifact_url, str):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_url must be a string")
+    if len(artifact_url) > MAX_ARTIFACT_URL_LENGTH:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_url exceeds maximum allowed length")
+    if not artifact_url.startswith(("http://", "https://", "/")):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_url must be absolute HTTP(S) URL or absolute path")
+
+
+def _validate_artifact_size(artifact_size_bytes):
+    if artifact_size_bytes is None:
+        return
+    if not isinstance(artifact_size_bytes, int):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_size_bytes must be an integer")
+    if artifact_size_bytes < 0 or artifact_size_bytes > MAX_ARTIFACT_SIZE_BYTES:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_size_bytes is out of allowed range")
+
+
+def _validate_artifact_sha256(artifact_sha256):
+    if artifact_sha256 is None:
+        return
+    if not isinstance(artifact_sha256, str) or len(artifact_sha256) != 64:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_sha256 must be a 64-char hex string")
+    if any(c not in "0123456789abcdefABCDEF" for c in artifact_sha256):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="artifact_sha256 must be hexadecimal")
+
+
 def _validate_callback_artifacts(stages: list[dict]):
     for stage in stages:
-        artifact_url = stage.get("artifact_url")
-        if artifact_url is not None:
-            if not isinstance(artifact_url, str):
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400, detail="artifact_url must be a string"
-                )
-            if len(artifact_url) > MAX_ARTIFACT_URL_LENGTH:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail="artifact_url exceeds maximum allowed length",
-                )
-            if not artifact_url.startswith(("http://", "https://", "/")):
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail="artifact_url must be absolute HTTP(S) URL or absolute path",
-                )
-
-        artifact_size_bytes = stage.get("artifact_size_bytes")
-        if artifact_size_bytes is not None:
-            if not isinstance(artifact_size_bytes, int):
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400, detail="artifact_size_bytes must be an integer"
-                )
-            if artifact_size_bytes < 0 or artifact_size_bytes > MAX_ARTIFACT_SIZE_BYTES:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail="artifact_size_bytes is out of allowed range",
-                )
-
-        artifact_sha256 = stage.get("artifact_sha256")
-        if artifact_sha256 is not None:
-            if not isinstance(artifact_sha256, str) or len(artifact_sha256) != 64:
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400,
-                    detail="artifact_sha256 must be a 64-char hex string",
-                )
-            if any(c not in "0123456789abcdefABCDEF" for c in artifact_sha256):
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=400, detail="artifact_sha256 must be hexadecimal"
-                )
+        _validate_artifact_url(stage.get("artifact_url"))
+        _validate_artifact_size(stage.get("artifact_size_bytes"))
+        _validate_artifact_sha256(stage.get("artifact_sha256"))
 
 
 def _expire_scan_if_timed_out(
@@ -176,7 +168,7 @@ def _expire_scan_if_timed_out(
     if reference_time and now - reference_time > timedelta(seconds=timeout_seconds):
         scan_obj.state = ScanState.FAILED
         scan_obj.finished_at = now
-        scan_obj.error_message = f"Scan timed out after {settings.SCAN_TIMEOUT} seconds"
+        scan_obj.error_message = f"Scan timed out after {timeout_seconds} seconds"
         scan_obj.error_type = "TIMEOUT"
         project_obj.last_scan_state = scan_obj.state.value
 

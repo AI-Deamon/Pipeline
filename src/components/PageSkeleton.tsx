@@ -99,9 +99,15 @@ export function PageSkeleton({ type = 'dashboard' }: PageSkeletonProps) {
     </div>
   );
 
+  const renderSkeleton = () => {
+    if (type === 'form') return renderFormSkeleton();
+    if (type === 'dashboard') return renderDashboardSkeleton();
+    return renderScanSkeleton();
+  };
+
   return (
     <div className="p-8">
-      {type === 'form' ? renderFormSkeleton() : type === 'dashboard' ? renderDashboardSkeleton() : renderScanSkeleton()}
+      {renderSkeleton()}
 
       {/* Centered Loading Logo */}
       <div className="fixed inset-0 pointer-events-none flex flex-col items-center justify-center z-50">

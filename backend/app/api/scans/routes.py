@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta, timezone
 import logging
 import uuid
-from typing import List
+from datetime import datetime, timezone
+from typing import Annotated, List
 
 from fastapi import (
     APIRouter,
@@ -47,13 +47,34 @@ from .state import router as state_router
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+_PROJECT_NOT_FOUND = "Project not found"
+_SCAN_NOT_FOUND = "Scan not found"
+
 router.include_router(callback_router)
 router.include_router(state_router)
 
 
+def _parse_scan_timeout_header(x_scan_timeout: str | None, calculated_timeout: int) -> int:
+    if not x_scan_timeout:
+        return calculated_timeout
+    try:
+        override = int(x_scan_timeout)
+        if override > 0:
+            max_allowed = max(settings.SCAN_TIMEOUT * 3, 7200)
+            actual = min(override, max_allowed)
+            if override > max_allowed:
+                logger.info(f"Scan timeout clamped from {override}s to {max_allowed}s (max allowed)")
+            logger.info(f"Scan timeout set via header: {actual} seconds ({actual / 60:.1f} minutes)")
+            return actual
+        logger.warning(f"Invalid X-Scan-Timeout header value ({x_scan_timeout}), using calculated timeout")
+    except ValueError:
+        logger.warning(f"Invalid X-Scan-Timeout header value ({x_scan_timeout}), using calculated timeout")
+    return calculated_timeout
+
+
 @router.get("/scans", response_model=List[ScanResponse])
 @limiter.limit("1000/minute" if settings.ENV == "test" else "50/minute")
-def list_scans(request: Request, db: Session = Depends(get_db)):
+def list_scans(request: Request, db: Annotated[Session, Depends(get_db)]):
     scans = db.query(ScanDB).all()
 
     active_scans = [s for s in scans if s.state not in TERMINAL_STATES]
@@ -83,15 +104,16 @@ def list_scans(request: Request, db: Session = Depends(get_db)):
     return [_scan_to_response(s) for s in scans]
 
 
-@router.post("/scans", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/scans", response_model=ScanResponse, status_code=status.HTTP_201_CREATED,
+  responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 @limiter.limit("1000/minute" if settings.ENV == "test" else "10/minute")
 def trigger_scan(
     request: Request,
     response: Response,
     scan: ScanCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    x_scan_timeout: str | None = Header(default=None, alias="X-Scan-Timeout"),
+    db: Annotated[Session, Depends(get_db)],
+    x_scan_timeout: Annotated[str | None, Header(alias="X-Scan-Timeout")] = None,
 ):
     try:
         validate_scan_request(scan)
@@ -105,7 +127,7 @@ def trigger_scan(
         .first()
     )
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     if project.last_scan_state and project.last_scan_state in [
         state.value for state in ACTIVE_STATES
@@ -116,31 +138,8 @@ def trigger_scan(
         )
 
     scan_id = str(uuid.uuid4())
-
-    scan_timeout = calculate_scan_timeout(scan.selected_stages)
-
-    if x_scan_timeout:
-        try:
-            override_timeout = int(x_scan_timeout)
-            if override_timeout > 0:
-                max_timeout = max(settings.SCAN_TIMEOUT * 3, 7200)
-                actual_timeout = min(override_timeout, max_timeout)
-                scan_timeout = actual_timeout
-                if override_timeout > max_timeout:
-                    logger.info(
-                        f"Scan timeout clamped from {override_timeout}s to {max_timeout}s (max allowed)"
-                    )
-                logger.info(
-                    f"Scan timeout set via header: {scan_timeout} seconds ({scan_timeout / 60:.1f} minutes)"
-                )
-            else:
-                logger.warning(
-                    f"Invalid X-Scan-Timeout header value ({x_scan_timeout}), using calculated timeout"
-                )
-        except ValueError:
-            logger.warning(
-                f"Invalid X-Scan-Timeout header value ({x_scan_timeout}), using calculated timeout"
-            )
+    calculated_timeout = calculate_scan_timeout(scan.selected_stages)
+    scan_timeout = _parse_scan_timeout_header(x_scan_timeout, calculated_timeout)
 
     try:
         scan_obj = ScanDB(
@@ -161,12 +160,8 @@ def trigger_scan(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        if "ix_scans_project_state" in str(e.orig) or "uq_project_active_state" in str(
-            e.orig
-        ):
-            logger.info(
-                f"Duplicate scan prevented for project {scan.project_id} (database constraint)"
-            )
+        if "ix_scans_project_state" in str(e.orig) or "uq_project_active_state" in str(e.orig):
+            logger.info(f"Duplicate scan prevented for project {scan.project_id} (database constraint)")
             raise HTTPException(
                 status_code=409,
                 detail="An active scan already exists for this project",
@@ -195,11 +190,6 @@ def trigger_scan(
         "scan_timeout": scan_timeout,
     }
 
-    logger.info(f"Project data before sending to celery: {project_data}")
-    logger.info(
-        f"Calculated scan timeout: {scan_timeout} seconds ({scan_timeout / 60:.1f} minutes)"
-    )
-
     from app.tasks.jenkins_tasks import trigger_jenkins_scan_async
 
     trigger_jenkins_scan_async.delay(
@@ -209,20 +199,20 @@ def trigger_scan(
         project_data=project_data,
     )
 
-    # T066: Return actual timeout in response header
     response.headers["X-Scan-Timeout-Actual"] = str(scan_timeout)
 
     return _scan_to_response(scan_obj)
 
 
-@router.post("/scans/trigger-verify", response_model=ScanResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/scans/trigger-verify", response_model=ScanResponse, status_code=status.HTTP_201_CREATED,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def trigger_verify_scan(
     project_id: str,
     tool: str,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Trigger a single-tool verification scan (issue resolution workflow)."""
     from app.services.rbac_service import get_rbac_service
@@ -232,7 +222,7 @@ def trigger_verify_scan(
 
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     scan_id = f"verify-{tool}-{uuid.uuid4().hex[:8]}"
@@ -254,18 +244,21 @@ def trigger_verify_scan(
         "branch": project.branch or "main",
     }
     try:
-        jenkins_service.trigger_scan_job(scan_obj, project_data)
+        from app.services.jenkins_service import JenkinsService
+        jenkins_svc = JenkinsService()
+        jenkins_svc.trigger_scan_job(scan_obj, project_data)
     except Exception as e:
         logger.warning(f"Jenkins trigger failed for verify scan {scan_id}: {e}")
 
     return _scan_to_response(scan_obj)
 
 
-@router.get("/scans/{scan_id}", response_model=ScanResponse)
-def get_scan(scan_id: str, db: Session = Depends(get_db)):
+@router.get("/scans/{scan_id}", response_model=ScanResponse,
+  responses={404: {"description": "Not found"}})
+def get_scan(scan_id: str, db: Annotated[Session, Depends(get_db)]):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
-        raise HTTPException(status_code=404, detail="Scan not found")
+        raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -277,11 +270,12 @@ def get_scan(scan_id: str, db: Session = Depends(get_db)):
     return _scan_to_response(scan_obj)
 
 
-@router.get("/scans/{scan_id}/results", response_model=ScanResultsResponse)
-def get_scan_results(scan_id: str, db: Session = Depends(get_db)):
+@router.get("/scans/{scan_id}/results", response_model=ScanResultsResponse,
+  responses={404: {"description": "Not found"}})
+def get_scan_results(scan_id: str, db: Annotated[Session, Depends(get_db)]):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
-        raise HTTPException(status_code=404, detail="Scan not found")
+        raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -296,15 +290,12 @@ def get_scan_results(scan_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/scans/{scan_id}/retry-reports", response_model=ScanRetryReportsResponse)
-def retry_scan_reports(scan_id: str, db: Session = Depends(get_db)):
-    """
-    Re-trigger report fetching for a completed scan.
-    Useful when Jenkins was unreachable during the original fetch.
-    """
+@router.post("/scans/{scan_id}/retry-reports", response_model=ScanRetryReportsResponse,
+  responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}})
+def retry_scan_reports(scan_id: str, db: Annotated[Session, Depends(get_db)]):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
-        raise HTTPException(status_code=404, detail="Scan not found")
+        raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
 
     if not scan_obj.jenkins_build_number:
         raise HTTPException(
@@ -316,7 +307,7 @@ def retry_scan_reports(scan_id: str, db: Session = Depends(get_db)):
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
     )
     if not project_obj:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     jenkins_base_url = (
         f"http://{project_obj.target_ip}"
@@ -340,11 +331,12 @@ def retry_scan_reports(scan_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/scans/{scan_id}/overview")
-def get_scan_overview(scan_id: str, db: Session = Depends(get_db)):
+@router.get("/scans/{scan_id}/overview",
+  responses={404: {"description": "Not found"}})
+def get_scan_overview(scan_id: str, db: Annotated[Session, Depends(get_db)]):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
-        raise HTTPException(status_code=404, detail="Scan not found")
+        raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -356,18 +348,19 @@ def get_scan_overview(scan_id: str, db: Session = Depends(get_db)):
     return _scan_to_response(scan_obj)
 
 
-@router.get("/projects/{project_id}/scans", response_model=List[ScanHistoryResponse])
+@router.get("/projects/{project_id}/scans", response_model=List[ScanHistoryResponse],
+  responses={404: {"description": "Not found"}})
 @limiter.limit("30/minute")
 def get_project_scan_history(
     project_id: str,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     limit: int = 20,
     offset: int = 0,
 ):
     project_obj = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project_obj:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     scans = (
         db.query(ScanDB)

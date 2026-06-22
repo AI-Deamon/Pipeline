@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Shield, Eye, EyeOff, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
+import { Shield, Eye, EyeOff, Loader2, CheckCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { ApiError } from '../utils/apiError';
 import { useAuth } from '../hooks/useAuth';
+import { ErrorDisplay } from '../components/ui/ErrorDisplay';
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -81,10 +82,7 @@ const LoginPage = () => {
             </div>
           )}
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" />
-              {error}
-            </div>
+            <ErrorDisplay message={error} onRetry={() => setError(null)} />
           )}
           
           <div>

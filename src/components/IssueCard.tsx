@@ -24,9 +24,23 @@ function severityIcon(severity: string) {
   }
 }
 
-const IssueCard = memo(function IssueCard({ issue }: { issue: IssueResponse }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition-all">
+const IssueCard = memo(function IssueCard({
+  issue,
+  onClick,
+}: {
+  issue: IssueResponse;
+  onClick?: (issue: IssueResponse) => void;
+}) {
+  const handleClick = () => onClick?.(issue);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  const content = (
+    <>
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2 min-w-0">
           {severityIcon(issue.severity)}
@@ -50,7 +64,26 @@ const IssueCard = memo(function IssueCard({ issue }: { issue: IssueResponse }) {
           <Clock size={12} /> {new Date(issue.last_seen_at).toLocaleDateString()}
         </span>
       </div>
-    </div>
+    </>
+  );
+
+  if (!onClick) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition-all">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      className="w-full text-left bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-300 hover:shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-blue-200"
+    >
+      {content}
+    </button>
   );
 });
 

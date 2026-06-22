@@ -15,6 +15,56 @@ class HttpClient:
         if self.default_headers:
             self.session.headers.update(self.default_headers)
 
+    def _get_jenkins_crumb(self, request_headers: dict) -> dict:
+        try:
+            crumb_response = self.session.get(
+                f"{self.base_url}/crumbIssuer/api/json", timeout=10
+            )
+            if crumb_response.ok:
+                crumb_data = crumb_response.json()
+                crumb_field = crumb_data.get("crumbRequestField", "Jenkins-Crumb")
+                crumb_value = crumb_data.get("crumb")
+                if crumb_value:
+                    request_headers[crumb_field] = crumb_value
+        except Exception as e:
+            logger.warning(f"Failed to get Jenkins crumb: {e}")
+        return request_headers
+
+    def _send_jenkins_post(self, url: str, params: Optional[Dict], request_headers: dict, timeout: int):
+        logger.info(f"[HTTP] Sending Jenkins POST request to {url}")
+        logger.info(f"[HTTP] Query params: {params}")
+        return self.session.request(
+            method="POST", url=url, params=params,
+            headers=request_headers, timeout=timeout, allow_redirects=True,
+        )
+
+    def _send_jenkins_get(self, url: str, params: Optional[Dict], request_headers: dict, timeout: int):
+        logger.info(f"[HTTP] Sending Jenkins GET request to {url}")
+        return self.session.request(
+            method="GET", url=url, params=params,
+            headers=request_headers, timeout=timeout,
+        )
+
+    def _send_generic(self, url: str, method: str, data: Optional[Dict], params: Optional[Dict], request_headers: dict, timeout: int):
+        logger.info(f"[HTTP] Sending request to {url} with params: {params}, json: {data}")
+        return self.session.request(
+            method=method, url=url, json=data, params=params,
+            headers=request_headers, timeout=timeout,
+        )
+
+    def _process_response(self, response, is_jenkins_request: bool):
+        if not response.ok:
+            raise ExternalServiceError(
+                service=response.url,
+                status_code=response.status_code,
+                message=response.text,
+            )
+        if is_jenkins_request:
+            return response
+        if response.content:
+            return response.json()
+        return {"status_code": response.status_code, "headers": dict(response.headers)}
+
     def request(
         self,
         method: str,
@@ -30,84 +80,19 @@ class HttpClient:
             request_headers.update(headers)
 
         try:
-            if "jenkins" in self.base_url.lower() and method == "POST":
-                try:
-                    crumb_response = self.session.get(
-                        f"{self.base_url}/crumbIssuer/api/json", timeout=10
-                    )
-                    if crumb_response.ok:
-                        crumb_data = crumb_response.json()
-                        crumb_field = crumb_data.get(
-                            "crumbRequestField", "Jenkins-Crumb"
-                        )
-                        crumb_value = crumb_data.get("crumb")
-                        if crumb_value:
-                            # Add CSRF token to this request's headers
-                            request_headers[crumb_field] = crumb_value
-                except Exception as e:
-                    logger.warning(f"Failed to get Jenkins crumb: {e}")
-
-            # Check if this is a Jenkins request with parameters
             is_jenkins_request = "jenkins" in self.base_url.lower()
 
             if is_jenkins_request and method == "POST":
-                # Jenkins buildWithParameters: POST to URL with params as query string
-                logger.info(f"[HTTP] Sending Jenkins POST request to {url}")
-                logger.info(f"[HTTP] Query params: {params}")
+                request_headers = self._get_jenkins_crumb(request_headers)
 
-                # Performance Optimization (Bolt ⚡): Use self.session.request for connection pooling
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    params=params,  # Jenkins expects params in query string
-                    headers=request_headers,
-                    timeout=timeout,
-                    allow_redirects=True,
-                )
-                logger.info(f"[HTTP] Jenkins response status: {response.status_code}")
+            if is_jenkins_request and method == "POST":
+                response = self._send_jenkins_post(url, params, request_headers, timeout)
             elif is_jenkins_request and method == "GET":
-                # GET requests with params
-                # Performance Optimization (Bolt ⚡): Use self.session.request for connection pooling
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    params=params,
-                    headers=request_headers,
-                    timeout=timeout,
-                )
+                response = self._send_jenkins_get(url, params, request_headers, timeout)
             else:
-                # For all other requests, use JSON
-                logger.info(
-                    f"[HTTP] Sending request to {url} with params: {params}, json: {data}"
-                )
-                # Performance Optimization (Bolt ⚡): Use self.session.request for connection pooling
-                response = self.session.request(
-                    method=method,
-                    url=url,
-                    json=data,
-                    params=params,
-                    headers=request_headers,
-                    timeout=timeout,
-                )
+                response = self._send_generic(url, method, data, params, request_headers, timeout)
 
-            if not response.ok:
-                raise ExternalServiceError(
-                    service=url,
-                    status_code=response.status_code,
-                    message=response.text,
-                )
-
-            # For Jenkins requests, return the response object to allow header inspection
-            if is_jenkins_request:
-                return response
-
-            # For other APIs, return JSON if content exists
-            if response.content:
-                return response.json()
-            return {
-                "status_code": response.status_code,
-                "headers": dict(response.headers),
-            }
+            return self._process_response(response, is_jenkins_request)
 
         except requests.RequestException as e:
             raise ExternalServiceError(

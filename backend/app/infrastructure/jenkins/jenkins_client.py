@@ -1,3 +1,4 @@
+import re
 from app.infrastructure.http.client import HttpClient
 from app.core.config import settings
 import urllib.parse
@@ -36,21 +37,38 @@ class JenkinsClient:
             )
             if response and "crumb" in response:
                 self.csrf_token = response["crumb"]
-                logger.info(f"[JENKINS] CSRF token obtained: {self.csrf_token}")
+                logger.debug("[JENKINS] CSRF token obtained")
                 return self.csrf_token
         except Exception as e:
             logger.warning(
                 f"[JENKINS] Failed to get CSRF token: {type(e).__name__}: {str(e)}"
             )
-            # Continue without CSRF token for compatibility
             return None
+
+    def _extract_queue_id(self, response) -> int | None:
+        if not response:
+            return None
+        if isinstance(response, dict):
+            status_code = response.get("status_code")
+            headers = response.get("headers", {})
+            if status_code == 201:
+                location = headers.get("Location", "")
+                match = re.search(r"/queue/item/(\d+)/", location)
+                if match:
+                    return int(match.group(1))
+        else:
+            if response.status_code == 201:
+                location = response.headers.get("Location", "")
+                match = re.search(r"/queue/item/(\d+)/", location)
+                if match:
+                    return int(match.group(1))
+        return None
 
     def trigger_pipeline(self, job_name: str, parameters: dict):
         logger.info(
             f"[JENKINS] Triggering pipeline '{job_name}' with params: {parameters}"
         )
         try:
-            # Get CSRF token for POST requests
             csrf_token = self._get_csrf_token()
             headers = {}
             if csrf_token:
@@ -59,42 +77,15 @@ class JenkinsClient:
             logger.info(f"[JENKINS] Using headers: {headers}")
             logger.info(f"[JENKINS] Parameters to send: {parameters}")
 
-            # Jenkins buildWithParameters works best with parameters as query string
-            # POST to the URL with params in query string
             response = self.client.request(
                 method="POST",
                 path=f"job/{job_name}/buildWithParameters",
-                params=parameters,  # Pass as query parameters
+                params=parameters,
                 headers=headers,
             )
             logger.info(f"[JENKINS] Pipeline trigger succeeded: {response}")
 
-            # Extract queue_id from Location header
-            queue_id = None
-            if response:
-                # response is either the response object or a dict with status_code
-                if isinstance(response, dict):
-                    # HttpClient returned a dict
-                    status_code = response.get("status_code")
-                    headers = response.get("headers", {})
-                    if status_code == 201:
-                        location = headers.get("Location", "")
-                        if location:
-                            import re
-
-                            match = re.search(r"/queue/item/(\d+)/", location)
-                            if match:
-                                queue_id = int(match.group(1))
-                else:
-                    # response is a requests.Response object
-                    if response.status_code == 201:
-                        location = response.headers.get("Location", "")
-                        if location:
-                            import re
-
-                            match = re.search(r"/queue/item/(\d+)/", location)
-                            if match:
-                                queue_id = int(match.group(1))
+            queue_id = self._extract_queue_id(response)
 
             return {"accepted": True, "queue_id": queue_id, "response": response}
         except Exception as e:

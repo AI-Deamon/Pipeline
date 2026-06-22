@@ -22,7 +22,6 @@ class IssueCreate(BaseModel):
     recommendation: Optional[str] = None
     finding_type: Optional[str] = None
     raw_evidence: Optional[str] = None
-
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str) -> str:
@@ -100,6 +99,18 @@ class IssueResponse(BaseModel):
     def code_snippet_language(self) -> Optional[str]:
         if self.extra_metadata and isinstance(self.extra_metadata, dict):
             return self.extra_metadata.get("code_snippet_language")
+        return None
+
+    @property
+    def rule_name(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("rule_name")
+        return None
+
+    @property
+    def language(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("language")
         return None
 
     @property

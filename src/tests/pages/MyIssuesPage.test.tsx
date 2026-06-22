@@ -40,7 +40,7 @@ describe('MyIssuesPage', () => {
   test('renders error state', async () => {
     api.issues.getMyIssues = vi.fn().mockRejectedValue(new Error('Failed'));
     renderPage();
-    expect(await screen.findByText('Failed to load your issues')).toBeInTheDocument();
+    expect(await screen.findByText('Something went wrong')).toBeInTheDocument();
   });
 
   test('renders empty state', async () => {

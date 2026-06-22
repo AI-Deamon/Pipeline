@@ -2,12 +2,12 @@ import uuid
 import shutil
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 from fastapi import APIRouter, HTTPException, Depends, status, Request
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.db import get_db
-from app.core.auth import get_current_user
 from app.core.auth import get_current_user, get_rbac
 from app.models.db_models import ProjectDB, ScanDB, UserDB, ProjectAssignmentDB
 from app.core.config import settings
@@ -15,6 +15,9 @@ from app.api.scans.utils import _expire_scan_if_timed_out
 from app.state.scan_state import ScanState
 from app.services.rbac_service import get_rbac_service
 router = APIRouter()
+
+_PROJECT_NOT_FOUND = "Project not found"
+_GITHUB_COM = "github.com"
 
 ACTIVE_STATES = {
     ScanState.CREATED.value,
@@ -24,22 +27,19 @@ ACTIVE_STATES = {
 
 
 def _is_api_key_auth(request: Request) -> bool:
-    """Check if request is authenticated via API key (service account pattern)."""
     api_key = request.headers.get("X-API-Key")
     return bool(api_key and api_key == settings.API_KEY)
 
 
 def _get_user_id_filter(request: Request, current_user) -> str | None:
-    """Return user_id filter for queries. API-key auth sees all data (returns None)."""
     if _is_api_key_auth(request):
-        return None  # Service account: see all data
+        return None
     if hasattr(current_user, 'id'):
         return current_user.id
-    return None  # Fallback for test-bypass user
+    return None
 
 
 def _filter_projects_by_user(query, request: Request, current_user, db: Session | None = None):
-    """Apply user-level data isolation to a ProjectDB query using RBAC."""
     if _is_api_key_auth(request):
         return query
     if db is not None:
@@ -50,7 +50,6 @@ def _filter_projects_by_user(query, request: Request, current_user, db: Session 
         if effective_ids:
             return query.filter(ProjectDB.project_id.in_(effective_ids))
         return query.filter(ProjectDB.project_id == "__no_access__")
-    # Fallback: no db session available, return query unfiltered
     return query
 
 
@@ -77,31 +76,28 @@ def _get_last_scan_map(db: Session) -> dict[str, str]:
     return {row.project_id: row.scan_id for row in rows}
 
 
-@router.get("/projects", response_model=list[dict])
-def list_projects(request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    last_scan_map = _get_last_scan_map(db)
-    db_projects = _filter_projects_by_user(db.query(ProjectDB), request, current_user).all()
-
+def _expire_active_scans(db: Session, db_projects: list) -> bool:
     now = datetime.now(timezone.utc)
     any_expired = False
     for p in db_projects:
-        if p.last_scan_state in ACTIVE_STATES:
-            active_scan = (
-                db.query(ScanDB)
-                .filter(
-                    ScanDB.project_id == p.project_id,
-                    ScanDB.state.in_(
-                        [ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]
-                    ),
-                )
-                .first()
+        if p.last_scan_state not in ACTIVE_STATES:
+            continue
+        active_scan = (
+            db.query(ScanDB)
+            .filter(
+                ScanDB.project_id == p.project_id,
+                ScanDB.state.in_(
+                    [ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]
+                ),
             )
-            if active_scan:
-                if _expire_scan_if_timed_out(db, active_scan, p, now, auto_commit=False):
-                    any_expired = True
-    if any_expired:
-        db.commit()
+            .first()
+        )
+        if active_scan and _expire_scan_if_timed_out(db, active_scan, p, now, auto_commit=False):
+            any_expired = True
+    return any_expired
 
+
+def _build_project_list(db: Session, db_projects: list, last_scan_map: dict) -> list:
     projects = []
     for p in db_projects:
         last_scan_id = last_scan_map.get(p.project_id)
@@ -109,13 +105,10 @@ def list_projects(request: Request, db: Session = Depends(get_db), current_user=
         if last_scan_id:
             last_scan = db.query(ScanDB).filter(ScanDB.scan_id == last_scan_id).first()
             if last_scan and last_scan.created_at:
-                # Convert UTC to IST (UTC+5:30)
                 dt = last_scan.created_at
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
-                # Add 5:30 hours for IST
-                ist_dt = dt + timedelta(hours=5, minutes=30)
-                last_scan_time = ist_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                last_scan_time = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         projects.append(
             {
                 "project_id": p.project_id,
@@ -128,8 +121,19 @@ def list_projects(request: Request, db: Session = Depends(get_db), current_user=
     return projects
 
 
+@router.get("/projects", response_model=list[dict])
+def list_projects(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
+    last_scan_map = _get_last_scan_map(db)
+    db_projects = _filter_projects_by_user(db.query(ProjectDB), request, current_user).all()
+
+    if _expire_active_scans(db, db_projects):
+        db.commit()
+
+    return _build_project_list(db, db_projects, last_scan_map)
+
+
 @router.post("/projects", response_model=ProjectResponse)
-def create_project(project: ProjectCreate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def create_project(project: ProjectCreate, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
     project_id = str(uuid.uuid4())
     user_id = current_user.id if hasattr(current_user, 'id') else None
     db_project = ProjectDB(
@@ -150,11 +154,12 @@ def create_project(project: ProjectCreate, request: Request, db: Session = Depen
     return db_project
 
 
-@router.get("/projects/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: str, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@router.get("/projects/{project_id}", response_model=ProjectResponse,
+  responses={404: {"description": "Not found"}})
+def get_project(project_id: str, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
     db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
     last_scan = (
         db.query(ScanDB)
         .filter(ScanDB.project_id == project_id)
@@ -179,13 +184,14 @@ def get_project(project_id: str, request: Request, db: Session = Depends(get_db)
     )
 
 
-@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+@router.patch("/projects/{project_id}", response_model=ProjectResponse,
+  responses={404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def update_project(
-    project_id: str, project: ProjectUpdate, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)
+    project_id: str, project: ProjectUpdate, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]
 ):
     db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     if db_project.last_scan_state in ACTIVE_STATES:
         raise HTTPException(
@@ -213,11 +219,12 @@ def update_project(
     return project_data
 
 
-@router.delete("/projects/{project_id}")
-def delete_project(project_id: str, request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+@router.delete("/projects/{project_id}",
+  responses={404: {"description": "Not found"}})
+def delete_project(project_id: str, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
     db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
     scans = db.query(ScanDB).filter(ScanDB.project_id == project_id).all()
     scan_ids = [scan.scan_id for scan in scans]
     for scan in scans:
@@ -238,16 +245,49 @@ def delete_project(project_id: str, request: Request, db: Session = Depends(get_
     }
 
 
-@router.get("/projects/{project_id}/code-snippet")
+def _fetch_github_content(git_url: str, use_branch: str, file: str) -> tuple[str | None, str]:
+    if _GITHUB_COM not in git_url:
+        return None, "none"
+    raw_url = git_url.replace(_GITHUB_COM, "raw.githubusercontent.com").replace(".git", "")
+    file_url = f"{raw_url}/{use_branch}/{file}"
+    import httpx
+    resp = httpx.get(file_url, timeout=10)
+    if resp.status_code == 200:
+        return resp.text, "github"
+    return None, "none"
+
+
+def _fetch_workspace_content(project_id: str, file: str) -> tuple[str | None, str]:
+    from app.core.config import settings as _s
+    workspace = Path(_s.STORAGE_PATH).parent / "workspaces" / project_id
+    file_path = (workspace / file).resolve()
+    if not file_path.is_relative_to(workspace.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied: path traversal detected")
+    if file_path.exists():
+        return file_path.read_text(), "workspace"
+    return None, "none"
+
+
+def _build_git_blob_url(git_url: str, use_branch: str, file: str, line: int) -> str | None:
+    if _GITHUB_COM not in (git_url or ""):
+        return None
+    clean = git_url.replace(".git", "")
+    if clean.startswith("git@github.com:"):
+        clean = clean.replace("git@github.com:", "https://github.com/", 1)
+    return f"{clean}/blob/{use_branch}/{file}#L{line}"
+
+
+@router.get("/projects/{project_id}/code-snippet",
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def get_code_snippet(
     project_id: str,
     file: str,
     line: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     context: int = 10,
     branch: str = "",
     request: Request = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     """Return lines of code around the given line from the project's Git repo."""
     from app.services.rbac_service import get_rbac_service
@@ -258,7 +298,7 @@ def get_code_snippet(
 
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     ext = Path(file).suffix.lower()
     language_map = {
@@ -279,25 +319,15 @@ def get_code_snippet(
 
     git_url = project.git_url or ""
     try:
-        if "github.com" in git_url:
-            raw_url = git_url.replace("github.com", "raw.githubusercontent.com").replace(".git", "")
-            file_url = f"{raw_url}/{use_branch}/{file}"
-            import httpx
-            resp = httpx.get(file_url, timeout=10)
-            if resp.status_code == 200:
-                content = resp.text
-                source = "github"
+        content, source = _fetch_github_content(git_url, use_branch, file)
     except Exception:
         pass
 
     if content is None and project.git_url:
         try:
-            from app.core.config import settings as _s
-            workspace = Path(_s.STORAGE_PATH).parent / "workspaces" / project_id
-            file_path = workspace / file
-            if file_path.exists():
-                content = file_path.read_text()
-                source = "workspace"
+            content, source = _fetch_workspace_content(project_id, file)
+        except HTTPException:
+            raise
         except Exception:
             pass
 
@@ -310,12 +340,7 @@ def get_code_snippet(
     snippet_lines = lines[start:end]
     snippet = "\n".join(snippet_lines)
 
-    git_blob_url = None
-    if "github.com" in (project.git_url or ""):
-        clean = project.git_url.replace(".git", "")
-        if clean.startswith("git@github.com:"):
-            clean = clean.replace("git@github.com:", "https://github.com/", 1)
-        git_blob_url = f"{clean}/blob/{use_branch}/{file}#L{line}"
+    git_blob_url = _build_git_blob_url(project.git_url, use_branch, file, line)
 
     return {
         "file": file,

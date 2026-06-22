@@ -4,6 +4,7 @@ import { ArrowLeft, Play, AlertCircle, CheckCircle, Loader2 } from 'lucide-react
 import { api } from '../services/api';
 import { FIXED_STAGES, STAGE_DISPLAY_NAMES, STAGE_DEPENDENCIES, type StageId } from '../types';
 import { PageSkeleton } from '../components/PageSkeleton';
+import { ErrorDisplay } from '../components/ui/ErrorDisplay';
 
 const ManualScanPage = () => {
   const { projectId } = useParams();
@@ -40,26 +41,34 @@ const ManualScanPage = () => {
         const dependents = Object.entries(STAGE_DEPENDENCIES)
           .filter(([, deps]) => (deps as StageId[]).includes(stage))
           .map(([s]) => s as StageId);
-        setAutoStages(prevAuto => {
-          const next = new Set(prevAuto);
-          dependents.forEach(s => next.delete(s));
-          return next;
-        });
+        removeDependents(dependents);
         return prev.filter(s => s !== stage && !dependents.includes(s));
       }
       const deps = (STAGE_DEPENDENCIES[stage] || []) as StageId[];
       if (!result.includes(stage)) result.push(stage);
-      setAutoStages(prevAuto => {
-        const next = new Set(prevAuto);
-        for (const dep of deps) {
-          if (!prev.includes(dep)) next.add(dep);
-        }
-        return next;
-      });
+      addDependencies(deps, prev);
       for (const dep of deps) {
         if (!result.includes(dep)) result.push(dep);
       }
       return result;
+    });
+  };
+
+  const removeDependents = (dependents: StageId[]) => {
+    setAutoStages(prevAuto => {
+      const next = new Set(prevAuto);
+      dependents.forEach(s => next.delete(s));
+      return next;
+    });
+  };
+
+  const addDependencies = (deps: StageId[], prev: StageId[]) => {
+    setAutoStages(prevAuto => {
+      const next = new Set(prevAuto);
+      for (const dep of deps) {
+        if (!prev.includes(dep)) next.add(dep);
+      }
+      return next;
     });
   };
 
@@ -133,9 +142,8 @@ const ManualScanPage = () => {
       </header>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-6 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5" />
-          <span className="text-sm">{error}</span>
+        <div className="mb-6">
+          <ErrorDisplay message={error} onRetry={() => setError(null)} />
         </div>
       )}
 

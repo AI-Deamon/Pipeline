@@ -128,6 +128,14 @@ class ConnectionManager:
         await self.broadcast_to_project(project_id, message)
         await self.broadcast_global(message)
 
+    async def broadcast_event(self, event_type: str, data: dict):
+        """Broadcast a generic event to all connected clients."""
+        message = {
+            "event": event_type,
+            "data": data,
+        }
+        await self.broadcast_global(message)
+
 
 # Global connection manager instance
 manager = ConnectionManager()

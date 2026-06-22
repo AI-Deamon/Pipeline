@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
@@ -26,13 +27,84 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/scans/{scan_id}/callback")
+def _process_failure_info(scan_obj: ScanDB, report: dict) -> None:
+    error_message = report.get("ERROR_MESSAGE") or report.get("error_message")
+    error_type = report.get("ERROR_TYPE") or report.get("error_type")
+    jenkins_console_url = report.get("JENKINS_CONSOLE_URL") or report.get("jenkins_console_url")
+
+    if error_message:
+        scan_obj.error_message = error_message
+    if error_type:
+        scan_obj.error_type = error_type
+    if jenkins_console_url:
+        scan_obj.jenkins_console_url = jenkins_console_url
+
+    logger.info(
+        f"Scan {scan_obj.scan_id} failed with error type: {error_type}, message: {error_message}"
+    )
+
+
+def _update_jenkins_metadata(scan_obj: ScanDB, report: dict) -> None:
+    build_number = report.get("build_number")
+    if build_number is None:
+        build_number = report.get("buildNumber")
+    if build_number is not None:
+        scan_obj.jenkins_build_number = str(build_number)
+
+    queue_id = report.get("queue_id")
+    if queue_id is None:
+        queue_id = report.get("queueId")
+    if queue_id is not None:
+        scan_obj.jenkins_queue_id = str(queue_id)
+
+    git_commit = report.get("GIT_COMMIT")
+    git_branch = report.get("GIT_BRANCH")
+    if git_commit:
+        scan_obj.git_commit = git_commit
+    if git_branch:
+        scan_obj.git_branch = git_branch
+
+
+def _update_finished_at(scan_obj: ScanDB, report: dict) -> None:
+    finished_at_str = report.get("finishedAt")
+    if finished_at_str:
+        try:
+            scan_obj.finished_at = datetime.fromisoformat(
+                finished_at_str.replace("Z", "+00:00")
+            )
+        except ValueError:
+            scan_obj.finished_at = datetime.now(timezone.utc)
+    elif scan_obj.state in TERMINAL_STATES:
+        scan_obj.finished_at = datetime.now(timezone.utc)
+
+
+def _schedule_post_processing(scan_obj: ScanDB, normalized_stages: list, build_number: int | None) -> None:
+    if scan_obj.state != ScanState.COMPLETED or not build_number:
+        return
+
+    process_scan_reports_task.delay(
+        scan_id=scan_obj.scan_id,
+        jenkins_build_number=str(build_number),
+        jenkins_base_url=settings.JENKINS_BASE_URL,
+    )
+
+    completed_stages = [s for s in normalized_stages if s.get("status") in ("PASSED", "PASS")]
+    for stage in completed_stages:
+        tool_name = stage["stage"]
+        migrate_scan_to_issues.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
+        auto_verify_fixed_issues.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
+        auto_verify_pending_rescans.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
+        detect_regressions.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
+
+
+@router.post("/scans/{scan_id}/callback",
+  responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}})
 def scan_callback(
     scan_id: str,
     report: dict,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    x_callback_token: str | None = Header(default=None, alias="X-Callback-Token"),
+    db: Annotated[Session, Depends(get_db)],
+    x_callback_token: Annotated[str | None, Header(alias="X-Callback-Token")] = None,
 ):
     _validate_callback_auth(x_callback_token)
 
@@ -77,78 +149,23 @@ def scan_callback(
         scan_obj.state = ScanState.COMPLETED
     elif jenkins_status in {"FAILURE", "ABORTED", "UNSTABLE"}:
         scan_obj.state = ScanState.FAILED
-
-        error_message = report.get("ERROR_MESSAGE") or report.get("error_message")
-        error_type = report.get("ERROR_TYPE") or report.get("error_type")
-        jenkins_console_url = report.get("JENKINS_CONSOLE_URL") or report.get(
-            "jenkins_console_url"
-        )
-
-        if error_message:
-            scan_obj.error_message = error_message
-        if error_type:
-            scan_obj.error_type = error_type
-        if jenkins_console_url:
-            scan_obj.jenkins_console_url = jenkins_console_url
-
-        logger.info(
-            f"Scan {scan_id} failed with error type: {error_type}, message: {error_message}"
-        )
+        _process_failure_info(scan_obj, report)
     else:
         raise HTTPException(status_code=400, detail="Invalid callback status")
 
-    build_number = report.get("build_number")
-    if build_number is None:
-        build_number = report.get("buildNumber")
-    if build_number is not None:
-        scan_obj.jenkins_build_number = str(build_number)
-
-    queue_id = report.get("queue_id")
-    if queue_id is None:
-        queue_id = report.get("queueId")
-    if queue_id is not None:
-        scan_obj.jenkins_queue_id = str(queue_id)
-
-    # Store git metadata for auditability
-    git_commit = report.get("GIT_COMMIT")
-    git_branch = report.get("GIT_BRANCH")
-    if git_commit:
-        scan_obj.git_commit = git_commit
-    if git_branch:
-        scan_obj.git_branch = git_branch
+    _update_jenkins_metadata(scan_obj, report)
 
     if project_obj:
         project_obj.last_scan_state = scan_obj.state.value
 
-    finished_at_str = report.get("finishedAt")
-    if finished_at_str:
-        try:
-            scan_obj.finished_at = datetime.fromisoformat(
-                finished_at_str.replace("Z", "+00:00")
-            )
-        except ValueError:
-            scan_obj.finished_at = datetime.now(timezone.utc)
-    elif scan_obj.state in TERMINAL_STATES:
-        scan_obj.finished_at = datetime.now(timezone.utc)
+    _update_finished_at(scan_obj, report)
 
     current_digests.append(callback_digest)
     scan_obj.callback_digests = list(current_digests)
     db.commit()
 
-    if scan_obj.state == ScanState.COMPLETED and build_number:
-        process_scan_reports_task.delay(
-            scan_id=scan_id,
-            jenkins_build_number=str(build_number),
-            jenkins_base_url=settings.JENKINS_BASE_URL,
-        )
-
-        completed_stages = [s for s in normalized_stages if s.get("status") in ("PASSED", "PASS")]
-        for stage in completed_stages:
-            tool_name = stage["stage"]
-            migrate_scan_to_issues.delay(scan_id, scan_obj.project_id, tool_name)
-            auto_verify_fixed_issues.delay(scan_id, scan_obj.project_id, tool_name)
-            auto_verify_pending_rescans.delay(scan_id, scan_obj.project_id, tool_name)
-            detect_regressions.delay(scan_id, scan_obj.project_id, tool_name)
+    build_number = report.get("build_number") or report.get("buildNumber")
+    _schedule_post_processing(scan_obj, normalized_stages, build_number)
 
     background_tasks.add_task(
         websocket_manager.send_scan_update,

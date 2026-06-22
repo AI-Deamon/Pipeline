@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
@@ -23,21 +24,23 @@ from app.services.rbac_service import RbacService, get_rbac_service
 
 router = APIRouter()
 
+_ADMIN_ACCESS_REQUIRED = "Admin access required"
 
-def _get_rbac(request: Request, db: Session = Depends(get_db), current_user=Depends(get_current_user)) -> RbacService:
+def _get_rbac(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]) -> RbacService:
     return get_rbac_service(db=db, user=current_user)
 
 
-@router.get("/users", response_model=list[UserWithRole])
+@router.get("/users", response_model=list[UserWithRole],
+  responses={403: {"description": "Forbidden"}})
 def list_users(
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     role: str | None = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     query = db.query(UserDB)
     if role:
@@ -62,17 +65,18 @@ def list_users(
     return result
 
 
-@router.patch("/users/{user_id}/role", response_model=UserWithRole)
+@router.patch("/users/{user_id}/role", response_model=UserWithRole,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 422: {"description": "Unprocessable entity"}})
 def update_user_role(
     user_id: str,
     body: RoleUpdate,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     from app.services.rbac_service import validate_role
     try:
@@ -104,16 +108,17 @@ def update_user_role(
     )
 
 
-@router.get("/users/{user_id}/project-access", response_model=UserAccessResponse)
+@router.get("/users/{user_id}/project-access", response_model=UserAccessResponse,
+  responses={403: {"description": "Forbidden"}})
 def get_user_project_access(
     user_id: str,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     from app.models.db_models import ProjectAssignmentDB
     assignments = (
@@ -129,17 +134,18 @@ def get_user_project_access(
     )
 
 
-@router.post("/users/{user_id}/project-access", response_model=ProjectAccessResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/users/{user_id}/project-access", response_model=ProjectAccessResponse, status_code=status.HTTP_201_CREATED,
+  responses={403: {"description": "Forbidden"}, 409: {"description": "Conflict"}})
 def grant_project_access(
     user_id: str,
     body: ProjectAccessCreate,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     # Check for duplicate
     existing = (
@@ -173,17 +179,18 @@ def grant_project_access(
     return ProjectAccessResponse.model_validate(assignment)
 
 
-@router.delete("/users/{user_id}/project-access/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/users/{user_id}/project-access/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def revoke_project_access(
     user_id: str,
     assignment_id: int,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     assignment = (
         db.query(ProjectAssignmentDB)
@@ -207,12 +214,13 @@ def revoke_project_access(
     )
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT,
+  responses={400: {"description": "Bad request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def delete_user(
     user_id: str,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Delete a user account.
 
@@ -230,7 +238,7 @@ def delete_user(
     """
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     target_user = db.query(UserDB).filter(UserDB.id == user_id).first()
     if not target_user:
@@ -289,18 +297,19 @@ def delete_user(
     )
 
 
-@router.get("/access-changes", response_model=list[AccessChangeResponse])
+@router.get("/access-changes", response_model=list[AccessChangeResponse],
+  responses={403: {"description": "Forbidden"}})
 def list_access_changes(
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     target_user_id: str | None = None,
     actor_id: str | None = None,
     change_type: str | None = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     rbac = _get_rbac(request, db, current_user)
     if not rbac.can_manage_users():
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_ADMIN_ACCESS_REQUIRED)
 
     from app.models.db_models import AccessChangeDB
 

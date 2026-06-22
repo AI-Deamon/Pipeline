@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -12,6 +14,25 @@ from app.services.rbac_service import get_rbac_service
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
+# Common prefix for scan routes (used in callback path matching)
+_SCAN_PREFIX = "/api/v1/scans"
+
+
+def _is_callback_route(path: str) -> bool:
+    """Check if path is a callback endpoint that uses X-Callback-Token instead of JWT.
+
+    Matches:
+      - /api/v1/scans/callback                (legacy prefix)
+      - /api/v1/scans/{scan_id}/callback       (actual callback route)
+    """
+    path = path.rstrip("/")
+    if path == "/api/v1/scans/callback":
+        return True
+    if path.startswith(_SCAN_PREFIX + "/") and path.endswith("/callback"):
+        return True
+    return False
+
+
 def get_current_user(
     request: Request,
     token: str | None = Security(oauth2_scheme),
@@ -22,15 +43,28 @@ def get_current_user(
     if settings.ENV == "test" and settings.TEST_BYPASS_AUTH:
         return type("User", (), {"username": "test-bypass", "role": "admin", "id": "bypass-id"})()
 
-    # Callback endpoint has its own dedicated shared-secret guard.
-    if request.url.path.endswith("/callback"):
-        return type("User", (), {"username": "callback-bypass"})()
+    # Callback endpoints use their own dedicated shared-secret guard (X-Callback-Token).
+    # Only match registered callback route patterns, not arbitrary paths.
+    if _is_callback_route(request.url.path):
+        return type("User", (), {"username": "callback-bypass", "id": None, "role": None})()
 
     if not token:
         # Fallback to API Key logic for Jenkins/external scripts that haven't migrated
         api_key = request.headers.get("X-API-Key")
-        if api_key and api_key == settings.API_KEY:
-            return type("User", (), {"username": "api-key-bypass"})()
+        if api_key and hmac.compare_digest(api_key, settings.API_KEY):
+            # Return the service account from DB so RBAC checks work correctly
+            service_user = db.query(UserDB).filter(UserDB.username == "service-account").first()
+            if not service_user:
+                service_user = UserDB(
+                    id="service-account",
+                    username="service-account",
+                    role="admin",
+                    is_active=True,
+                )
+                db.add(service_user)
+                db.commit()
+                db.refresh(service_user)
+            return service_user
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",

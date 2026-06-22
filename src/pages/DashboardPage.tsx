@@ -17,6 +17,11 @@ import { useDebounce } from "../hooks/useDebounce";
 import { useRbac } from "../hooks/useRbac";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { useToast } from "../components/Toast";
+import { StatusBadge } from "../components/ui/StatusBadge";
+import { IconButton } from "../components/ui/IconButton";
+import { OnboardingChecklist } from "../components/OnboardingChecklist";
+import EmptyState from "../components/EmptyState";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSummaries: Record<string, ReportSummary> }) => {
   const queryClient = useQueryClient();
@@ -45,50 +50,6 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
     },
   });
 
-  const getStatusBadge = (state: string | null) => {
-    switch (state) {
-      case "COMPLETED":
-        return {
-          bg: "bg-emerald-50 text-emerald-700",
-          dot: "bg-emerald-500",
-          label: "Secured",
-        };
-      case "FAILED":
-        return {
-          bg: "bg-rose-50 text-rose-700",
-          dot: "bg-rose-500",
-          label: "Issues Found",
-        };
-      case "RUNNING":
-      case "QUEUED":
-      case "CREATED":
-        return {
-          bg: "bg-amber-50 text-amber-700",
-          dot: "bg-amber-500 animate-pulse",
-          label: "Scanning",
-        };
-      case "CANCELLED":
-        return {
-          bg: "bg-slate-100 text-slate-600",
-          dot: "bg-slate-400",
-          label: "Cancelled",
-        };
-      case "SKIPPED":
-        return {
-          bg: "bg-slate-100 text-slate-500",
-          dot: "bg-slate-300",
-          label: "Skipped",
-        };
-      default:
-        return {
-          bg: "bg-slate-100 text-slate-600",
-          dot: "bg-slate-400",
-          label: "No Scans",
-        };
-    }
-  };
-
-  const status = getStatusBadge(project.last_scan_state ?? null);
   const isScanning =
     project.last_scan_state === "RUNNING" ||
     project.last_scan_state === "QUEUED" ||
@@ -115,6 +76,7 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
   };
 
   return (
+    <>
     <tr className="hover:bg-slate-50/50 transition-colors group">
       <td className="px-6 py-4">
         <div className="flex flex-col">
@@ -123,36 +85,10 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
         </div>
       </td>
       <td className="px-6 py-4">
-        <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${status.bg}`}
-        >
-          <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`}></span>
-          {status.label}
-        </span>
+        <StatusBadge state={project.last_scan_state ?? null} />
       </td>
       <td className="px-6 py-4 text-sm text-slate-500">{lastScanDate}</td>
       <td className="px-6 py-4 text-right">
-        {showDeleteConfirm ? (
-          <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={() => deleteProjectMutation.mutate()}
-              disabled={deleteProjectMutation.isPending}
-              className="px-3 py-1.5 bg-rose-600 text-white rounded-md text-sm font-medium hover:bg-rose-700 disabled:opacity-50"
-            >
-              {deleteProjectMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                "Delete"
-              )}
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(false)}
-              className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-md text-sm font-medium"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
           <div className="flex items-center justify-end gap-2">
             {project.last_scan_id && !isScanning && (
               <Link
@@ -168,7 +104,6 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
             >
               View Reports
             </Link>
-            {/* Report Summary Badges */}
             {reportSummary && (
               <div className="flex items-center gap-2 ml-3">
                 <div className="relative">
@@ -195,17 +130,28 @@ const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSumm
               Manage
             </Link>
             {isAdmin && (
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="p-1.5 text-slate-400 hover:text-rose-600"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+              <IconButton
+                icon={Trash2}
+                label={`Delete ${project.name}`}
+                variant="danger"
+                onClick={() => setShowDeleteConfirm(true)}
+              />
+            )}
           </div>
-        )}
       </td>
     </tr>
+
+    <ConfirmModal
+      isOpen={showDeleteConfirm}
+      onClose={() => setShowDeleteConfirm(false)}
+      onConfirm={() => deleteProjectMutation.mutate()}
+      title="Delete project?"
+      message={`This will permanently delete "${project.name}" and all associated scans and reports. This action cannot be undone.`}
+      confirmLabel="Delete permanently"
+      variant="danger"
+      isPending={deleteProjectMutation.isPending}
+    />
+    </>
   );
 };
 
@@ -303,6 +249,8 @@ const DashboardPage = () => {
         </div>
       </header>
 
+      <OnboardingChecklist />
+
       {activeScanProjects.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex flex-col gap-2">
           {activeScanProjects.map((p) => (
@@ -347,28 +295,29 @@ const DashboardPage = () => {
       </div>
 
       {filteredProjects.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
-          <Search className="w-10 h-10 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-slate-900 mb-2">
-            {debouncedSearchTerm ? "No projects found" : isAdmin ? "No projects yet" : "No projects in scope"}
-          </h3>
-          <p className="text-slate-500 mb-6">
-            {debouncedSearchTerm
-              ? `No projects matching "${debouncedSearchTerm}"`
-              : isAdmin
-                ? "Start by adding your first project to scan."
-                : "You don't have access to any projects. Contact an admin to get access."}
-          </p>
-          {isAdmin && (
-            <Link
-              to="/projects/create"
-              className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium inline-flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Add Project
-            </Link>
-          )}
-        </div>
+        debouncedSearchTerm ? (
+          <EmptyState
+            variant="empty"
+            title="No projects found"
+            message={`No projects matching "${debouncedSearchTerm}"`}
+            icon={<Search size={48} />}
+          />
+        ) : isAdmin ? (
+          <EmptyState
+            variant="empty"
+            title="No projects yet"
+            message="Start by adding your first project to scan."
+            action={{ label: "Add Project", onClick: () => window.location.href = "/projects/create" }}
+            icon={<Plus size={48} />}
+          />
+        ) : (
+          <EmptyState
+            variant="empty"
+            title="No projects in scope"
+            message="You don't have access to any projects. Contact an admin to get access."
+            icon={<Shield size={48} />}
+          />
+        )
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <table className="w-full text-left">

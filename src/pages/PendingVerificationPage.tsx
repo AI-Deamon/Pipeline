@@ -5,7 +5,7 @@ import { api } from '../services/api';
 import FilterChips from '../components/FilterChips';
 import RescanRequestCard from '../components/RescanRequestCard';
 import EmptyState from '../components/EmptyState';
-import { ArrowLeft, BarChart3, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, BarChart3, Wifi, WifiOff, Info } from 'lucide-react';
 import { useRescanWebSocket } from '../hooks/useRescanWebSocket';
 import type { PendingVerificationResponse } from '../types';
 
@@ -67,7 +67,7 @@ const PendingVerificationPage = () => {
         </Link>
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Pending Verification</h1>
+            <h1 className="text-2xl font-bold text-slate-900">Rescan Approvals</h1>
             <p className="text-sm text-slate-500 mt-1">
               {total} request{total !== 1 ? 's' : ''} awaiting review
             </p>
@@ -90,6 +90,19 @@ const PendingVerificationPage = () => {
           </button>
         </div>
       )}
+
+      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+        <div className="flex items-start gap-3">
+          <Info className="w-5 h-5 text-indigo-600 mt-0.5 shrink-0" />
+          <div>
+            <h3 className="text-sm font-medium text-indigo-900">Review developer fixes</h3>
+            <p className="text-sm text-indigo-700 mt-1">
+              When a developer marks an issue as fixed, it appears here for verification.
+              Approve to close the issue, or reject if the fix is incomplete.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {(['pending', 'approved', 'completed', 'rejected'] as const).map((s) => (

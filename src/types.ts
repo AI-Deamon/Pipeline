@@ -157,6 +157,8 @@ export type Finding = {
   raw_evidence?: string;
   rule?: string;
   finding_type?: string;
+  rule_name?: string;
+  language?: string;
 };
 
 // Compliance Mapping Types
@@ -276,6 +278,8 @@ export type IssueResponse = {
   line_number?: number;
   tags?: string[];
   code_snippet_language?: string;
+  rule_name?: string;
+  language?: string;
   git_url?: string | null;
 };
 

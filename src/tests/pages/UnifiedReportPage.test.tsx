@@ -7,6 +7,28 @@ import { api } from '../../services/api';
 import { ToastProvider } from '../../components/Toast';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAuthenticated: true,
+    token: 'mock-token',
+    role: 'admin',
+    permissions: {
+      canManageUsers: true,
+      canManageProjectAccess: true,
+      canViewAllProjects: true,
+      canAssignIssues: true,
+      canVerifyIssues: true,
+      canUpdateAssignedIssues: true,
+    },
+    currentUser: { id: 'u-1', username: 'admin', role: 'admin' },
+    login: vi.fn(),
+    logout: vi.fn(),
+    isLoading: false,
+    refreshUser: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 describe('UnifiedReportPage', () => {
   const originalGetUnified = api.reports.getUnified;
   const originalGetTrends = api.reports.getTrends;

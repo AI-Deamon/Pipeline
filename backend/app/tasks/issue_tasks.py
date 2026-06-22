@@ -10,6 +10,70 @@ from app.services import rescan_service as rescan_svc
 logger = logging.getLogger(__name__)
 service = IssueService()
 
+_REPORT_NOT_FOUND = "Report not found"
+
+
+def _build_location(finding: dict) -> dict | None:
+    file_path = finding.get("file_path")
+    line_number = finding.get("line_number")
+    location = finding.get("location")
+    if not location and (file_path or line_number):
+        location = {}
+        if file_path:
+            location["file_path"] = file_path
+        if line_number is not None:
+            location["line"] = line_number
+    return location
+
+
+def _build_extra_metadata(finding: dict) -> dict:
+    extra = {}
+    tags = finding.get("tags") or []
+    if tags:
+        extra["tags"] = tags
+    if finding.get("sonar_status"):
+        extra["sonar_status"] = finding["sonar_status"]
+    if finding.get("sonar_resolution"):
+        extra["sonar_resolution"] = finding["sonar_resolution"]
+    if finding.get("code_snippet_language"):
+        extra["code_snippet_language"] = finding["code_snippet_language"]
+    if finding.get("rule_name"):
+        extra["rule_name"] = finding["rule_name"]
+    if finding.get("language"):
+        extra["language"] = finding["language"]
+    return extra
+
+
+def _build_issue_data(finding: dict, scan_id: str, project_id: str, tool_name: str, count: int) -> dict:
+    location = _build_location(finding)
+    extra_metadata = _build_extra_metadata(finding)
+    return {
+        "issue_id": finding.get("id") or finding.get("issue_id", f"{scan_id}-{count}"),
+        "project_id": project_id,
+        "tool_name": tool_name,
+        "scan_id": scan_id,
+        "severity": (finding.get("severity") or "medium").lower(),
+        "title": finding.get("title") or finding.get("message", "Unknown issue"),
+        "description": finding.get("description") or finding.get("detail"),
+        "location": location,
+        "effort": finding.get("effort"),
+        "finding_type": finding.get("type") or finding.get("finding_type", "bug"),
+        "recommendation": finding.get("recommendation") or finding.get("fix"),
+        "rule": finding.get("rule") or finding.get("rule_id"),
+        "code_snippet": finding.get("code_snippet"),
+        "extra_metadata": extra_metadata,
+    }
+
+
+def _get_current_ids(report) -> set:
+    current_ids = set()
+    findings = report.findings or []
+    for f in findings:
+        fid = f.get("id") or f.get("issue_id")
+        if fid:
+            current_ids.add(fid)
+    return current_ids
+
 
 @celery_app.task
 def migrate_scan_to_issues(scan_id: str, project_id: str, tool_name: str):
@@ -27,7 +91,7 @@ def migrate_scan_to_issues(scan_id: str, project_id: str, tool_name: str):
         )
         if not report:
             logger.warning(f"No report found for scan {scan_id} tool {tool_name}")
-            return {"error": "Report not found"}
+            return {"error": _REPORT_NOT_FOUND}
 
         report.migration_status = "processing"
         db.commit()
@@ -36,41 +100,7 @@ def migrate_scan_to_issues(scan_id: str, project_id: str, tool_name: str):
         count = 0
         for finding in findings:
             try:
-                file_path = finding.get("file_path")
-                line_number = finding.get("line_number")
-                location = finding.get("location")
-                if not location and (file_path or line_number):
-                    location = {}
-                    if file_path:
-                        location["file_path"] = file_path
-                    if line_number is not None:
-                        location["line"] = line_number
-                extra_metadata = {}
-                tags = finding.get("tags") or []
-                if tags:
-                    extra_metadata["tags"] = tags
-                if finding.get("sonar_status"):
-                    extra_metadata["sonar_status"] = finding["sonar_status"]
-                if finding.get("sonar_resolution"):
-                    extra_metadata["sonar_resolution"] = finding["sonar_resolution"]
-                if finding.get("code_snippet_language"):
-                    extra_metadata["code_snippet_language"] = finding["code_snippet_language"]
-                issue_data = {
-                    "issue_id": finding.get("id") or finding.get("issue_id", f"{scan_id}-{count}"),
-                    "project_id": project_id,
-                    "tool_name": tool_name,
-                    "scan_id": scan_id,
-                    "severity": (finding.get("severity") or "medium").lower(),
-                    "title": finding.get("title") or finding.get("message", "Unknown issue"),
-                    "description": finding.get("description") or finding.get("detail"),
-                    "location": location,
-                    "effort": finding.get("effort"),
-                    "finding_type": finding.get("type") or finding.get("finding_type", "bug"),
-                    "recommendation": finding.get("recommendation") or finding.get("fix"),
-                    "rule": finding.get("rule") or finding.get("rule_id"),
-                    "code_snippet": finding.get("code_snippet"),
-                    "extra_metadata": extra_metadata,
-                }
+                issue_data = _build_issue_data(finding, scan_id, project_id, tool_name, count)
                 service.create_issue(db, issue_data)
                 count += 1
             except Exception as e:
@@ -133,14 +163,9 @@ def auto_verify_fixed_issues(scan_id: str, project_id: str, tool_name: str):
             .first()
         )
         if not report:
-            return {"error": "Report not found"}
+            return {"error": _REPORT_NOT_FOUND}
 
-        current_ids = set()
-        findings = report.findings or []
-        for f in findings:
-            fid = f.get("id") or f.get("issue_id")
-            if fid:
-                current_ids.add(fid)
+        current_ids = _get_current_ids(report)
 
         fixed_issues = (
             db.query(IssueDB)
@@ -186,14 +211,9 @@ def detect_regressions(scan_id: str, project_id: str, tool_name: str):
             .first()
         )
         if not report:
-            return {"error": "Report not found"}
+            return {"error": _REPORT_NOT_FOUND}
 
-        current_ids = set()
-        findings = report.findings or []
-        for f in findings:
-            fid = f.get("id") or f.get("issue_id")
-            if fid:
-                current_ids.add(fid)
+        current_ids = _get_current_ids(report)
 
         resolved_issues = (
             db.query(IssueDB)
@@ -228,6 +248,40 @@ def detect_regressions(scan_id: str, project_id: str, tool_name: str):
         db.close()
 
 
+def _process_rescan_verification(db, rescan, current_ids, scan_id):
+    """Process a single rescan verification and broadcast result."""
+    issue = db.query(IssueDB).filter(IssueDB.id == rescan.issue_id).first()
+    if not issue:
+        return 0, 0
+
+    still_present = issue.issue_id in current_ids
+    if still_present:
+        service.transition_status(db, issue.id, "rejected", "system")
+        rescan_svc.complete(db, rescan, "rejected")
+        verified, rejected = 0, 1
+    else:
+        service.transition_status(db, issue.id, "verified", "system")
+        rescan_svc.complete(db, rescan, "verified")
+        verified, rejected = 1, 0
+
+    try:
+        from app.websockets.manager import manager as wsm
+        wsm.broadcast_event(
+            "rescan_verification_complete",
+            {
+                "issue_id": issue.id,
+                "rescan_request_id": rescan.id,
+                "verdict": "rejected" if still_present else "verified",
+                "scan_id": scan_id,
+                "issue_still_present": still_present,
+            },
+        )
+    except Exception:
+        pass
+
+    return verified, rejected
+
+
 @celery_app.task
 def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
     """After a verify scan completes, check all pending-verification issues for
@@ -246,7 +300,7 @@ def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
             .first()
         )
         if not report:
-            return {"error": "Report not found"}
+            return {"error": _REPORT_NOT_FOUND}
 
         current_ids = {f.get("id") or f.get("issue_id") for f in (report.findings or [])}
 
@@ -262,33 +316,9 @@ def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
         verified = 0
         rejected = 0
         for rescan in approved_rescans:
-            issue = db.query(IssueDB).filter(IssueDB.id == rescan.issue_id).first()
-            if not issue:
-                continue
-            still_present = issue.issue_id in current_ids
-            if still_present:
-                service.transition_status(db, issue.id, "rejected", "system")
-                rescan_svc.complete(db, rescan, "rejected")
-                rejected += 1
-            else:
-                service.transition_status(db, issue.id, "verified", "system")
-                rescan_svc.complete(db, rescan, "verified")
-                verified += 1
-
-            try:
-                from app.websockets.manager import manager as websocket_manager
-                websocket_manager.broadcast_event(
-                    "rescan_verification_complete",
-                    {
-                        "issue_id": issue.id,
-                        "rescan_request_id": rescan.id,
-                        "verdict": "rejected" if still_present else "verified",
-                        "scan_id": scan_id,
-                        "issue_still_present": still_present,
-                    },
-                )
-            except Exception:
-                pass
+            v, r = _process_rescan_verification(db, rescan, current_ids, scan_id)
+            verified += v
+            rejected += r
 
         from app.metrics import VERIFICATIONS_TOTAL
         if verified:
@@ -297,9 +327,7 @@ def auto_verify_pending_rescans(scan_id: str, project_id: str, tool_name: str):
             VERIFICATIONS_TOTAL.labels(verdict="rejected").inc(rejected)
 
         db.commit()
-        logger.info(
-            f"Auto-verify for {scan_id}: {verified} verified, {rejected} rejected"
-        )
+        logger.info(f"Auto-verify for {scan_id}: {verified} verified, {rejected} rejected")
         return {"verified": verified, "rejected": rejected}
 
     except Exception as e:

@@ -1,6 +1,7 @@
 import uuid
 import re
 from datetime import timedelta
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -40,9 +41,12 @@ def _validate_password_strength(password: str) -> None:
             detail="Password must contain at least one digit",
         )
 
-@router.post("/register", response_model=User)
+@router.post("/register", response_model=User,
+  responses={
+    400: {"description": "Bad request"}
+  })
 @limiter.limit("5/minute")
-def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
+def register(request: Request, user: UserCreate, db: Annotated[Session, Depends(get_db)]):
     _validate_password_strength(user.password)
 
     # Check username collision
@@ -61,9 +65,12 @@ def register(request: Request, user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(db_user)
     return db_user
 
-@router.post("/login", response_model=Token)
+@router.post("/login", response_model=Token,
+  responses={
+    401: {"description": "Unauthorized"}
+  })
 @limiter.limit("10/minute")
-def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_for_access_token(request: Request, form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Annotated[Session, Depends(get_db)]):
     user = db.query(UserDB).filter(UserDB.username == form_data.username).first()
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -82,8 +89,8 @@ def login_for_access_token(request: Request, form_data: OAuth2PasswordRequestFor
 @router.get("/me", response_model=CurrentUserResponse)
 def get_current_user_info(
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = get_rbac_service(db=db, user=current_user)
     return CurrentUserResponse(

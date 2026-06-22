@@ -354,6 +354,27 @@ export const api = {
       const response = await apiClient.get(`/issues/${issueId}/history`);
       return response.data;
     },
+    findByFindingKey: async (
+      projectId: string,
+      tool: string,
+      findingId: string,
+    ): Promise<IssueResponse | null> => {
+      const PAGE_CAP = 5;
+      const PAGE_SIZE = 25;
+      for (let page = 1; page <= PAGE_CAP; page++) {
+        const result = await api.issues.getToolIssues(projectId, tool, page, PAGE_SIZE, undefined);
+        const match = result.issues.find((i) => i.issue_id === findingId);
+        if (match) return match;
+        if (result.issues.length < PAGE_SIZE) return null;
+      }
+      return null;
+    },
+  },
+  health: {
+    check: async (): Promise<{ status: 'operational' | 'degraded' | 'down'; details?: string }> => {
+      const response = await apiClient.get('/health');
+      return response.data;
+    },
   },
   rbac: {
     getUsers: async (role?: string): Promise<CurrentUser[]> => {
@@ -372,7 +393,19 @@ export const api = {
     },
     getProjectAccess: async (userId: string): Promise<UserAccess> => {
       const response = await apiClient.get(`/users/${userId}/project-access`);
-      return response.data;
+      const d = response.data;
+      return {
+        userId: d.user_id ?? d.userId ?? '',
+        assignments: (d.assignments || []).map((a: Record<string, unknown>) => ({
+          id: a.id as number,
+          userId: (a.user_id ?? a.userId ?? '') as string,
+          scopeType: (a.scope_type ?? a.scopeType ?? '') as string,
+          scopeId: (a.scope_id ?? a.scopeId ?? '') as string,
+          scopeName: a.scope_name as string | undefined ?? a.scopeName as string | undefined,
+          assignedBy: a.assigned_by as string | undefined ?? a.assignedBy as string | undefined,
+          createdAt: (a.created_at ?? a.createdAt ?? '') as string,
+        })),
+      };
     },
     grantProjectAccess: async (userId: string, scopeType: string, scopeId: string): Promise<ProjectAccessAssignment> => {
       const response = await apiClient.post(`/users/${userId}/project-access`, {

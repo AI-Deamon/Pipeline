@@ -199,6 +199,216 @@ function useInitializationTime(startedAt?: string, isRunning?: boolean, hasStage
   return { seconds, isStalled };
 }
 
+type InitializingBannerProps = {
+  isStalled: boolean;
+  initSeconds: number;
+};
+
+function InitializingBanner({ isStalled, initSeconds }: InitializingBannerProps) {
+  return (
+    <div className={`mb-8 p-6 rounded-2xl border-2 transition-all ${
+      isStalled
+        ? 'bg-amber-50 border-amber-200 shadow-lg shadow-amber-100'
+        : 'bg-blue-50 border-blue-200 shadow-lg shadow-blue-100'
+    }`} role="status" aria-live="polite">
+      <div className="flex items-start gap-4">
+        <div className={`mt-0.5 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+          isStalled ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
+        }`}>
+          {isStalled ? (
+            <AlertCircle className="w-5 h-5" />
+          ) : (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          )}
+        </div>
+        <div className="flex-1">
+          <h4 className={`text-base font-black uppercase tracking-tight mb-1 ${
+            isStalled ? 'text-amber-900' : 'text-blue-900'
+          }`}>
+            {isStalled ? 'Scan Starting Delayed' : 'Starting Scan'}
+          </h4>
+          <p className={`text-sm mb-3 ${isStalled ? 'text-amber-700' : 'text-blue-700'}`}>
+            {isStalled
+              ? 'The scan is taking longer than expected to start. This may indicate Jenkins queue delays.'
+              : 'The scan is starting. Stage data will appear shortly.'}
+          </p>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs font-mono font-black uppercase tracking-widest ${
+              isStalled ? 'text-amber-600' : 'text-blue-600'
+            }`}>
+              Initializing for: {Math.floor(initSeconds / 60)}m {initSeconds % 60}s
+            </span>
+            {isStalled && (
+              <span className="text-xs font-black text-amber-600 uppercase tracking-widest bg-amber-100 px-2 py-0.5 rounded">
+                Warning: &gt;5 min
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ProgressHeaderProps = {
+  isRunning: boolean;
+  isComplete: boolean;
+  isFailed: boolean;
+  scanState: string;
+  elapsed: string;
+  completed: number;
+  totalStages: number;
+};
+
+function ProgressHeaderIcon({ isRunning, isComplete, isFailed }: { isRunning: boolean; isComplete: boolean; isFailed: boolean }) {
+  if (isRunning) return <Loader2 className="w-6 h-6 animate-spin" />;
+  if (isComplete) return <CheckCircle className="w-6 h-6" />;
+  if (isFailed) return <AlertCircle className="w-6 h-6" />;
+  return <Activity className="w-6 h-6" />;
+}
+
+function getProgressHeaderClass(isFailed: boolean, isComplete: boolean): string {
+  if (isFailed) return 'bg-red-50 text-red-600 shadow-red-100';
+  if (isComplete) return 'bg-green-50 text-green-600 shadow-green-100';
+  return 'bg-blue-50 text-blue-600 shadow-blue-100';
+}
+
+function getProgressTitle(isRunning: boolean, isComplete: boolean, isFailed: boolean): string {
+  if (isRunning) return 'Scan Running';
+  if (isComplete) return 'Scan Complete';
+  if (isFailed) return 'Scan Failed';
+  return 'Scan Ready';
+}
+
+function getStatusTextClass(isFailed: boolean, isComplete: boolean): string {
+  if (isFailed) return 'text-red-600';
+  if (isComplete) return 'text-green-600';
+  return 'text-blue-600';
+}
+
+function ProgressHeader({ isRunning, isComplete, isFailed, scanState, elapsed, completed, totalStages }: ProgressHeaderProps) {
+  const iconClass = getProgressHeaderClass(isFailed, isComplete);
+  return (
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      <div className="flex items-center gap-4">
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors ${iconClass}`} aria-hidden="true">
+          <ProgressHeaderIcon isRunning={isRunning} isComplete={isComplete} isFailed={isFailed} />
+        </div>
+        <div>
+          <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase leading-none mb-1">
+            {getProgressTitle(isRunning, isComplete, isFailed)}
+          </h3>
+          <div className="flex items-center gap-2" aria-live="polite">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Status:</span>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${getStatusTextClass(isFailed, isComplete)}`}>
+              {scanState}
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-6 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
+        <div className="text-center">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Scan Duration</div>
+          <div className="text-sm font-mono font-black text-slate-900 tracking-tighter">{elapsed}</div>
+        </div>
+        <div className="w-px h-8 bg-slate-200"></div>
+        <div className="text-center">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Stages</div>
+          <div className="text-sm font-black text-slate-900 tracking-tight">{completed}/{totalStages}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ProgressBarSectionProps = {
+  isRunning: boolean;
+  isComplete: boolean;
+  isFailed: boolean;
+  percentage: number;
+};
+
+function getProgressBarTextClass(isFailed: boolean, isComplete: boolean): string {
+  if (isFailed) return 'text-red-600';
+  if (isComplete) return 'text-green-600';
+  return 'text-blue-600';
+}
+
+function ProgressBarSection({ isRunning, isComplete, isFailed, percentage }: ProgressBarSectionProps) {
+  return (
+    <div className="relative mb-10">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Readiness</span>
+        <span className={`text-sm font-black tracking-tighter ${getProgressBarTextClass(isFailed, isComplete)}`}>
+          {percentage}%
+        </span>
+      </div>
+      <div className="w-full bg-slate-100 rounded-full h-4 p-1 border border-slate-200 shadow-inner">
+        <div
+          className={`h-full rounded-full transition-all duration-1000 ease-out relative overflow-hidden ${
+            isFailed ? 'bg-red-500 shadow-lg shadow-red-200' : 
+            isComplete ? 'bg-green-500 shadow-lg shadow-green-200' : 
+            'bg-blue-600 shadow-lg shadow-blue-200'
+          }`}
+          style={{ width: `${percentage}%` }}
+        >
+          {isRunning && (
+            <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite] skew-x-12 translate-x-[-100%]"></div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type StageCardProps = {
+  stageId: string;
+  status: string;
+  isCurrentRunning: boolean;
+  isStagePassed: boolean;
+  isStageFailed: boolean;
+};
+
+function getCardClass(isCurrentRunning: boolean, isStagePassed: boolean, isStageFailed: boolean): string {
+  if (isCurrentRunning) return 'bg-blue-50/50 border-blue-200 shadow-lg shadow-blue-50 ring-2 ring-blue-500/10';
+  if (isStagePassed) return 'bg-green-50/30 border-green-100';
+  if (isStageFailed) return 'bg-red-50/30 border-red-100 shadow-lg shadow-red-50';
+  return 'bg-slate-50/50 border-slate-100 grayscale opacity-60 hover:grayscale-0 hover:opacity-100';
+}
+
+function getStageIconClass(isCurrentRunning: boolean, isStagePassed: boolean, isStageFailed: boolean): string {
+  if (isCurrentRunning) return 'bg-blue-100 text-blue-600';
+  if (isStagePassed) return 'bg-green-100 text-green-600';
+  if (isStageFailed) return 'bg-red-100 text-red-600';
+  return 'bg-slate-200 text-slate-400';
+}
+
+function getStageStatusClass(isCurrentRunning: boolean, isStagePassed: boolean, isStageFailed: boolean): string {
+  if (isCurrentRunning) return 'text-blue-600';
+  if (isStagePassed) return 'text-green-600';
+  if (isStageFailed) return 'text-red-600';
+  return 'text-slate-400';
+}
+
+function StageCard({ stageId, status, isCurrentRunning, isStagePassed, isStageFailed }: StageCardProps) {
+  return (
+    <div className={`group flex items-start gap-4 p-5 rounded-2xl border transition-all duration-300 ${getCardClass(isCurrentRunning, isStagePassed, isStageFailed)}`}>
+      <div className={`mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${getStageIconClass(isCurrentRunning, isStagePassed, isStageFailed)}`}>
+        {getStageStatusIcon(status)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[10px] font-black text-slate-900 tracking-tight uppercase truncate">
+          {STAGE_DISPLAY_NAMES[stageId] || stageId.replace(/_/g, ' ')}
+        </div>
+        <div className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${getStageStatusClass(isCurrentRunning, isStagePassed, isStageFailed)}`}>
+          {status}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ScanProgressBar({
   stages,
   scanState,
@@ -224,163 +434,37 @@ export function ScanProgressBar({
 
   return (
     <div className="bg-white p-8" role="region" aria-label="Scan progress">
-      {/* Initializing State Banner */}
       {isInitializing && (
-        <div className={`mb-8 p-6 rounded-2xl border-2 transition-all ${
-          isStalled
-            ? 'bg-amber-50 border-amber-200 shadow-lg shadow-amber-100'
-            : 'bg-blue-50 border-blue-200 shadow-lg shadow-blue-100'
-        }`} role="status" aria-live="polite">
-          <div className="flex items-start gap-4">
-            <div className={`mt-0.5 w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-              isStalled ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'
-            }`}>
-              {isStalled ? (
-                <AlertCircle className="w-5 h-5" />
-              ) : (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              )}
-            </div>
-            <div className="flex-1">
-              <h4 className={`text-base font-black uppercase tracking-tight mb-1 ${
-                isStalled ? 'text-amber-900' : 'text-blue-900'
-              }`}>
-                {isStalled ? 'Scan Starting Delayed' : 'Starting Scan'}
-              </h4>
-              <p className={`text-sm mb-3 ${isStalled ? 'text-amber-700' : 'text-blue-700'}`}>
-                {isStalled
-                  ? 'The scan is taking longer than expected to start. This may indicate Jenkins queue delays.'
-                  : 'The scan is starting. Stage data will appear shortly.'}
-              </p>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-mono font-black uppercase tracking-widest ${
-                  isStalled ? 'text-amber-600' : 'text-blue-600'
-                }`}>
-                  Initializing for: {Math.floor(initSeconds / 60)}m {initSeconds % 60}s
-                </span>
-                {isStalled && (
-                  <span className="text-xs font-black text-amber-600 uppercase tracking-widest bg-amber-100 px-2 py-0.5 rounded">
-                    Warning: &gt;5 min
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <InitializingBanner isStalled={isStalled} initSeconds={initSeconds} />
       )}
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-colors ${
-            isFailed ? 'bg-red-50 text-red-600 shadow-red-100' : 
-            isComplete ? 'bg-green-50 text-green-600 shadow-green-100' : 
-            'bg-blue-50 text-blue-600 shadow-blue-100'
-          }`} aria-hidden="true">
-            {isRunning ? (
-              <Loader2 className="w-6 h-6 animate-spin" />
-            ) : isComplete ? (
-              <CheckCircle className="w-6 h-6" />
-            ) : isFailed ? (
-              <AlertCircle className="w-6 h-6" />
-            ) : (
-              <Activity className="w-6 h-6" />
-            )}
-          </div>
-          <div>
-            <h3 className="text-xl font-black text-slate-900 tracking-tight uppercase leading-none mb-1">
-              {isRunning ? 'Scan Running' : isComplete ? 'Scan Complete' : isFailed ? 'Scan Failed' : 'Scan Ready'}
-            </h3>
-            <div className="flex items-center gap-2" aria-live="polite">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Status:</span>
-              <span className={`text-[10px] font-black uppercase tracking-widest ${
-                isFailed ? 'text-red-600' : isComplete ? 'text-green-600' : 'text-blue-600'
-              }`}>
-                {scanState}
-              </span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-6 bg-slate-50 px-6 py-3 rounded-2xl border border-slate-100">
-          <div className="text-center">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Scan Duration</div>
-            <div className="text-sm font-mono font-black text-slate-900 tracking-tighter">{elapsed}</div>
-          </div>
-          <div className="w-px h-8 bg-slate-200"></div>
-          <div className="text-center">
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Stages</div>
-            <div className="text-sm font-black text-slate-900 tracking-tight">{completed}/{relevantStages.length}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Progress Bar Container */}
-      <div className="relative mb-10">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Readiness</span>
-          <span className={`text-sm font-black tracking-tighter ${
-            isFailed ? 'text-red-600' : isComplete ? 'text-green-600' : 'text-blue-600'
-          }`}>
-            {percentage}%
-          </span>
-        </div>
-        <div className="w-full bg-slate-100 rounded-full h-4 p-1 border border-slate-200 shadow-inner">
-          <div
-            className={`h-full rounded-full transition-all duration-1000 ease-out relative overflow-hidden ${
-              isFailed ? 'bg-red-500 shadow-lg shadow-red-200' : 
-              isComplete ? 'bg-green-500 shadow-lg shadow-green-200' : 
-              'bg-blue-600 shadow-lg shadow-blue-200'
-            }`}
-            style={{ width: `${percentage}%` }}
-          >
-            {isRunning && (
-              <div className="absolute inset-0 bg-white/20 animate-[shimmer_2s_infinite] skew-x-12 translate-x-[-100%]"></div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Stage Grid */}
+      <ProgressHeader
+        isRunning={isRunning}
+        isComplete={isComplete}
+        isFailed={isFailed}
+        scanState={scanState}
+        elapsed={elapsed}
+        completed={completed}
+        totalStages={relevantStages.length}
+      />
+      <ProgressBarSection
+        isRunning={isRunning}
+        isComplete={isComplete}
+        isFailed={isFailed}
+        percentage={percentage}
+      />
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {relevantStages.map((stageId) => {
           const stageResult = stages.find(s => s.stage === stageId);
           const status = stageResult?.status || 'PENDING';
-          const isCurrentRunning = running === stageId;
-          const isStageFailed = status.toLowerCase().includes('fail') || status.toLowerCase().includes('error');
-          const isStagePassed = status.toLowerCase().includes('pass') || status.toLowerCase().includes('success');
-
           return (
-            <div
+            <StageCard
               key={stageId}
-              className={`group flex items-start gap-4 p-5 rounded-2xl border transition-all duration-300 ${
-                isCurrentRunning ? 'bg-blue-50/50 border-blue-200 shadow-lg shadow-blue-50 ring-2 ring-blue-500/10' :
-                isStagePassed ? 'bg-green-50/30 border-green-100' :
-                isStageFailed ? 'bg-red-50/30 border-red-100 shadow-lg shadow-red-50' :
-                'bg-slate-50/50 border-slate-100 grayscale opacity-60 hover:grayscale-0 hover:opacity-100'
-              }`}
-            >
-              <div className={`mt-0.5 w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 ${
-                isCurrentRunning ? 'bg-blue-100 text-blue-600' :
-                isStagePassed ? 'bg-green-100 text-green-600' :
-                isStageFailed ? 'bg-red-100 text-red-600' :
-                'bg-slate-200 text-slate-400'
-              }`}>
-                {getStageStatusIcon(status)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[10px] font-black text-slate-900 tracking-tight uppercase truncate">
-                  {STAGE_DISPLAY_NAMES[stageId] || stageId.replace(/_/g, ' ')}
-                </div>
-                <div className={`text-[9px] font-black uppercase tracking-widest mt-0.5 ${
-                  isCurrentRunning ? 'text-blue-600' :
-                  isStagePassed ? 'text-green-600' :
-                  isStageFailed ? 'text-red-600' :
-                  'text-slate-400'
-                }`}>
-                  {status}
-                </div>
-              </div>
-            </div>
+              stageId={stageId}
+              status={status}
+              isCurrentRunning={running === stageId}
+              isStagePassed={status.toLowerCase().includes('pass') || status.toLowerCase().includes('success')}
+              isStageFailed={status.toLowerCase().includes('fail') || status.toLowerCase().includes('error')}
+            />
           );
         })}
       </div>

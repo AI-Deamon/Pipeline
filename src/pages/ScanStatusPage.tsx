@@ -14,6 +14,114 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { notificationService } from '../services/notifications';
 import type { Scan, ScanStage } from '../types';
 
+function scanRefetchInterval(query: { state: { data: unknown } }): false | 3000 {
+  const data = query.state.data as { scan: Scan; stages: ScanStage[] } | undefined;
+  if (data?.scan && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.scan.state)) {
+    return false;
+  }
+  return 3000;
+}
+
+type ScanStatusBadgeProps = {
+  state?: string;
+};
+
+function ScanStatusBadge({ state }: ScanStatusBadgeProps) {
+  return (
+    <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+      state === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700' :
+      state === 'FAILED' ? 'bg-rose-50 text-rose-700' :
+      state === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
+      'bg-amber-50 text-amber-700'
+    }`}>
+      {state || 'Unknown'}
+    </span>
+  );
+}
+
+type ScanStagesListProps = {
+  stages: ScanStage[];
+  scan?: Scan;
+  expandedStages: Record<string, boolean>;
+  onToggleStage: (stageId: string) => void;
+};
+
+function ScanStagesList({ stages, scan, expandedStages, onToggleStage }: ScanStagesListProps) {
+  if (stages.length === 0) {
+    return (
+      <div className="p-12 text-center">
+        <Clock className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+        <p className="text-slate-600 font-medium">
+          {scan?.state === 'RUNNING' || scan?.state === 'QUEUED' || scan?.state === 'CREATED'
+            ? "Scan is starting..."
+            : scan?.state === 'CANCELLED'
+            ? "Scan was cancelled"
+            : "No stages recorded"}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="divide-y divide-slate-100">
+      {stages.map((stage, idx) => {
+        const isExpanded = expandedStages[stage.stage];
+        const isFailed = stage.status.toLowerCase().includes('fail');
+        const isSuccess = stage.status.toLowerCase().includes('pass') || stage.status.toLowerCase().includes('success');
+
+        return (
+          <div key={idx}>
+            <button
+              onClick={() => onToggleStage(stage.stage)}
+              className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50"
+            >
+              <div className="flex items-center gap-3">
+                {isSuccess ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
+                ) : isFailed ? (
+                  <AlertCircle className="w-5 h-5 text-red-500" />
+                ) : stage.status.toLowerCase().includes('skipped') ? (
+                  <SkipForward className="w-5 h-5 text-slate-400" />
+                ) : (
+                  <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />
+                )}
+                <span className="font-medium text-slate-900">{stage.stage.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className={`text-sm ${
+                  isSuccess ? 'text-emerald-600' : isFailed ? 'text-red-600' : stage.status.toLowerCase().includes('skipped') ? 'text-slate-500' : 'text-amber-600'
+                }`}>
+                  {stage.status}
+                </span>
+                <span className="text-slate-400">{isExpanded ? '\u2212' : '+'}</span>
+              </div>
+            </button>
+
+            {isExpanded && (
+              <div className="px-6 pb-4 bg-slate-50/50">
+                <div className="text-sm text-slate-600">
+                  <p className="mb-2">{stage.summary || 'No summary available'}</p>
+                  {stage.artifact_url && (
+                    <a
+                      href={stage.artifact_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      View Artifacts
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 const ScanStatusPage = () => {
   const { scanId } = useParams();
   const navigate = useNavigate();
@@ -38,13 +146,7 @@ const ScanStatusPage = () => {
       const scan = await api.scans.get(scanId);
       return { scan, stages: scan?.results || [] };
     },
-    refetchInterval: (query) => {
-      const data = query.state.data as { scan: Scan; stages: ScanStage[] } | undefined;
-      if (data?.scan && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.scan.state)) {
-        return false;
-      }
-      return 3000;
-    },
+    refetchInterval: scanRefetchInterval,
     enabled: !!scanId,
   });
 
@@ -105,18 +207,22 @@ const ScanStatusPage = () => {
 
   const handleCancel = async () => {
     if (!scanId) return;
+    const projectIdToNavigate = scan?.project_id;
     cancelMutation.mutate(scanId, {
       onSuccess: () => {
         setShowCancelConfirm(false);
         addToast({
           type: 'success',
           title: 'Scan Cancelled',
-          message: 'The scan has been stopped.',
+          message: 'The scan has been stopped. You can re-trigger it from the project page.',
+          duration: 10000,
         });
         refetch();
-        setTimeout(() => {
-          navigate(`/projects/${scan?.project_id}`);
-        }, 2000);
+        if (projectIdToNavigate) {
+          setTimeout(() => {
+            navigate(`/projects/${projectIdToNavigate}`);
+          }, 2000);
+        }
       },
       onError: (error) => {
         addToast({
@@ -149,14 +255,7 @@ const ScanStatusPage = () => {
           <h1 className="text-2xl font-semibold text-slate-900">Scan Status</h1>
           <p className="text-sm text-slate-500">ID: {scanId}</p>
         </div>
-        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-          scan?.state === 'COMPLETED' ? 'bg-emerald-50 text-emerald-700' :
-          scan?.state === 'FAILED' ? 'bg-rose-50 text-rose-700' :
-          scan?.state === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
-          'bg-amber-50 text-amber-700'
-        }`}>
-          {scan?.state || 'Unknown'}
-        </span>
+        <ScanStatusBadge state={scan?.state} />
       </header>
 
       <div className="flex items-center gap-3 mb-6">
@@ -256,75 +355,12 @@ const ScanStatusPage = () => {
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
           <h3 className="font-medium text-slate-900">Scan Stages</h3>
         </div>
-        <div className="divide-y divide-slate-100">
-          {stages.length === 0 ? (
-            <div className="p-12 text-center">
-              <Clock className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-600 font-medium">
-                {scan?.state === 'RUNNING' || scan?.state === 'QUEUED' || scan?.state === 'CREATED'
-                  ? "Scan is starting..."
-                  : scan?.state === 'CANCELLED'
-                  ? "Scan was cancelled"
-                  : "No stages recorded"}
-              </p>
-            </div>
-          ) : (
-            stages.map((stage, idx) => {
-              const isExpanded = expandedStages[stage.stage];
-              const isFailed = stage.status.toLowerCase().includes('fail');
-              const isSuccess = stage.status.toLowerCase().includes('pass') || stage.status.toLowerCase().includes('success');
-              
-              return (
-                <div key={idx}>
-                  <button 
-                    onClick={() => toggleStage(stage.stage)}
-                    className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50"
-                  >
-                    <div className="flex items-center gap-3">
-                      {isSuccess ? (
-                        <CheckCircle className="w-5 h-5 text-emerald-500" />
-                      ) : isFailed ? (
-                        <AlertCircle className="w-5 h-5 text-red-500" />
-                      ) : stage.status.toLowerCase().includes('skipped') ? (
-                        <SkipForward className="w-5 h-5 text-slate-400" />
-                      ) : (
-                        <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />
-                      )}
-                      <span className="font-medium text-slate-900">{stage.stage.replace(/_/g, ' ')}</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-sm ${
-                        isSuccess ? 'text-emerald-600' : isFailed ? 'text-red-600' : stage.status.toLowerCase().includes('skipped') ? 'text-slate-500' : 'text-amber-600'
-                      }`}>
-                        {stage.status}
-                      </span>
-                      <span className="text-slate-400">{isExpanded ? '−' : '+'}</span>
-                    </div>
-                  </button>
-                  
-                  {isExpanded && (
-                    <div className="px-6 pb-4 bg-slate-50/50">
-                      <div className="text-sm text-slate-600">
-                        <p className="mb-2">{stage.summary || 'No summary available'}</p>
-                        {stage.artifact_url && (
-                          <a 
-                            href={stage.artifact_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline inline-flex items-center gap-1"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            View Artifacts
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+        <ScanStagesList
+          stages={stages}
+          scan={scan}
+          expandedStages={expandedStages}
+          onToggleStage={toggleStage}
+        />
       </div>
 
       <ScanErrorModal
@@ -334,28 +370,16 @@ const ScanStatusPage = () => {
       />
 
       {showCancelConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setShowCancelConfirm(false)}></div>
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10">
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Cancel Scan?</h3>
-            <p className="text-slate-500 text-sm mb-6">This will stop the running scan. Partial results may be lost.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleCancel}
-                disabled={cancelMutation.isPending}
-                className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-              >
-                {cancelMutation.isPending ? "Cancelling..." : "Cancel Scan"}
-              </button>
-              <button
-                onClick={() => setShowCancelConfirm(false)}
-                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium"
-              >
-                Keep Running
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmModal
+          isOpen={showCancelConfirm}
+          onClose={() => setShowCancelConfirm(false)}
+          onConfirm={handleCancel}
+          title="Cancel scan?"
+          message="Partial results will be lost and you'll need to re-trigger the scan from the project page. This action cannot be undone."
+          confirmLabel="Cancel Scan"
+          variant="danger"
+          isPending={cancelMutation.isPending}
+        />
       )}
 
       <ConfirmModal

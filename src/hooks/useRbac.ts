@@ -27,9 +27,11 @@ export function useRbac() {
       canManageUsers: isAdmin,
       canManageProjectAccess: isAdmin,
       canViewAllProjects: isAdmin,
+      canViewProjectGroups: isAdmin || isTeamLead,
       canAssignIssues: isAdmin || isTeamLead,
       canVerifyIssues: isAdmin || isTeamLead,
       canUpdateAssignedIssues: isAuthenticated,
+      canUpdateProject: isAdmin || isTeamLead,
     };
   }, [role, permissions, isAuthenticated]);
 }

@@ -35,5 +35,5 @@ async def test_fetch_sonar_issues_returns_findings():
         mock_client.return_value.__aenter__.return_value.get.return_value = mock_resp
 
         findings, raw_json = await fetch_sonar_issues("my-project", "localhost:9000")
-        assert len(findings) >= 0  # May be empty if parsing fails
-        assert isinstance(raw_json, str)
+        assert isinstance(findings, list), "findings should be a list"
+        assert isinstance(raw_json, str), "raw_json should be a string"

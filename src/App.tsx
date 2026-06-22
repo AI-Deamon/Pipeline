@@ -23,6 +23,7 @@ const ProjectReportsPage = lazy(() => import('./pages/ProjectReportsPage'));
 const UnifiedReportPage = lazy(() => import('./pages/UnifiedReportPage'));
 const ProjectGroupsPage = lazy(() => import('./pages/ProjectGroupsPage'));
 const ProjectOverviewPage = lazy(() => import('./pages/ProjectOverviewPage'));
+const IssuesTriagePage = lazy(() => import('./pages/IssuesTriagePage'));
 const ToolDetailViewPage = lazy(() => import('./pages/ToolDetailViewPage'));
 const MyIssuesPage = lazy(() => import('./pages/MyIssuesPage'));
 const PendingVerificationPage = lazy(() => import('./pages/PendingVerificationPage'));
@@ -177,6 +178,14 @@ function App() {
                   element={
                     <Suspense fallback={<PageLoader />}>
                       <ToolDetailViewPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/issues"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <IssuesTriagePage />
                     </Suspense>
                   }
                 />

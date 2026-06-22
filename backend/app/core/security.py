@@ -1,4 +1,5 @@
 import os
+import secrets
 import warnings
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -7,14 +8,14 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# Use separate JWT secret; fall back to API_KEY with warning if not configured
+# Use separate JWT secret; generate ephemeral key if not configured
 if settings.JWT_SECRET_KEY:
     SECRET_KEY = settings.JWT_SECRET_KEY
 else:
-    SECRET_KEY = settings.API_KEY
+    SECRET_KEY = secrets.token_hex(32)
     warnings.warn(
-        "JWT_SECRET_KEY not configured — falling back to API_KEY as JWT signing secret. "
-        "Set JWT_SECRET_KEY to limit blast radius if API_KEY is compromised.",
+        "JWT_SECRET_KEY not configured — using ephemeral random key. "
+        "Tokens will not survive application restarts. Set JWT_SECRET_KEY for persistence.",
         RuntimeWarning,
         stacklevel=1,
     )

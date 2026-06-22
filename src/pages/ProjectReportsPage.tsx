@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useRbac } from '../hooks/useRbac';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { SeveritySummary, ReportSummary, Scan, Finding } from '../types';
@@ -9,13 +10,14 @@ interface LocationState {
 }
 import { ToolsTable } from '../components/reports/ToolsTable';
 import { FindingsTable } from '../components/reports/FindingsTable';
-import { 
-  ChevronLeft, 
-  ExternalLink, 
-  AlertCircle, 
-  Shield, 
-  History, 
-  Download
+import {
+  ChevronLeft,
+  ExternalLink,
+  AlertCircle,
+  Shield,
+  History,
+  Download,
+  ListChecks
 } from 'lucide-react';
 
 const severityColors: Record<string, { text: string; bg: string; border: string }> = {
@@ -30,6 +32,7 @@ const ProjectReportsPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const { canAssignIssues, isAdmin } = useRbac();
   const initialScanId = (location.state as LocationState)?.scanId;
   
   const [exportLoading, setExportLoading] = useState(false);
@@ -105,6 +108,12 @@ const ProjectReportsPage = () => {
   const isLoading = projectLoading || scansLoading || summaryLoading || reportsLoading;
 
   // Calculate delta
+  const getDirection = (diff: number): 'up' | 'down' | 'same' => {
+    if (diff > 0) return 'up';
+    if (diff < 0) return 'down';
+    return 'same';
+  };
+
   const getDelta = (severity: keyof SeveritySummary): { value: number; direction: 'up' | 'down' | 'same' } => {
     if (!summary?.severity || !previousSummary?.severity) return { value: 0, direction: 'same' };
     const current = summary.severity[severity] || 0;
@@ -112,7 +121,7 @@ const ProjectReportsPage = () => {
     const diff = current - previous;
     return {
       value: Math.abs(diff),
-      direction: diff > 0 ? 'up' : diff < 0 ? 'down' : 'same',
+      direction: getDirection(diff),
     };
   };
 
@@ -246,6 +255,15 @@ const ProjectReportsPage = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {(canAssignIssues || isAdmin) && (
+            <Link
+              to={`/projects/${projectId}/issues`}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
+            >
+              <ListChecks className="w-4 h-4" />
+              Issues
+            </Link>
+          )}
           <button
             onClick={handleExport}
             disabled={exportLoading}
@@ -351,7 +369,7 @@ const ProjectReportsPage = () => {
       )}
 
       {/* Findings Table */}
-      <FindingsTable findings={allFindings} />
+      <FindingsTable findings={allFindings} projectId={projectId} scanId={selectedScanId} />
     </div>
   );
 };

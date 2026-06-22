@@ -24,11 +24,21 @@ export const FormInput = ({
   const showSuccess = touched && !error && hasValue;
   const showError = touched && error;
 
+  const labelColorClass = (() => {
+    if (showError) return 'text-red-500';
+    if (showSuccess) return 'text-green-600';
+    return 'group-focus-within:text-blue-500';
+  })();
+
+  const inputBorderClass = (() => {
+    if (showError) return 'border-red-300 focus:ring-red-500/10 focus:border-red-500 bg-red-50/30';
+    if (showSuccess) return 'border-green-300 focus:ring-green-500/10 focus:border-green-500 bg-green-50/30';
+    return '';
+  })();
+
   return (
     <div className="space-y-2 w-full group">
-      <label htmlFor={props.id} className={`flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 transition-colors ${
-        showError ? 'text-red-500' : showSuccess ? 'text-green-600' : 'group-focus-within:text-blue-500'
-      }`}>
+      <label htmlFor={props.id} className={`flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1 transition-colors ${labelColorClass}`}>
         {Icon && <Icon className="w-3.5 h-3.5" />}
         {label}
         {required && <span className="text-red-500 ml-1" aria-hidden="true">*</span>}
@@ -37,13 +47,7 @@ export const FormInput = ({
       <div className="relative">
         <input
           {...props}
-          className={`input-field transition-all ${
-            showError 
-              ? 'border-red-300 focus:ring-red-500/10 focus:border-red-500 bg-red-50/30' 
-              : showSuccess 
-              ? 'border-green-300 focus:ring-green-500/10 focus:border-green-500 bg-green-50/30' 
-              : ''
-          } ${className}`}
+          className={`input-field transition-all ${inputBorderClass} ${className}`}
         />
         {showSuccess && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 animate-in fade-in zoom-in duration-200">

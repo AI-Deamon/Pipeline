@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -13,6 +13,8 @@ from app.services.reporting.parsers.base import SecurityFinding
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
+_PROJECT_NOT_FOUND = "Project not found"
+_REPORT_NOT_FOUND = "Report not found"
 
 class SeveritySummary(BaseModel):
     critical: int = 0
@@ -75,27 +77,28 @@ def _verify_project_ownership(db: Session, project_id: str, request: Request, cu
     if _is_api_key_auth(request):
         project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
         if not project:
-            raise HTTPException(status_code=404, detail="Project not found")
+            raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
         return project
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
     from app.services.rbac_service import get_rbac_service
     rbac = get_rbac_service(db=db, user=current_user)
     if rbac.is_admin:
         return project
     if rbac.has_project_access(project_id):
         return project
-    raise HTTPException(status_code=404, detail="Project not found")
+    raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
 
-@router.get("/projects/{project_id}/reports", response_model=List[ReportDetail])
+@router.get("/projects/{project_id}/reports", response_model=List[ReportDetail],
+  responses={404: {"description": "Not found"}})
 def get_project_reports(
     project_id: str,
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     scan_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     """Get reports for a project, optionally filtered by scan_id"""
     _verify_project_ownership(db, project_id, request, current_user)
@@ -119,13 +122,14 @@ def get_project_reports(
     ]
 
 
-@router.get("/projects/{project_id}/reports/summary", response_model=ReportSummary)
+@router.get("/projects/{project_id}/reports/summary", response_model=ReportSummary,
+  responses={404: {"description": "Not found"}})
 def get_reports_summary(
     project_id: str,
     request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     scan_id: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
 ):
     """Get combined severity counts across all tools, optionally filtered by scan_id"""
     _verify_project_ownership(db, project_id, request, current_user)
@@ -173,12 +177,24 @@ def get_reports_summary(
     )
 
 
-@router.get("/{report_id}", response_model=ReportDetail)
-def get_report(report_id: int, db: Session = Depends(get_db)):
-    """Get detailed report for a specific tool"""
+@router.get("/{report_id}", response_model=ReportDetail,
+  responses={404: {"description": "Not found"}})
+def get_report(
+    report_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """Get detailed report for a specific tool with ownership check"""
+    from app.services.rbac_service import get_rbac_service
+
     report = db.query(ScanReportDB).filter(ScanReportDB.id == report_id).first()
     if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail=_REPORT_NOT_FOUND)
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.is_admin and not rbac.has_project_access(report.project_id):
+        raise HTTPException(status_code=404, detail=_REPORT_NOT_FOUND)
 
     return ReportDetail(
         id=report.id,
@@ -191,12 +207,20 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{report_id}/download")
-def download_raw_report(report_id: int, db: Session = Depends(get_db)):
+@router.get("/{report_id}/download",
+  responses={404: {"description": "Not found"}})
+def download_raw_report(
+    report_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     """Download raw JSON report"""
     report = db.query(ScanReportDB).filter(ScanReportDB.id == report_id).first()
     if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail=_REPORT_NOT_FOUND)
+
+    _verify_project_ownership(db, report.project_id, request, current_user)
 
     if not report.raw_report:
         raise HTTPException(status_code=404, detail="Raw report not available")
@@ -208,12 +232,20 @@ def download_raw_report(report_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.delete("/{report_id}")
-def delete_report(report_id: int, db: Session = Depends(get_db)):
+@router.delete("/{report_id}",
+  responses={404: {"description": "Not found"}})
+def delete_report(
+    report_id: int,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     """Delete a specific report"""
     report = db.query(ScanReportDB).filter(ScanReportDB.id == report_id).first()
     if not report:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail=_REPORT_NOT_FOUND)
+
+    _verify_project_ownership(db, report.project_id, request, current_user)
 
     db.delete(report)
     db.commit()
@@ -221,11 +253,18 @@ def delete_report(report_id: int, db: Session = Depends(get_db)):
     return {"status": "success", "message": f"Report {report_id} deleted"}
 
 
-@router.get("/projects/{project_id}/reports/unified")
+@router.get("/projects/{project_id}/reports/unified",
+  responses={404: {"description": "Not found"}})
 def get_unified_report(
-    project_id: str, scan_id: Optional[str] = None, db: Session = Depends(get_db)
+    project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    scan_id: Optional[str] = None,
 ):
     """Get unified report combining all tools"""
+    _verify_project_ownership(db, project_id, request, current_user)
+
     # If scan_id provided, get that scan's reports
     # Otherwise, get latest completed scan
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
@@ -300,9 +339,18 @@ def get_unified_report(
     }
 
 
-@router.get("/projects/{project_id}/reports/trends")
-def get_report_trends(project_id: str, days: int = 30, db: Session = Depends(get_db)):
+@router.get("/projects/{project_id}/reports/trends",
+  responses={404: {"description": "Not found"}})
+def get_report_trends(
+    project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    days: int = 30,
+):
     """Get findings trends over time"""
+    _verify_project_ownership(db, project_id, request, current_user)
+
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
     reports = (
@@ -328,11 +376,18 @@ def get_report_trends(project_id: str, days: int = 30, db: Session = Depends(get
     return [{"date": date, **data} for date, data in sorted(trends.items())]
 
 
-@router.get("/projects/{project_id}/reports/compliance")
+@router.get("/projects/{project_id}/reports/compliance",
+  responses={404: {"description": "Not found"}})
 def get_compliance_report(
-    project_id: str, scan_id: Optional[str] = None, db: Session = Depends(get_db)
+    project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    scan_id: Optional[str] = None,
 ):
     """Get OWASP Top 10 and CWE Top 25 compliance report"""
+    _verify_project_ownership(db, project_id, request, current_user)
+
     from app.services.reporting.compliance_mapper import ComplianceMapper
 
     # Get findings (same logic as unified report)
@@ -373,15 +428,20 @@ def get_compliance_report(
     }
 
 
-@router.get("/projects/{project_id}/reports/unified/export")
+@router.get("/projects/{project_id}/reports/unified/export",
+  responses={404: {"description": "Not found"}})
 def export_unified_report(
     project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     format: str = "html",
     scan_id: Optional[str] = None,
     report_type: str = "technical",
-    db: Session = Depends(get_db),
 ):
     """Export unified report as HTML or PDF"""
+    _verify_project_ownership(db, project_id, request, current_user)
+
     # Get unified report data (similar to get_unified_report)
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from app.schemas.scan import ScanCancelResponse, ScanResponse
 from app.state.scan_state import ScanState
 from app.websockets.manager import manager as websocket_manager
 
+from app.core.auth import require_admin
 from .utils import (
     TERMINAL_STATES,
     _scan_to_response,
@@ -20,13 +22,14 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.post("/scans/{scan_id}/cancel", response_model=ScanCancelResponse)
+@router.post("/scans/{scan_id}/cancel", response_model=ScanCancelResponse,
+  responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}})
 @limiter.limit("10/minute")
 def cancel_scan(
     scan_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
@@ -67,13 +70,15 @@ def cancel_scan(
     )
 
 
-@router.post("/scans/{scan_id}/force-unlock")
+@router.post("/scans/{scan_id}/force-unlock",
+  responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}})
 @limiter.limit("10/minute")
 def force_unlock_scan(
     scan_id: str,
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(require_admin)],
 ):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:

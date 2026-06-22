@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import { ArrowLeft, Search } from 'lucide-react';
 import { PageSkeleton } from '../components/PageSkeleton';
 import { useScanForceUnlock } from '../hooks/useScanReset';
+import { StatusBadge } from '../components/ui/StatusBadge';
+import { ConfirmModal } from '../components/ConfirmModal';
+import EmptyState from '../components/EmptyState';
 import type { Scan } from '../types';
 
 export default function ScanHistoryPage() {
@@ -39,23 +42,6 @@ export default function ScanHistoryPage() {
 
   if (isLoading) return <PageSkeleton type="scan" />;
 
-  const getStatusBadge = (state: string) => {
-    switch (state) {
-      case "COMPLETED":
-        return { bg: "bg-emerald-50 text-emerald-700", label: "Secured" };
-      case "FAILED":
-        return { bg: "bg-rose-50 text-rose-700", label: "Failed" };
-      case "RUNNING":
-      case "QUEUED":
-      case "CREATED":
-        return { bg: "bg-amber-50 text-amber-700", label: "Scanning" };
-      case "CANCELLED":
-        return { bg: "bg-slate-100 text-slate-600", label: "Cancelled" };
-      default:
-        return { bg: "bg-slate-100 text-slate-600", label: state || "Unknown" };
-    }
-  };
-
   return (
     <div className="max-w-4xl mx-auto p-8 pb-20">
       <header className="flex items-center gap-4 mb-8">
@@ -87,21 +73,22 @@ export default function ScanHistoryPage() {
       </div>
 
       {filteredHistory.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-12 text-center">
-          <Search className="w-10 h-10 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-slate-900 mb-2">
-            {history.length === 0 ? "No scans yet" : "No matches found"}
-          </h3>
-          <p className="text-slate-500 mb-6">
-            {history.length === 0 ? "Start a scan to see history here." : `No results for "${searchTerm}"`}
-          </p>
-          <Link
-            to={`/projects/${projectId}`}
-            className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium"
-          >
-            Go to Project
-          </Link>
-        </div>
+        history.length === 0 ? (
+          <EmptyState
+            variant="empty"
+            title="No scans yet"
+            message="Start a scan to see history here."
+            action={{ label: "Go to Project", onClick: () => navigate(`/projects/${projectId}`) }}
+            icon={<Search size={48} />}
+          />
+        ) : (
+          <EmptyState
+            variant="empty"
+            title="No matches found"
+            message={`No results for "${searchTerm}"`}
+            icon={<Search size={48} />}
+          />
+        )
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <table className="w-full text-left">
@@ -115,7 +102,6 @@ export default function ScanHistoryPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredHistory.map((scan: Scan) => {
-                const status = getStatusBadge(scan.state);
                 return (
                   <tr
                     key={scan.scan_id}
@@ -126,9 +112,7 @@ export default function ScanHistoryPage() {
                       <span className="text-sm font-mono text-slate-600">{scan.scan_id}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${status.bg}`}>
-                        {status.label}
-                      </span>
+                      <StatusBadge state={scan.state} />
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-500">
                       {scan.created_at ? new Date(scan.created_at).toLocaleString('en-IN', {
@@ -164,30 +148,16 @@ export default function ScanHistoryPage() {
         </div>
       )}
 
-      {confirmReset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setConfirmReset(null)}></div>
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10">
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Force Stop Scan?</h3>
-            <p className="text-slate-500 text-sm mb-6">This will mark scan {confirmReset.scanId.slice(0, 8)}... as failed so you can start a new scan.</p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleConfirmForceStop}
-                disabled={forceUnlockMutation.isPending}
-                className="flex-1 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
-              >
-                {forceUnlockMutation.isPending ? "Stopping..." : "Force Stop"}
-              </button>
-              <button
-                onClick={() => setConfirmReset(null)}
-                className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium"
-              >
-                Keep
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={!!confirmReset}
+        onClose={() => setConfirmReset(null)}
+        onConfirm={handleConfirmForceStop}
+        title="Force stop scan?"
+        message={`This will mark scan ${confirmReset?.scanId.slice(0, 8)}... as failed so you can start a new scan.`}
+        confirmLabel="Force Stop"
+        variant="warning"
+        isPending={forceUnlockMutation.isPending}
+      />
     </div>
   );
 }

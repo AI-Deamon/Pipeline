@@ -33,6 +33,7 @@ describe('IssueDetailModal', () => {
   const originalAssign = api.issues.assign;
   const originalTransition = api.issues.transition;
   const originalComment = api.issues.addComment;
+  const originalGetUsers = api.rbac.getUsers;
 
   const mockIssue = {
     id: 1,
@@ -71,6 +72,10 @@ describe('IssueDetailModal', () => {
     api.issues.assign = vi.fn().mockResolvedValue({ ...mockIssue, status: 'assigned', assignee_id: 'user-1' });
     api.issues.transition = vi.fn().mockResolvedValue({ ...mockIssue, status: 'in_progress' });
     api.issues.addComment = vi.fn().mockResolvedValue({ id: 1, issue_id: 1, change_type: 'comment', message: 'test', actor_id: 'user', created_at: new Date().toISOString() });
+    api.rbac.getUsers = vi.fn().mockResolvedValue([
+      { id: 'u-1', username: 'dev-user' },
+      { id: 'u-2', username: 'tl' },
+    ]);
   });
 
   afterEach(() => {
@@ -79,6 +84,7 @@ describe('IssueDetailModal', () => {
     api.issues.assign = originalAssign;
     api.issues.transition = originalTransition;
     api.issues.addComment = originalComment;
+    api.rbac.getUsers = originalGetUsers;
   });
 
   function renderModal(issueId = 1) {
@@ -107,16 +113,21 @@ describe('IssueDetailModal', () => {
     expect(await screen.findByRole('button', { name: /assign/i })).toBeInTheDocument();
   });
 
-  test('shows assign input on button click', async () => {
+  test('shows assign select on button click', async () => {
     renderModal();
     fireEvent.click(await screen.findByRole('button', { name: /^assign$/i }));
-    expect(screen.getByPlaceholderText('Username...')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('option', { name: /select user/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'dev-user' })).toBeInTheDocument();
   });
 
   test('calls assign mutation', async () => {
     renderModal();
     fireEvent.click(await screen.findByRole('button', { name: /^assign$/i }));
-    fireEvent.change(screen.getByPlaceholderText('Username...'), { target: { value: 'dev-user' } });
+    const select = await screen.findByRole('combobox');
+    fireEvent.change(select, { target: { value: 'dev-user' } });
     fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
     await waitFor(() => {
       expect(api.issues.assign).toHaveBeenCalledWith(1, { assignee_id: 'dev-user' });

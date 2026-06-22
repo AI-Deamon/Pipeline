@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { UnifiedReport, TrendData, Finding, ComplianceReport } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
@@ -9,13 +9,15 @@ import TableOfContents from '../components/TableOfContents';
 import FilterBar from '../components/FilterBar';
 import FindingDetailModal from '../components/FindingDetailModal';
 import { useToast } from '../components/Toast';
+import { useRbac } from '../hooks/useRbac';
 import { useScanHistory } from '../hooks/useScanHistory';
-import { ArrowLeft, ChevronLeft, Download, History, Shield } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, Download, History, Shield, ListChecks } from 'lucide-react';
 
 const UnifiedReportPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { addToast } = useToast();
+  const { canAssignIssues, isAdmin } = useRbac();
   const { scans, isLoading: scansLoading } = useScanHistory(projectId);
   const [selectedScanId, setSelectedScanId] = useState<string>('');
   const [report, setReport] = useState<UnifiedReport | null>(null);
@@ -182,13 +184,24 @@ const UnifiedReportPage = () => {
           </button>
           <h1 className="text-2xl font-semibold text-slate-900">Security Report</h1>
         </div>
-        <button
-          onClick={() => navigate(`/projects/${projectId}/reports`)}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Back to Detailed View
-        </button>
+        <div className="flex items-center gap-3">
+          {(canAssignIssues || isAdmin) && (
+            <Link
+              to={`/projects/${projectId}/issues`}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
+            >
+              <ListChecks className="w-4 h-4" />
+              Issues
+            </Link>
+          )}
+          <button
+            onClick={() => navigate(`/projects/${projectId}/reports`)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Back to Detailed View
+          </button>
+        </div>
         <div className="flex items-center gap-3">
           {/* Report Type Selector */}
           <select
@@ -395,7 +408,15 @@ const UnifiedReportPage = () => {
               <tr
                 key={idx}
                 className="border-b cursor-pointer hover:bg-slate-50"
+                tabIndex={0}
+                role="button"
                 onClick={() => setSelectedFinding(finding)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedFinding(finding);
+                  }
+                }}
               >
                 <td className="p-2">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${
@@ -419,6 +440,8 @@ const UnifiedReportPage = () => {
       {/* Finding Detail Modal */}
       <FindingDetailModal
         finding={selectedFinding}
+        projectId={projectId}
+        scanId={selectedScanId ?? undefined}
         onClose={() => setSelectedFinding(null)}
       />
     </div>

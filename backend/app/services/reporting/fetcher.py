@@ -177,7 +177,7 @@ class ReportFetcher:
                     for stage, tool in STAGE_TO_TOOL.items()
                     if stage in selected_stages
                 }
-            return set(TOOL_PARSERS.keys())
+            return set(STAGE_TO_TOOL.values())
 
         active_stages = {
             s["stage"] for s in stage_results if s.get("status") in {"PASS", "FAIL"}

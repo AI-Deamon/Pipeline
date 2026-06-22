@@ -36,7 +36,7 @@ export class ApiError extends Error {
       message?: string;
     };
 
-    const status = axiosError.response?.status || 500;
+    const status = axiosError.response?.status || (axiosError.request ? 0 : 500);
     const message =
       axiosError.response?.data?.detail ||
       axiosError.response?.data?.message ||

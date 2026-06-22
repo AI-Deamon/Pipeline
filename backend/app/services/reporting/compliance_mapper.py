@@ -4,6 +4,8 @@ Maps findings to OWASP Top 10 2021 and CWE Top 25
 """
 from typing import Dict, List, Optional
 
+_A03_2021 = "A03:2021"
+
 # OWASP Top 10 2021
 OWASP_TOP_10_2021 = {
     "A01:2021": {
@@ -14,7 +16,7 @@ OWASP_TOP_10_2021 = {
         "name": "Cryptographic Failures",
         "cwe": ["CWE-310", "CWE-311", "CWE-312"],
     },
-    "A03:2021": {
+    _A03_2021: {
         "name": "Injection",
         "cwe": ["CWE-89", "CWE-564", "CWE-917"],
     },
@@ -76,49 +78,41 @@ CWE_TOP_25_2023 = [
     {"id": "CWE-969", "name": "Inherited from...?"},
 ]
 
+_OWASP_KEYWORD_RULES = [
+    (["sql", "injection", "sqli"], _A03_2021, "Injection"),
+    (["crypto", "tls", "ssl", "certificate"], "A02:2021", "Cryptographic Failures"),
+    (["access control", "authorization", "privilege escalation", "insecure direct object"], "A01:2021", "Broken Access Control"),
+    (["misconfiguration", "default credentials", "debug", "exposed"], "A05:2021", "Security Misconfiguration"),
+    (["xss", "cross site scripting", "cross-site scripting"], _A03_2021, "Injection"),
+    (["ssrf", "server-side request forgery"], "A10:2021", "Server-Side Request Forgery (SSRF)"),
+    (["authentication", "password", "login", "session"], "A07:2021", "Identification and Authentication Failures"),
+    (["xml external entity", "xxe", "xml parser"], "A08:2021", "Software and Data Integrity Failures"),
+]
+
+
+def _matches_owasp_text(text: str, keywords: list) -> bool:
+    return any(kw in text for kw in keywords)
+
+
+def _matches_owasp_keywords(title: str, description: str, cve: str, keywords: list) -> bool:
+    return _matches_owasp_text(title, keywords) or _matches_owasp_text(description, keywords) or _matches_owasp_text(cve, keywords)
+
 
 class ComplianceMapper:
     """Map security findings to compliance frameworks"""
 
     def map_to_owasp(self, finding: Dict) -> Optional[Dict]:
-        """
-        Map a finding to OWASP Top 10 2021.
-        Returns compliance entry or None.
-        """
         title = finding.get("title", "").lower()
         description = finding.get("description", "").lower()
         cve = (finding.get("cve") or "").lower()
 
-        # Keyword matching
-        if any(kw in title or kw in description or kw in cve for kw in ["sql", "injection", "sqli"]):
-            return {"id": "A03:2021", "name": "Injection", "found": True}
+        for keywords, owasp_id, name in _OWASP_KEYWORD_RULES:
+            if _matches_owasp_keywords(title, description, cve, keywords):
+                return {"id": owasp_id, "name": name, "found": True}
 
-        if any(kw in title or kw in description for kw in ["crypto", "tls", "ssl", "certificate"]):
-            return {"id": "A02:2021", "name": "Cryptographic Failures", "found": True}
-
-        if any(kw in title or kw in description for kw in ["access control", "authorization", "privilege escalation", "insecure direct object"]):
-            return {"id": "A01:2021", "name": "Broken Access Control", "found": True}
-
-        if any(kw in title or kw in description for kw in ["misconfiguration", "default credentials", "debug", "exposed"]):
-            return {"id": "A05:2021", "name": "Security Misconfiguration", "found": True}
-
-        if any(kw in title or kw in description for kw in ["xss", "cross site scripting", "cross-site scripting"]):
-            return {"id": "A03:2021", "name": "Injection", "found": True}
-
-        if any(kw in title or kw in description for kw in ["ssrf", "server-side request forgery"]):
-            return {"id": "A10:2021", "name": "Server-Side Request Forgery (SSRF)", "found": True}
-
-        if any(kw in title or kw in description for kw in ["authentication", "password", "login", "session"]):
-            return {"id": "A07:2021", "name": "Identification and Authentication Failures", "found": True}
-
-        if any(kw in title or kw in description for kw in ["xml external entity", "xxe", "xml parser"]):
-            return {"id": "A08:2021", "name": "Software and Data Integrity Failures", "found": True}
-
-        # Default: no match
         return None
 
     def get_compliance_summary(self, findings: List[Dict]) -> Dict:
-        """Get compliance summary for all findings"""
         owasp_summary = {f"A{idx:02d}:2021": {"id": f"A{idx:02d}:2021", "name": OWASP_TOP_10_2021.get(f"A{idx:02d}:2021", {}).get("name", ""), "count": 0} for idx in range(1, 11)}
         cwe_summary: Dict[str, int] = {}
 
@@ -127,20 +121,12 @@ class ComplianceMapper:
             if owasp:
                 owasp_summary[owasp["id"]]["count"] += 1
 
-            # CWE mapping - try to extract CWE from CVE or raw evidence
-            cve = finding.get("cve", "")
-            if cve:
-                # Not ideal: just use CVE number; proper mapping would require CVE-to-CWE database
-                # For now, we'll try to match CWE IDs in raw_evidence or description
-                pass
-            # Also check raw_evidence for CWE mentions
             raw = finding.get("raw_evidence", "").lower()
             for cwe_entry in CWE_TOP_25_2023:
                 cwe_id_lower = cwe_entry["id"].lower()
                 if cwe_id_lower.replace("-", "") in raw.replace("-", ""):
                     cwe_summary[cwe_entry["id"]] = cwe_summary.get(cwe_entry["id"], 0) + 1
 
-        # Filter out zero-count OWASP entries
         owasp_nonzero = [v for v in owasp_summary.values() if v["count"] > 0]
 
         return {

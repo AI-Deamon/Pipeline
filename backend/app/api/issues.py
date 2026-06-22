@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
@@ -34,101 +37,24 @@ from app.websockets.manager import manager as websocket_manager
 router = APIRouter()
 service = IssueService()
 
+_PROJECT_NOT_FOUND = "Project not found"
+_ISSUE_NOT_FOUND = "Issue not found"
+_RESCAN_REQUEST_NOT_FOUND = "Rescan request not found"
 
-@router.get("/issues/projects/{project_id}/overview", response_model=OverviewResponse)
-def get_project_overview(
-    project_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+
+def _build_pending_verification_query(
+    db: Session,
+    current_user,
+    rbac,
+    project_id: str | None,
+    status: str,
+    user_id: str,
+    page: int,
+    page_size: int,
 ):
-    rbac = get_rbac_service(db=db, user=current_user)
-    if not rbac.has_project_access(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    tools = service.get_project_overview(db, project_id)
-    return OverviewResponse(project_id=project_id, tools=[ToolOverview(**t) for t in tools])
-
-
-@router.get("/issues/projects/{project_id}/tools/{tool_name}")
-def get_tool_issues(
-    project_id: str,
-    tool_name: str,
-    request: Request,
-    page: int = 1,
-    page_size: int = 25,
-    finding_type: str | None = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    rbac = get_rbac_service(db=db, user=current_user)
-    if not rbac.has_project_access(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    result = service.get_tool_issues(db, project_id, tool_name, page, page_size, finding_type)
-    return result
-
-
-@router.get("/issues/my")
-def get_my_issues(
-    request: Request,
-    page: int = 1,
-    page_size: int = 25,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    user_id = getattr(current_user, "username", None) or "api-key-bypass"
-    result = service.get_my_issues(db, user_id, page, page_size)
-    return result
-
-
-@router.post("/issues", response_model=IssueResponse, status_code=201)
-def create_issue(
-    data: IssueCreate,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    try:
-        issue = service.create_issue(db, data.model_dump())
-        db.commit()
-        return issue
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.get("/issues/projects/{project_id}/metrics", response_model=MetricsResponse)
-def get_project_metrics(
-    project_id: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    rbac = get_rbac_service(db=db, user=current_user)
-    if not rbac.has_project_access(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
-    metrics = service.get_metrics(db, project_id)
-    return MetricsResponse(**metrics)
-
-
-@router.get("/issues/pending-verification", response_model=PendingVerificationResponse)
-def get_pending_verification(
-    request: Request,
-    project_id: str | None = None,
-    status: str = "pending",
-    page: int = 1,
-    page_size: int = 25,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    from app.services.cache import cache_get, cache_set
-    cache_key = f"pending_verification:{project_id or 'all'}:{status}:p{page}:s{page_size}"
-    cached = cache_get(cache_key)
-    if cached is not None:
-        return cached
-    rbac = get_rbac_service(db=db, user=current_user)
     effective_ids = rbac.get_effective_project_ids() if not rbac.is_admin else None
+
     if rbac.is_developer:
-        user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
         q = (
             db.query(RescanRequestDB)
             .filter(
@@ -142,14 +68,21 @@ def get_pending_verification(
             q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
                 IssueDB.project_id.in_(effective_ids)
             )
+
     if project_id:
         q = q.join(IssueDB, IssueDB.id == RescanRequestDB.issue_id).filter(
             IssueDB.project_id == project_id
         )
+
     total = q.count()
     rows = q.order_by(RescanRequestDB.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    groups_map: dict[str, dict] = {}
+    return total, rows
+
+
+def _build_pending_groups_map(db: Session, rows: list) -> dict:
     from app.models.db_models import ProjectDB
+
+    groups_map: dict[str, dict] = {}
     for r in rows:
         issue_obj = service.get_by_id(db, r.issue_id)
         if not issue_obj:
@@ -158,8 +91,6 @@ def get_pending_verification(
         if pid not in groups_map:
             proj = db.query(ProjectDB).filter(ProjectDB.project_id == pid).first()
             groups_map[pid] = {"project_id": pid, "project_name": proj.name if proj else pid, "items": []}
-        from datetime import datetime, timezone
-        # Handle both naive and aware datetimes from DB
         created_at = r.created_at
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
@@ -178,6 +109,86 @@ def get_pending_verification(
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "fix_elapsed_minutes": int(elapsed),
         })
+    return groups_map
+
+
+@router.get("/issues/projects/{project_id}/overview", response_model=OverviewResponse,
+  responses={404: {"description": "Not found"}})
+def get_project_overview(
+    project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
+    tools = service.get_project_overview(db, project_id)
+    return OverviewResponse(project_id=project_id, tools=[ToolOverview(**t) for t in tools])
+
+
+@router.get("/issues/projects/{project_id}/tools/{tool_name}",
+  responses={404: {"description": "Not found"}})
+def get_tool_issues(project_id: str, tool_name: str, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)], page: int = 1, page_size: int = 25, finding_type: str | None = None):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
+    result = service.get_tool_issues(db, project_id, tool_name, page, page_size, finding_type)
+    return result
+
+
+@router.get("/issues/my")
+def get_my_issues(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)], page: int = 1, page_size: int = 25):
+    user_id = getattr(current_user, "username", None) or "api-key-bypass"
+    result = service.get_my_issues(db, user_id, page, page_size)
+    return result
+
+
+@router.post("/issues", response_model=IssueResponse, status_code=201,
+  responses={400: {"description": "Bad request"}})
+def create_issue(
+    data: IssueCreate,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    try:
+        issue = service.create_issue(db, data.model_dump())
+        db.commit()
+        return issue
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to create issue")
+
+
+@router.get("/issues/projects/{project_id}/metrics", response_model=MetricsResponse,
+  responses={404: {"description": "Not found"}})
+def get_project_metrics(
+    project_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
+    metrics = service.get_metrics(db, project_id)
+    return MetricsResponse(**metrics)
+
+
+@router.get("/issues/pending-verification", response_model=PendingVerificationResponse)
+def get_pending_verification(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)], project_id: str | None = None, status: str = "pending", page: int = 1, page_size: int = 25):
+    from app.services.cache import cache_get, cache_set
+    cache_key = f"pending_verification:{project_id or 'all'}:{status}:p{page}:s{page_size}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
+    total, rows = _build_pending_verification_query(db, current_user, rbac, project_id, status, user_id, page, page_size)
+    groups_map = _build_pending_groups_map(db, rows)
+
     response = PendingVerificationResponse(
         total=total,
         page=page,
@@ -188,12 +199,13 @@ def get_pending_verification(
     return response
 
 
-@router.get("/issues/{issue_id}", response_model=IssueResponse)
+@router.get("/issues/{issue_id}", response_model=IssueResponse,
+  responses={404: {"description": "Not found"}})
 def get_issue(
     issue_id: int,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     from app.services.cache import cache_get, cache_set
     cache_key = f"issue:{issue_id}"
@@ -202,24 +214,25 @@ def get_issue(
         return cached
     issue = service.get_by_id(db, issue_id)
     if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
     payload = IssueResponse.model_validate(issue).model_dump()
     cache_set(cache_key, payload, ttl_seconds=60)
     return issue
 
 
-@router.post("/issues/{issue_id}/comments")
+@router.post("/issues/{issue_id}/comments",
+  responses={404: {"description": "Not found"}})
 def add_comment(
     issue_id: int,
     data: IssueCommentCreate,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     issue = service.get_by_id(db, issue_id)
     if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     entry = service.add_comment(db, issue_id, user_id, data.message)
     db.commit()
@@ -233,54 +246,57 @@ def add_comment(
     }
 
 
-@router.get("/issues/{issue_id}/history", response_model=IssueHistoryResponse)
+@router.get("/issues/{issue_id}/history", response_model=IssueHistoryResponse,
+  responses={404: {"description": "Not found"}})
 def get_issue_history(
     issue_id: int,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     issue = service.get_by_id(db, issue_id)
     if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     history = service.get_history(db, issue_id)
     return IssueHistoryResponse(issue_id=issue_id, history=history)
 
 
-@router.post("/issues/{issue_id}/assign", response_model=IssueResponse)
+@router.post("/issues/{issue_id}/assign", response_model=IssueResponse,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def assign_issue(
     issue_id: int,
     data: IssueAssignRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = get_rbac_service(db=db, user=current_user)
     db_issue = service.get_by_id(db, issue_id)
     if db_issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     if not rbac.can_assign_issue(db_issue.project_id):
         raise HTTPException(status_code=403, detail="Not authorized to assign issues")
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     issue = service.assign(db, issue_id, data.assignee_id, user_id, data.priority)
     if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
     return issue
 
 
-@router.post("/issues/{issue_id}/transition", response_model=IssueResponse)
+@router.post("/issues/{issue_id}/transition", response_model=IssueResponse,
+  responses={400: {"description": "Bad request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def transition_issue(
     issue_id: int,
     data: IssueStatusRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = get_rbac_service(db=db, user=current_user)
     db_issue = service.get_by_id(db, issue_id)
     if db_issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     if data.status in ("verified", "rejected") and not rbac.can_verify_issue(db_issue.project_id):
         raise HTTPException(status_code=403, detail="Not authorized to verify or reject issues")
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
@@ -289,22 +305,23 @@ def transition_issue(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
     return issue
 
 
-@router.post("/issues/{issue_id}/request-rescan", response_model=RescanRequestResponse, status_code=201)
+@router.post("/issues/{issue_id}/request-rescan", response_model=RescanRequestResponse, status_code=201,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}, 429: {"description": "Too many requests"}})
 def request_rescan(
     issue_id: int,
     data: RescanRequestCreate,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     issue = service.get_by_id(db, issue_id)
     if not issue:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     rbac = get_rbac_service(db=db, user=current_user)
     if not rbac.can_request_rescan(issue):
         raise HTTPException(status_code=403, detail="Not authorized to request rescan for this issue")
@@ -355,17 +372,18 @@ def request_rescan(
     return rescan
 
 
-@router.post("/issues/{issue_id}/approve-rescan")
+@router.post("/issues/{issue_id}/approve-rescan",
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def approve_rescan(
     issue_id: int,
     data: RescanApproveRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     issue = service.get_by_id(db, issue_id)
     if not issue:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     rbac = get_rbac_service(db=db, user=current_user)
     if not rbac.can_approve_rescan(issue.project_id):
         raise HTTPException(status_code=403, detail="Not authorized to approve rescan")
@@ -379,8 +397,6 @@ def approve_rescan(
     rescan.version = rescan.version + 1
     from datetime import datetime, timezone
     rescan.updated_at = datetime.now(timezone.utc)
-    # scan_id is left NULL here. It will be set by /trigger-verify-scan which
-    # creates the actual scans row in the same transaction.
     db.commit()
     db.refresh(rescan)
     try:
@@ -401,17 +417,18 @@ def approve_rescan(
     }
 
 
-@router.post("/issues/{issue_id}/trigger-verify-scan")
+@router.post("/issues/{issue_id}/trigger-verify-scan",
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def trigger_verify_scan(
     issue_id: int,
     data: TriggerVerifyScanRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     issue = service.get_by_id(db, issue_id)
     if not issue:
-        raise HTTPException(status_code=404, detail="Issue not found")
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     rbac = get_rbac_service(db=db, user=current_user)
     if not rbac.can_approve_rescan(issue.project_id):
         raise HTTPException(status_code=403, detail="Not authorized to trigger verify scan")
@@ -423,19 +440,18 @@ def trigger_verify_scan(
     }
 
 
-
-
-@router.patch("/rescan-requests/{request_id}", response_model=RescanRequestResponse)
+@router.patch("/rescan-requests/{request_id}", response_model=RescanRequestResponse,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def edit_rescan_request(
     request_id: int,
     data: RescanEditRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     record = rescan_service.find_by_id(db, request_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Rescan request not found")
+        raise HTTPException(status_code=404, detail=_RESCAN_REQUEST_NOT_FOUND)
     user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
     if record.requested_by != user_id:
         rbac = get_rbac_service(db=db, user=current_user)
@@ -460,17 +476,18 @@ def edit_rescan_request(
     return record
 
 
-@router.delete("/rescan-requests/{request_id}")
+@router.delete("/rescan-requests/{request_id}",
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def cancel_rescan_request(
     request_id: int,
     data: RescanCancelRequest,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     record = rescan_service.find_by_id(db, request_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Rescan request not found")
+        raise HTTPException(status_code=404, detail=_RESCAN_REQUEST_NOT_FOUND)
     user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", ""))
     if record.requested_by != user_id:
         rbac = get_rbac_service(db=db, user=current_user)
@@ -492,17 +509,18 @@ def cancel_rescan_request(
     return {"detail": "Rescan request cancelled", "id": record.id, "version": record.version}
 
 
-@router.get("/fix-notes/{request_id}/raw", response_model=RawFixNoteResponse)
+@router.get("/fix-notes/{request_id}/raw", response_model=RawFixNoteResponse,
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def get_raw_fix_note(
     request_id: int,
     request: Request,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     rbac = get_rbac_service(db=db, user=current_user)
     if not rbac.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
     record = rescan_service.find_by_id(db, request_id)
     if not record:
-        raise HTTPException(status_code=404, detail="Rescan request not found")
+        raise HTTPException(status_code=404, detail=_RESCAN_REQUEST_NOT_FOUND)
     return record

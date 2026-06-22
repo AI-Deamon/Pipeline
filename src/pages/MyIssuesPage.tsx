@@ -1,19 +1,25 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
-import { Bug, ClipboardList } from 'lucide-react';
+import { ClipboardList } from 'lucide-react';
 import IssueCard from '../components/IssueCard';
+import IssueDetailModal from '../components/IssueDetailModal';
+import { ErrorDisplay } from '../components/ui/ErrorDisplay';
+import EmptyState from '../components/EmptyState';
 import type { IssueResponse } from '../types';
 
 const MyIssuesPage = () => {
-  const { data, isLoading, error } = useQuery({
+  const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['my-issues'],
     queryFn: () => api.issues.getMyIssues(),
   });
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-[60vh]" role="status" aria-live="polite">
         <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <span className="sr-only">Loading your issues...</span>
       </div>
     );
   }
@@ -21,11 +27,10 @@ const MyIssuesPage = () => {
   if (error) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-          <Bug size={40} className="mx-auto mb-3 text-red-400" />
-          <h2 className="text-lg font-semibold text-red-700 mb-1">Failed to load your issues</h2>
-          <p className="text-sm text-red-500">{(error as Error).message}</p>
-        </div>
+        <ErrorDisplay
+          message={(error as Error).message}
+          onRetry={() => refetch()}
+        />
       </div>
     );
   }
@@ -52,11 +57,12 @@ const MyIssuesPage = () => {
       </div>
 
       {total === 0 ? (
-        <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center">
-          <ClipboardList size={48} className="mx-auto mb-4 text-slate-300" />
-          <h3 className="text-lg font-semibold text-slate-600 mb-1">No issues assigned</h3>
-          <p className="text-sm text-slate-400">Issues assigned to you will appear here.</p>
-        </div>
+        <EmptyState
+          variant="empty"
+          title="No issues assigned"
+          message="Issues assigned to you will appear here."
+          icon={<ClipboardList size={48} />}
+        />
       ) : (
         <div className="space-y-6">
           {projects.map((p) => {
@@ -66,13 +72,24 @@ const MyIssuesPage = () => {
                 <h2 className="text-lg font-semibold text-slate-800 mb-3">{p.project_id}</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {projectIssues.map((issue) => (
-                    <IssueCard key={issue.id} issue={issue} />
+                    <IssueCard
+                      key={issue.id}
+                      issue={issue}
+                      onClick={(i) => setSelectedIssueId(i.id)}
+                    />
                   ))}
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {selectedIssueId !== null && (
+        <IssueDetailModal
+          issueId={selectedIssueId}
+          onClose={() => setSelectedIssueId(null)}
+        />
       )}
     </div>
   );

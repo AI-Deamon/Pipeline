@@ -46,11 +46,11 @@ export function useScanStatus() {
   const stages = scanData?.stages || [];
 
   useEffect(() => {
-    if (scan?.state === 'FAILED') {
+    if (scan?.state === 'FAILED' && scan?.error) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowErrorModal(true);
     }
-  }, [scan]);
+  }, [scan, scan?.error]);
 
   const cancelMutation = useScanCancel();
 

@@ -3,10 +3,17 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Users, Plus, Trash2, LogOut, Shield, UserCog, History } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { Modal } from '../components/ui/Modal';
 import { useRbac } from '../hooks/useRbac';
 import { api } from '../services/api';
 import { ApiError } from '../utils/apiError';
 import type { CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment } from '../types';
+
+function roleDescription(role: string): string {
+  if (role === 'admin') return 'Full control';
+  if (role === 'team_lead') return 'Scoped project management';
+  return 'Assigned work only';
+}
 
 const UserManagementPage = () => {
   const navigate = useNavigate();
@@ -242,117 +249,85 @@ const UserManagementPage = () => {
       )}
 
       {/* Role change modal */}
-      {showRoleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setShowRoleModal(null)} />
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Change Role: {showRoleModal.username}</h3>
-            <div className="space-y-2 mb-6">
-              {(['admin', 'team_lead', 'developer'] as const).map((role) => (
-                <button
-                  key={role}
-                  onClick={() => handleUpdateRole(showRoleModal.userId, role)}
-                  className={`w-full text-left px-4 py-3 rounded-lg border ${
-                    showRoleModal.currentRole === role
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="font-medium">{role}</span>
-                  <span className="text-sm text-slate-500 ml-2">
-                    {role === 'admin' ? 'Full control' : role === 'team_lead' ? 'Scoped project management' : 'Assigned work only'}
-                  </span>
-                </button>
-              ))}
-            </div>
+      <Modal isOpen={!!showRoleModal} onClose={() => setShowRoleModal(null)} title={`Change Role: ${showRoleModal?.username || ''}`} size="sm">
+        <div className="space-y-2">
+          {(['admin', 'team_lead', 'developer'] as const).map((role) => (
             <button
-              onClick={() => setShowRoleModal(null)}
-              className="w-full py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium"
+              key={role}
+              onClick={() => handleUpdateRole(showRoleModal!.userId, role)}
+              className={`w-full text-left px-4 py-3 rounded-lg border ${
+                showRoleModal?.currentRole === role
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 hover:bg-slate-50'
+              }`}
             >
-              Cancel
+              <span className="font-medium">{role}</span>
+              <span className="text-sm text-slate-500 ml-2">
+                {roleDescription(role)}
+              </span>
             </button>
-          </div>
+          ))}
         </div>
-      )}
+      </Modal>
 
       {/* Project access modal */}
-      {showAccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setShowAccessModal(null)} />
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10 max-h-[80vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Project Access: {showAccessModal.username}</h3>
-
-            {/* Current assignments */}
-            {userAccess?.assignments && userAccess.assignments.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-medium text-slate-700 mb-2">Current Access</h4>
-                {userAccess.assignments.map((a: ProjectAccessAssignment) => (
-                  <div key={a.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg mb-1">
-                    <span className="text-sm"><span className="font-medium">{a.scopeType}</span>: {a.scopeId}</span>
-                    <button
-                      onClick={() => handleRevokeAccess(a.id, `${a.scopeType}:${a.scopeId}`)}
-                      className="p-1 text-slate-400 hover:text-red-600"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Grant new access */}
-            <div className="border-t border-slate-100 pt-4">
-              <h4 className="text-sm font-medium text-slate-700 mb-2">Grant Access</h4>
-              <div className="flex gap-2 mb-2">
-                <select
-                  value={newScopeType}
-                  onChange={(e) => setNewScopeType(e.target.value as 'project' | 'project_group')}
-                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+      <Modal isOpen={!!showAccessModal} onClose={() => setShowAccessModal(null)} title={`Project Access: ${showAccessModal?.username || ''}`} size="md">
+        {userAccess?.assignments && userAccess.assignments.length > 0 && (
+          <div className="mb-4">
+            <h4 className="text-sm font-medium text-slate-700 mb-2">Current Access</h4>
+            {userAccess.assignments.map((a: ProjectAccessAssignment) => (
+              <div key={a.id} className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg mb-1">
+                <span className="text-sm"><span className="font-medium">{a.scopeType}</span>: {a.scopeId}</span>
+                <button
+                  onClick={() => handleRevokeAccess(a.id, `${a.scopeType}:${a.scopeId}`)}
+                  className="p-1 text-slate-400 hover:text-red-600"
                 >
-                  <option value="project">Project</option>
-                  <option value="project_group">Project Group</option>
-                </select>
-                <input
-                  type="text"
-                  value={newScopeId}
-                  onChange={(e) => setNewScopeId(e.target.value)}
-                  placeholder="Project or Group ID"
-                  className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                />
+                  <Trash2 className="w-3 h-3" />
+                </button>
               </div>
-              <button
-                onClick={handleGrantAccess}
-                disabled={!newScopeId.trim()}
-                className="w-full py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
-              >
-                Grant Access
-              </button>
-            </div>
-
-            <button
-              onClick={() => setShowAccessModal(null)}
-              className="w-full mt-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium"
-            >
-              Close
-            </button>
+            ))}
           </div>
+        )}
+
+        <div className="border-t border-slate-100 pt-4">
+          <h4 className="text-sm font-medium text-slate-700 mb-2">Grant Access</h4>
+          <div className="flex gap-2 mb-2">
+            <select
+              value={newScopeType}
+              onChange={(e) => setNewScopeType(e.target.value as 'project' | 'project_group')}
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            >
+              <option value="project">Project</option>
+              <option value="project_group">Project Group</option>
+            </select>
+            <input
+              type="text"
+              value={newScopeId}
+              onChange={(e) => setNewScopeId(e.target.value)}
+              placeholder="Project or Group ID"
+              className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm"
+            />
+          </div>
+          <button
+            onClick={handleGrantAccess}
+            disabled={!newScopeId.trim()}
+            className="w-full py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
+          >
+            Grant Access
+          </button>
         </div>
-      )}
+      </Modal>
 
       {/* Confirm revoke modal */}
-      {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setConfirmDelete(null)} />
-          <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-xl relative z-10">
-            <h3 className="text-lg font-semibold text-slate-900 mb-2">Revoke Access?</h3>
-            <p className="text-slate-500 text-sm mb-6">Remove {confirmDelete.scopeDesc} access?</p>
-            <div className="flex gap-3">
-              <button onClick={confirmRevoke} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700">Revoke</button>
-              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={confirmRevoke}
+        title="Revoke access?"
+        message={`Remove ${confirmDelete?.scopeDesc || ''} access?`}
+        confirmLabel="Revoke"
+        variant="danger"
+      />
 
       {/* Confirm user-delete modal — uses the accessible ConfirmModal
           component (focus trap + role="dialog" + aria-modal) instead of

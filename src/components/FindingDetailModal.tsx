@@ -1,104 +1,213 @@
-import React from 'react';
-import { X } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Bug, Plus, Loader2 } from 'lucide-react';
+import { useRbac } from '../hooks/useRbac';
+import { useCreateIssue } from '../hooks/useIssues';
+import { api } from '../services/api';
+import { useToast } from './Toast';
+import { Modal } from './ui/Modal';
+import { Badge } from './ui/Badge';
 import type { Finding } from '../types';
+
 interface FindingDetailModalProps {
   finding: Finding | null;
+  projectId?: string;
+  scanId?: string;
   onClose: () => void;
 }
-const FindingDetailModal: React.FC<FindingDetailModalProps> = ({ finding, onClose }) => {
+
+const severityVariant: Record<string, 'danger' | 'warning' | 'info' | 'default'> = {
+  Critical: 'danger',
+  High: 'warning',
+  Medium: 'info',
+  Low: 'default',
+  Info: 'default',
+};
+
+const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
+  finding,
+  projectId,
+  scanId,
+  onClose,
+}) => {
+  const navigate = useNavigate();
+  const [hasSearched, setHasSearched] = useState(false);
+
+  const isOpen = !!finding;
+  const { canAssignIssues } = useRbac();
+  const { addToast } = useToast();
+  const createMutation = useCreateIssue();
+
+  const enabled = isOpen && !!projectId && !!finding?.tool && canAssignIssues;
+
+  const {
+    data: matchedIssue,
+    isFetching: isSearching,
+    refetch: searchForIssue,
+  } = useQuery({
+    queryKey: ['finding-lookup', projectId, finding?.tool, finding?.id],
+    queryFn: () => api.issues.findByFindingKey(projectId!, finding!.tool!, finding!.id),
+    enabled: false,
+  });
+
   if (!finding) return null;
-  const severityColors: Record<string, string> = {
-    Critical: 'bg-red-100 text-red-700',
-    High: 'bg-orange-100 text-orange-700',
-    Medium: 'bg-yellow-100 text-yellow-700',
-    Low: 'bg-blue-100 text-blue-700',
-    Info: 'bg-slate-100 text-slate-700',
+
+  const handleOpenInIssueTracker = async () => {
+    if (!enabled) return;
+    setHasSearched(true);
+    const result = await searchForIssue();
+    if (result.data) {
+      addToast({ type: 'success', title: 'Issue found' });
+      onClose();
+      navigate(`/projects/${projectId}/issues/${finding.tool}?highlight=${result.data.id}`);
+    }
   };
+
+  const handleCreateIssue = async () => {
+    if (!projectId || !scanId || !finding.tool) return;
+    try {
+      const compositeId = `${finding.id}:${scanId}`;
+      const created = await createMutation.mutateAsync({
+        issue_id: compositeId,
+        project_id: projectId,
+        tool_name: finding.tool,
+        severity: finding.severity,
+        title: finding.title,
+        scan_id: scanId,
+      });
+      addToast({ type: 'success', title: 'Issue created' });
+      onClose();
+      navigate(`/projects/${projectId}/issues/${finding.tool}?highlight=${created.id}`);
+    } catch (e) {
+      addToast({
+        type: 'error',
+        title: 'Failed to create issue',
+        message: (e as Error).message,
+      });
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-slate-900">Finding Details</h2>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
-            <X className="w-5 h-5 text-slate-600" />
-          </button>
+    <Modal isOpen={isOpen} onClose={onClose} title="Finding Details" size="lg">
+      <div className="mb-4">
+        <Badge variant={severityVariant[finding.severity] || 'default'} size="md">
+          {finding.severity}
+        </Badge>
+      </div>
+
+      <h3 className="text-lg font-medium text-slate-900 mb-3">{finding.title}</h3>
+
+      <dl className="space-y-3">
+        <div>
+          <dt className="text-sm font-medium text-slate-500">ID</dt>
+          <dd className="text-sm text-slate-900">{finding.id}</dd>
         </div>
-        {/* Severity Badge */}
-        <div className="mb-4">
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${severityColors[finding.severity] || severityColors.Info}`}>
-            {finding.severity}
-          </span>
-        </div>
-        {/* Title */}
-        <h3 className="text-lg font-medium text-slate-900 mb-2">{finding.title}</h3>
-        {/* Details */}
-        <dl className="space-y-3">
+
+        {finding.description && (
           <div>
-            <dt className="text-sm font-medium text-slate-500">ID</dt>
-            <dd className="text-sm text-slate-900">{finding.id}</dd>
-          </div>
-
-          {finding.description && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Description</dt>
-              <dd className="text-sm text-slate-900">{finding.description}</dd>
-            </div>
-          )}
-
-          {finding.cve && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">CVE</dt>
-              <dd className="text-sm text-slate-900">{finding.cve}</dd>
-            </div>
-          )}
-
-          {finding.host && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Host</dt>
-              <dd className="text-sm text-slate-900">{finding.host}</dd>
-            </div>
-          )}
-
-          {finding.port && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Port</dt>
-              <dd className="text-sm text-slate-900">{finding.port}</dd>
-            </div>
-          )}
-
-          {finding.package && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Package</dt>
-              <dd className="text-sm text-slate-900">{finding.package}</dd>
-            </div>
-          )}
-
-          {finding.tool && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Tool</dt>
-              <dd className="text-sm text-slate-900">{finding.tool}</dd>
-            </div>
-          )}
-
-          {finding.recommendation && (
-            <div>
-              <dt className="text-sm font-medium text-slate-500">Recommendation</dt>
-              <dd className="text-sm text-slate-900">{finding.recommendation}</dd>
-            </div>
-          )}
-        </dl>
-        {/* Raw Evidence */}
-        {finding.raw_evidence && (
-          <div className="mt-4">
-            <dt className="text-sm font-medium text-slate-500 mb-2">Raw Evidence</dt>
-            <pre className="text-xs bg-slate-50 p-3 rounded-lg overflow-x-auto">
-              {finding.raw_evidence}
-            </pre>
+            <dt className="text-sm font-medium text-slate-500">Description</dt>
+            <dd className="text-sm text-slate-900">{finding.description}</dd>
           </div>
         )}
-      </div>
-    </div>
+
+        {finding.cve && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">CVE</dt>
+            <dd className="text-sm text-slate-900">{finding.cve}</dd>
+          </div>
+        )}
+
+        {finding.host && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Host</dt>
+            <dd className="text-sm text-slate-900">{finding.host}</dd>
+          </div>
+        )}
+
+        {finding.port && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Port</dt>
+            <dd className="text-sm text-slate-900">{finding.port}</dd>
+          </div>
+        )}
+
+        {finding.package && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Package</dt>
+            <dd className="text-sm text-slate-900">{finding.package}</dd>
+          </div>
+        )}
+
+        {finding.tool && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Tool</dt>
+            <dd className="text-sm text-slate-900">{finding.tool}</dd>
+          </div>
+        )}
+
+        {finding.recommendation && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Recommendation</dt>
+            <dd className="text-sm text-slate-900">{finding.recommendation}</dd>
+          </div>
+        )}
+
+        {finding.rule && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Rule</dt>
+            <dd className="text-sm text-slate-900">
+              {finding.rule_name && <span className="font-medium">{finding.rule_name}<br /></span>}
+              <span className="font-mono text-xs text-slate-500">{finding.rule}</span>
+            </dd>
+          </div>
+        )}
+
+        {finding.language && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">Language</dt>
+            <dd className="text-sm text-slate-900">{finding.language}</dd>
+          </div>
+        )}
+      </dl>
+
+      {finding.raw_evidence && (
+        <div className="mt-4">
+          <dt className="text-sm font-medium text-slate-500 mb-2">Raw Evidence</dt>
+          <pre className="text-xs bg-slate-50 p-3 rounded-lg overflow-x-auto">
+            {finding.raw_evidence}
+          </pre>
+        </div>
+      )}
+
+      {canAssignIssues && projectId && finding.tool && (
+        <div className="mt-6 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleOpenInIssueTracker}
+            disabled={isSearching}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+          >
+            {isSearching ? <Loader2 size={12} className="animate-spin" /> : <Bug size={14} />}
+            Open in Issue Tracker
+          </button>
+          {hasSearched && !matchedIssue && (
+            <button
+              type="button"
+              onClick={handleCreateIssue}
+              disabled={createMutation.isPending || !scanId}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+            >
+              {createMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={14} />}
+              Create issue
+            </button>
+          )}
+          {hasSearched && matchedIssue && (
+            <span className="text-xs text-emerald-600">Matched existing issue #{matchedIssue.id}</span>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 };
 export default FindingDetailModal;

@@ -287,6 +287,7 @@ const DocsPage = () => {
             src="/graph.html" 
             className="w-full h-[600px]"
             title="Architecture Graph"
+            sandbox="allow-scripts"
           />
         </div>
       </section>
