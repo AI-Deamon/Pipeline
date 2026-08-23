@@ -1,10 +1,14 @@
 """Test for Trivy image static filename fix in Jenkinsfile."""
+from pathlib import Path
+
 import pytest
+
+JENKINSFILE_PATH = Path(__file__).parent.parent / "Agent" / "Jenkinsfile"
 
 
 def test_trivy_image_static_filename():
     """Verify Jenkins outputs static trivy-image.json"""
-    with open('/home/kali_linux/Pipeline/Agent/Jenkinsfile') as f:
+    with open(JENKINSFILE_PATH) as f:
         content = f.read()
 
     # Check line 383 uses static filename

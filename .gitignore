@@ -84,7 +84,7 @@ htmlcov/
 *.js.map
 
 # Generated reports & scan artifacts
-reports/
+/reports/
 graphify-out/
 
 # Downloaded binaries
