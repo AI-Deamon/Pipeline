@@ -1,3 +1,12 @@
+> **⚠️ ARCHIVED — describes an early scaffolding version of this app, not the current system.**
+> This document was written when the frontend was a standalone mock/`localStorage`-backed prototype with
+> no authentication, no RBAC, no WebSockets, and no Issue-normalization pipeline. None of that reflects
+> the current real system: a FastAPI + PostgreSQL backend with JWT auth, role-based access control,
+> live WebSocket updates, and a full Issue lifecycle. Kept for historical reference only — do **not**
+> use this to understand the current architecture. See `AGENTS.md` for the up-to-date picture.
+> (Partner review finding #23, flagged because an unarchived early-scaffolding doc like this risks giving
+> anyone — human or AI agent — onboarding from it a materially wrong mental model.)
+
 # DevSecOps Platform: System Design & Implementation
 
 ## 1. UI Route Map

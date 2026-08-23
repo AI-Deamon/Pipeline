@@ -35,7 +35,7 @@ export type Scan = {
   scan_id: string;
   project_id: string;
   scan_mode?: ScanMode;
-  state: 'INITIAL' | 'WAITING' | 'IN PROGRESS' | 'FINISHED' | 'FAILED' | 'CANCELLED' | 'CREATED' | 'QUEUED' | 'RUNNING' | 'COMPLETED';
+  state: 'CREATED' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'SKIPPED';
   selected_stages?: string[];
   created_at?: string;
   started_at?: string;
@@ -72,6 +72,13 @@ export type ReportSummary = {
   total_findings: number;
   severity: SeveritySummary;
   tools: ToolSummary[];
+  risk_score?: {
+    score: number;
+    // null when there isn't enough recent history to compute a real trend
+    trend: string | null;
+    level: string;
+    previous_score?: number | null;
+  };
 };
 
 export type UnifiedReport = {
@@ -95,6 +102,122 @@ export type TrendData = {
   high: number;
   medium: number;
   low: number;
+};
+
+// Developer Dashboard Types
+export type FileMeasures = {
+  coverage: string;
+  complexity: string;
+  cognitive_complexity: string;
+  duplicated_lines_density: string;
+  ncloc: string;
+};
+
+export type DeveloperIssue = {
+  id: string;
+  line?: number;
+  message: string;
+  severity: string;
+  effort?: string;
+  type?: string;
+  rule?: string;
+  rule_name?: string;
+  description?: string;
+  recommendation?: string;
+  file_path?: string;
+  // Developer-friendly fields
+  cvss_score?: number;
+  cvss_severity?: string;
+  package_version?: string;
+  fixed_version?: string;
+  references?: string[];
+  exploit_available?: boolean;
+  fix_command?: string;
+  cwe_ids?: string[];
+};
+
+export type FileHealth = {
+  file_path: string;
+  component_key: string;
+  measures: FileMeasures;
+  issues: DeveloperIssue[];
+};
+
+export type QualityGateCondition = {
+  metric: string;
+  status: string;
+  actual: string;
+  expected: string;
+};
+
+export type QualityGateStatus = {
+  status: string;
+  conditions: QualityGateCondition[];
+};
+
+export type SonarMetrics = {
+  coverage?: string;
+  bugs?: string;
+  vulnerabilities?: string;
+  code_smells?: string;
+  ncloc?: string;
+  duplicated_lines_density?: string;
+  sqale_index?: string;
+};
+
+export type PortfolioProject = {
+  project_id: string;
+  name: string;
+  risk_score: number;
+  total_findings: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  tools: string[];
+  quality_gate_status?: string;
+  sonar_metrics?: SonarMetrics;
+  last_scan_state?: string;
+  last_scan_id?: string;
+  last_scan_time?: string;
+};
+
+export type PortfolioOverview = {
+  total_projects: number;
+  total_findings: number;
+  severity: SeveritySummary;
+  projects: PortfolioProject[];
+};
+
+export type PortfolioTrend = {
+  month: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  total: number;
+  coverage_avg?: number;
+};
+
+export type PortfolioTrendsResponse = {
+  trends: PortfolioTrend[];
+  months: number;
+};
+
+export type DeveloperReportSummary = {
+  total_files: number;
+  files_with_issues: number;
+  total_issues: number;
+};
+
+export type DeveloperReport = {
+  project_id: string;
+  scan_id: string;
+  quality_gate: QualityGateStatus;
+  files: FileHealth[];
+  summary: DeveloperReportSummary;
 };
 
 // Backend stage IDs (snake_case) - used in API calls
@@ -159,6 +282,15 @@ export type Finding = {
   finding_type?: string;
   rule_name?: string;
   language?: string;
+  // Developer-friendly fields
+  cvss_score?: number;
+  cvss_severity?: string;
+  package_version?: string;
+  fixed_version?: string;
+  references?: string[];
+  exploit_available?: boolean;
+  fix_command?: string;
+  cwe_ids?: string[];
 };
 
 // Compliance Mapping Types
@@ -281,6 +413,9 @@ export type IssueResponse = {
   rule_name?: string;
   language?: string;
   git_url?: string | null;
+  sonar_status?: string;
+  sonar_resolution?: string;
+  sonar_url?: string;
 };
 
 export type IssueAssignPayload = {
@@ -466,6 +601,43 @@ export type AccessChange = {
   beforeValue?: string;
   afterValue?: string;
   changedAt: string;
+};
+
+export type PortfolioToolEntry = {
+  tool_name: string;
+  total_findings: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  parse_status: string;
+  last_scan_at: string | null;
+  sonar_metrics?: SonarMetrics;
+  quality_gate?: {
+    status: string;
+    conditions: QualityGateCondition[];
+  };
+};
+
+export type PortfolioProjectToolDetail = {
+  project_id: string;
+  project_name: string;
+  tools: PortfolioToolEntry[];
+};
+
+export type TeamWorkloadDeveloper = {
+  username: string;
+  total_issues: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+};
+
+export type TeamWorkloadResponse = {
+  developers: TeamWorkloadDeveloper[];
+  unassigned: SeveritySummary & { total: number };
 };
 
 export type CurrentUser = {

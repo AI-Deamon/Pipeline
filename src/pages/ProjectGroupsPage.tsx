@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { api } from '../services/api';
 import type { ProjectGroup, ProjectGroupDetail } from '../types';
 import { Plus, Folder, Trash2, RefreshCw, Sparkles } from 'lucide-react';
@@ -18,6 +18,17 @@ const ProjectGroupsPage = () => {
   const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Mirrors selectedGroup's id but read synchronously inside async handlers below,
+  // instead of the `selectedGroup` closure captured at the moment the button was
+  // clicked (finding #100). Without this, switching to a different group while an
+  // auto-assign/refresh request for the previous group is still in flight lets that
+  // stale closure's `selectedGroup?.group_id === groupId` check still pass when the
+  // request resolves, silently overwriting the newly-selected group's displayed data.
+  const selectedGroupIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedGroupIdRef.current = selectedGroup?.group_id ?? null;
+  }, [selectedGroup]);
 
   const loadGroups = useCallback(async () => {
     setLoading(true);
@@ -104,7 +115,7 @@ const ProjectGroupsPage = () => {
     setAutoAssigning(groupId);
     try {
       const result = await api.projectGroups.autoAssign(groupId);
-      if (selectedGroup?.group_id === groupId) {
+      if (selectedGroupIdRef.current === groupId) {
         handleViewGroup(groupId);
       }
       addToast({ type: 'success', title: 'Auto-Assigned', message: `Auto-assigned ${result.assigned_count} scans` });
@@ -119,7 +130,7 @@ const ProjectGroupsPage = () => {
     setRefreshing(groupId);
     try {
       const result = await api.projectGroups.refresh(groupId);
-      if (selectedGroup?.group_id === groupId) {
+      if (selectedGroupIdRef.current === groupId) {
         handleViewGroup(groupId);
       }
       addToast({ type: 'success', title: 'Refreshed', message: result.message || `Group refreshed (${result.refreshed_count} projects)` });

@@ -31,15 +31,23 @@ const STATUS_OPTIONS: IssueStatus[] = [
 
 const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low'] as const;
 
+const FINDING_TYPE_OPTIONS = [
+  { value: 'BUG', label: 'Bug' },
+  { value: 'VULNERABILITY', label: 'Vulnerability' },
+  { value: 'CODE_SMELL', label: 'Code Smell' },
+  { value: 'SECURITY_HOTSPOT', label: 'Hotspot' },
+];
+
 const IssuesTriagePage = () => {
   const { canAssignIssues, isAdmin } = useRbac();
   const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(['open']);
   const [severityFilter, setSeverityFilter] = useState<string[]>([]);
+  const [findingTypeFilter, setFindingTypeFilter] = useState<string[]>([]);
   const [toolFilter, setToolFilter] = useState<string[]>([]);
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
-  const { data: projects = [], isLoading: projectsLoading } = useQuery({
+  const { data: projects = [], isLoading: projectsLoading, error: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ['projects'],
     queryFn: api.projects.list,
     refetchInterval: 60_000,
@@ -124,6 +132,7 @@ const IssuesTriagePage = () => {
       (i) =>
         statusFilter.includes(i.status) &&
         (severityFilter.length === 0 || severityFilter.includes(i.severity)) &&
+        (findingTypeFilter.length === 0 || (i.finding_type && findingTypeFilter.includes(i.finding_type))) &&
         (toolFilter.length === 0 || toolFilter.includes(i.tool_name)),
     );
     return filtered.sort((a, b) => {
@@ -131,7 +140,7 @@ const IssuesTriagePage = () => {
       if (sev !== 0) return sev;
       return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
     });
-  }, [allIssues, statusFilter, severityFilter, toolFilter]);
+  }, [allIssues, statusFilter, severityFilter, toolFilter, findingTypeFilter]);
 
   const groupedByProject = useMemo(() => {
     const grouped = new Map<string, IssueResponse[]>();
@@ -147,6 +156,15 @@ const IssuesTriagePage = () => {
     projectsLoading ||
     projectOverviews.some((q) => q.isLoading) ||
     toolQueries.some((q) => q.isLoading);
+
+  // Previously a failed fetch fell straight through to "no issues match your
+  // filters" — indistinguishable from a genuinely clean project (finding #60). An
+  // admin could see an empty triage list and assume nothing needed attention when
+  // the data simply never loaded.
+  const hasFetchError =
+    !!projectsError ||
+    projectOverviews.some((q) => q.isError) ||
+    toolQueries.some((q) => q.isError);
 
   if (!canAssignIssues && !isAdmin) {
     return <Navigate to="/my-issues" replace />;
@@ -230,6 +248,33 @@ const IssuesTriagePage = () => {
             ))}
           </div>
         </div>
+        {FINDING_TYPE_OPTIONS.length > 0 && (
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">Type</div>
+            <div className="flex flex-wrap gap-1.5">
+              {FINDING_TYPE_OPTIONS.map((ft) => (
+                <button
+                  key={ft.value}
+                  type="button"
+                  onClick={() =>
+                    setFindingTypeFilter((prev) =>
+                      prev.includes(ft.value)
+                        ? prev.filter((v) => v !== ft.value)
+                        : [...prev, ft.value],
+                    )
+                  }
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    findingTypeFilter.includes(ft.value)
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                  }`}
+                >
+                  {ft.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {availableTools.length > 0 && (
           <div>
             <div className="text-xs font-medium text-slate-500 mb-1.5">Tool</div>
@@ -252,12 +297,13 @@ const IssuesTriagePage = () => {
             </div>
           </div>
         )}
-        {(statusFilter.length !== 1 || statusFilter[0] !== 'open' || severityFilter.length > 0 || toolFilter.length > 0) && (
+        {(statusFilter.length !== 1 || statusFilter[0] !== 'open' || severityFilter.length > 0 || findingTypeFilter.length > 0 || toolFilter.length > 0) && (
           <button
             type="button"
             onClick={() => {
               setStatusFilter(['open']);
               setSeverityFilter([]);
+              setFindingTypeFilter([]);
               setToolFilter([]);
             }}
             className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
@@ -269,6 +315,13 @@ const IssuesTriagePage = () => {
 
       {isLoading && sortedAndFiltered.length === 0 ? (
         <PageSkeleton type="dashboard" />
+      ) : hasFetchError && sortedAndFiltered.length === 0 ? (
+        <EmptyState
+          variant="error"
+          title="Couldn't load issues"
+          message="Something went wrong fetching project or issue data."
+          action={{ label: "Retry", onClick: () => refetchProjects() }}
+        />
       ) : projects.length === 0 ? (
         <EmptyState
           variant="empty"

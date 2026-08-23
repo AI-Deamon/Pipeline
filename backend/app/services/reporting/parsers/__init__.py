@@ -13,6 +13,7 @@ from .sonar import (
     create_sonar_report_link,
     get_sonar_issues_link,
     fetch_sonar_issues,
+    fetch_sonar_hotspots,
 )
 from .npm import parse_npm_audit_report
 
@@ -32,5 +33,6 @@ __all__ = [
     "create_sonar_report_link",
     "get_sonar_issues_link",
     "fetch_sonar_issues",
+    "fetch_sonar_hotspots",
     "parse_npm_audit_report",
 ]

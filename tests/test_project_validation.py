@@ -65,6 +65,42 @@ class TestProjectCreateValidation:
             ProjectCreate(name="p", unknown_field="value")
 
 
+class TestProjectUpdateValidation:
+    """Regression tests for finding #76: ProjectUpdate previously redeclared these
+    fields as bare Optional[str] with zero validators, so a PATCH with a malformed
+    value succeeded where the equivalent POST would 422."""
+
+    def test_invalid_ip_rejected(self):
+        with pytest.raises(ValidationError, match="Target IP"):
+            ProjectUpdate(target_ip="not-an-ip; whatever")
+
+    def test_valid_ip_accepted(self):
+        u = ProjectUpdate(target_ip="10.0.0.1")
+        assert u.target_ip == "10.0.0.1"
+
+    def test_git_url_without_protocol_rejected(self):
+        with pytest.raises(ValidationError, match="Git URL must start with http"):
+            ProjectUpdate(git_url="example.com/repo")
+
+    def test_target_url_without_protocol_rejected(self):
+        with pytest.raises(ValidationError, match="Target URL must start with http"):
+            ProjectUpdate(target_url="example.com")
+
+    def test_empty_name_rejected(self):
+        with pytest.raises(ValidationError, match="Name cannot be empty"):
+            ProjectUpdate(name="")
+
+    def test_name_omitted_entirely_is_fine(self):
+        # PATCH semantics: omitted fields must stay None/untouched, not error.
+        u = ProjectUpdate(target_ip="10.0.0.1")
+        assert u.name is None
+
+    def test_valid_update_accepted(self):
+        u = ProjectUpdate(name="Renamed", target_ip="10.0.0.1", target_url="https://example.com")
+        assert u.name == "Renamed"
+        assert u.target_ip == "10.0.0.1"
+
+
 class TestProjectGroupCreateValidation:
     def test_empty_group_name_rejected(self):
         with pytest.raises(ValidationError, match="Name cannot be empty"):

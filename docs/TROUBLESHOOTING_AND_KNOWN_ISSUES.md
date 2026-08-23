@@ -13,7 +13,9 @@
 5. [Database Issues](#database-issues)
 6. [Jenkins Integration Issues](#jenkins-integration-issues)
 7. [Authentication Issues](#authentication-issues)
-8. [Build & Deployment Issues](#build--deployment-issues)
+8. [Celery / Background Task Issues](#celery--background-task-issues)
+9. [Projects API Issues](#projects-api-issues)
+10. [Build & Deployment Issues](#build--deployment-issues)
 
 ---
 
@@ -491,32 +493,123 @@ curl -H "X-API-Key: your_key" http://localhost:8000/api/v1/projects
 
 ---
 
-### 2. Token Expiration Not Handled
+### 2. Auth Cookie Behavior (Phase 1 — httpOnly Cookies)
+
+**Symptom**: Users report repeated logins or session loss despite tokens being valid.
+
+**Background**: Phase 1 moved JWT tokens from `localStorage` to httpOnly cookies (`SameSite=Lax`). The browser now sends cookies automatically with each request — the frontend no longer reads or injects tokens manually.
+
+**Key behaviors**:
+- `access_token` cookie: httpOnly, 1hr max age, `SameSite=Lax`, `Path=/`
+- `refresh_token` cookie: httpOnly, session-only (browser close destroys it)
+- Login response still returns `access_token` in JSON body during the 24hr migration grace period
+- `POST /auth/refresh` issues a new `access_token` cookie when the refresh cookie is valid
+- 24hr grace period: if no `access_token` cookie is present, the request interceptor falls back to `sessionStorage` (with deprecation warning in console)
+
+**Debugging**:
+```bash
+# Verify cookie is set on login
+curl -v -X POST http://localhost:8000/api/v1/auth/login \
+  -d "username=admin&password=admin123" 2>&1 | grep -i "set-cookie"
+
+# Expected: Set-Cookie: access_token=eyJ...; HttpOnly; Max-Age=3600; Path=/; SameSite=Lax
+# Expected: Set-Cookie: refresh_token=eyJ...; HttpOnly; Path=/; SameSite=Lax
+```
+
+**Common issues**:
+- **Secure flag in dev**: `COOKIE_SECURE` is `False` in `ENV=test`/`ENV=dev` but `True` in `ENV=staging`. If testing locally with HTTPS, set `COOKIE_SECURE=True` in `.env`.
+- **SameSite=Lax**: Cookies are not sent on cross-origin `POST` requests. This is by design — API calls must be same-origin or proxied through nginx.
+- **Refresh loop**: If the refresh token cookie is missing (browser cleared it), `POST /auth/refresh` returns 401. The frontend redirects to login.
+
+---
+
+### 3. Token Expiration Handling
 
 **Symptom**: User suddenly logged out during active session.
 
-**Cause**: No token refresh mechanism implemented.
+**Status (Phase 1 resolved)**: `POST /auth/refresh` endpoint now issues new access token cookies. The frontend's `useAuth` hook calls this automatically. Access tokens expire after 1 hour; refresh tokens are session-only (browser close destroys them).
 
-**Future Fix Required**:
-```typescript
-// TODO: Implement token refresh
-api.interceptors.response.use(
-  response => response,
-  async error => {
-    if (error.response?.status === 401) {
-      // Attempt token refresh
-      await refreshToken();
-      return retryOriginalRequest(error);
-    }
-    return Promise.reject(error);
-  }
-);
+**If still seeing premature logouts**:
+- Check that `access_token` cookie `Max-Age` is set (3600s = 1hr)
+- Verify `refresh_token` cookie is present (session-only — browser close destroys it)
+- Check browser cookie settings: third-party cookies may be blocked (same-origin only)
+
+---
+
+## Celery / Background Task Issues
+
+### 1. Celery Task Timeouts (Phase 1)
+
+**Symptom**: Celery worker stuck on a hung task, not picking up new work.
+
+**Cause**: No time limits configured — tasks can run indefinitely.
+
+**Configuration (Phase 1 applied)**:
+```python
+# backend/app/core/celery_app.py
+celery_app.conf.update(
+    task_time_limit=600,        # 10 minute hard limit (SIGKILL)
+    task_soft_time_limit=540,   # 9 minute soft limit (SoftTimeLimitExceeded)
+)
 ```
 
-**Current Workaround**:
-- Use long-lived tokens in development
-- Implement session persistence
-- Clear error messages on auth failure
+**Debugging**:
+```bash
+# Check if celery worker is alive
+docker compose exec celery_worker celery -A app.core.celery_app inspect ping
+
+# Check active tasks
+docker compose exec celery_worker celery -A app.core.celery_app inspect active
+
+# Check reserved tasks (queued but not started)
+docker compose exec celery_worker celery -A app.core.celery_app inspect reserved
+```
+
+**If tasks still hang**:
+- Per-task override is supported: `@celery_app.task(time_limit=300)` for shorter limits
+- Check that `celery_worker` was rebuilt after config changes: `docker compose up -d --build --no-deps celery_worker`
+
+---
+
+## Projects API Issues
+
+### 1. Paginated Response Shape (Phase 1)
+
+**Symptom**: Frontend shows empty project list or "No projects found" despite projects existing.
+
+**Cause**: `GET /projects` now returns a paginated envelope instead of a bare array.
+
+**Old response** (pre-Phase 1):
+```json
+[{ "project_id": "proj-1", "name": "..." }, ...]
+```
+
+**New response** (Phase 1+):
+```json
+{
+  "items": [{ "project_id": "proj-1", "name": "..." }, ...],
+  "total": 50,
+  "page": 1,
+  "page_size": 25,
+  "total_pages": 2
+}
+```
+
+**Debugging**:
+```bash
+# Verify pagination metadata
+curl -s http://localhost:8000/api/v1/projects?page=1&page_size=10 \
+  -H "Authorization: Bearer $TOKEN" | jq '.total, .page, .total_pages'
+
+# Test different page sizes (clamped 1..100)
+curl -s "http://localhost:8000/api/v1/projects?page=2&page_size=5" \
+  -H "Authorization: Bearer $TOKEN" | jq '.items | length'
+```
+
+**Common issues**:
+- **page_size clamped**: Values outside 1..100 are clamped to nearest boundary
+- **Default page_size**: 25 items per page
+- **Frontend handles both shapes**: `api.projects.list` reads `.items` if present, falls back to bare array for backward compatibility
 
 ---
 
@@ -740,5 +833,5 @@ docker compose exec backend nslookup redis
 
 ---
 
-*Last Updated: 2026-05-23*
-*Document Version: 1.1*
+*Last Updated: 2026-07-13*
+*Document Version: 1.2*

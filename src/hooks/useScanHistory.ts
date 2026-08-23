@@ -9,7 +9,14 @@ export interface ScanInfo {
 
 export function useScanHistory(projectId: string | undefined) {
   const { data: scans, isLoading } = useQuery({
-    queryKey: ['scans', projectId],
+    // Finding #121: this and ScanHistoryPage.tsx both fetch the same
+    // `/projects/{id}/scans` endpoint but previously used different query keys
+    // ('scans' vs 'scan-history'), so they held two independent, unsynchronized
+    // cache entries. useScanReset's cancel/reset/force-unlock mutations only
+    // invalidate 'scan-history' — this page's data went stale after any of those
+    // actions until its own unrelated refetch happened to fire. Matching the key
+    // means both consumers share one cache entry and one invalidation.
+    queryKey: ['scan-history', projectId],
     queryFn: () => api.scans.getHistory(projectId!),
     select: (data: ScanInfo[]) =>
       data

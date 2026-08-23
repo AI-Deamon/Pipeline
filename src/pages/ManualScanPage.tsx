@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Play, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
-import { FIXED_STAGES, STAGE_DISPLAY_NAMES, STAGE_DEPENDENCIES, type StageId } from '../types';
+import { FIXED_STAGES, STAGE_DISPLAY_NAMES, type StageId } from '../types';
+import { computeAutoStages } from '../utils/scanStages';
 import { PageSkeleton } from '../components/PageSkeleton';
 import { ErrorDisplay } from '../components/ui/ErrorDisplay';
 
@@ -10,8 +11,12 @@ const ManualScanPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [project, setProject] = useState<{ name: string; git_url: string; branch: string; target_ip?: string; target_url?: string; project_id: string } | null>(null);
-  const [selectedStages, setSelectedStages] = useState<StageId[]>([]);
-  const [autoStages, setAutoStages] = useState<Set<StageId>>(new Set());
+  const [manualStages, setManualStages] = useState<StageId[]>([]);
+  const autoStages = useMemo(() => computeAutoStages(manualStages), [manualStages]);
+  const selectedStages = useMemo(
+    () => FIXED_STAGES.filter(s => manualStages.includes(s) || autoStages.has(s)),
+    [manualStages, autoStages]
+  );
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isProjectLoading, setIsProjectLoading] = useState(true);
@@ -35,51 +40,15 @@ const ManualScanPage = () => {
   }, [projectId]);
 
   const handleStageToggle = (stage: StageId) => {
-    setSelectedStages(prev => {
-      const result = [...prev];
-      if (prev.includes(stage)) {
-        const dependents = Object.entries(STAGE_DEPENDENCIES)
-          .filter(([, deps]) => (deps as StageId[]).includes(stage))
-          .map(([s]) => s as StageId);
-        removeDependents(dependents);
-        return prev.filter(s => s !== stage && !dependents.includes(s));
-      }
-      const deps = (STAGE_DEPENDENCIES[stage] || []) as StageId[];
-      if (!result.includes(stage)) result.push(stage);
-      addDependencies(deps, prev);
-      for (const dep of deps) {
-        if (!result.includes(dep)) result.push(dep);
-      }
-      return result;
-    });
-  };
-
-  const removeDependents = (dependents: StageId[]) => {
-    setAutoStages(prevAuto => {
-      const next = new Set(prevAuto);
-      dependents.forEach(s => next.delete(s));
-      return next;
-    });
-  };
-
-  const addDependencies = (deps: StageId[], prev: StageId[]) => {
-    setAutoStages(prevAuto => {
-      const next = new Set(prevAuto);
-      for (const dep of deps) {
-        if (!prev.includes(dep)) next.add(dep);
-      }
-      return next;
-    });
+    // Pure toggle of the user's own picks only — no nested setState side effects.
+    // `autoStages`/`selectedStages` recompute automatically from this via useMemo.
+    setManualStages(prev =>
+      prev.includes(stage) ? prev.filter(s => s !== stage) : [...prev, stage]
+    );
   };
 
   const handleToggleAll = () => {
-    if (selectedStages.length === FIXED_STAGES.length) {
-      setSelectedStages([]);
-      setAutoStages(new Set());
-    } else {
-      setSelectedStages([...FIXED_STAGES]);
-      setAutoStages(new Set());
-    }
+    setManualStages(selectedStages.length === FIXED_STAGES.length ? [] : [...FIXED_STAGES]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

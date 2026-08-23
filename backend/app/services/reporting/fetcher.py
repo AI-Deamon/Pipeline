@@ -16,12 +16,41 @@ from app.services.reporting.parsers import (
     parse_nmap_findings,
     create_sonar_report_link,
     fetch_sonar_issues,
+    fetch_sonar_hotspots,
     calculate_severity_summary,
     calculate_expires_at,
     SecurityFinding,
 )
+from app.services.reporting.parsers.base import ParseError
+from app.services.reporting.parsers.sonar import SonarAuthError, fetch_sonar_quality_gate, fetch_sonar_project_measures
+from app.models.db_models import ScanMetricDB
 
 logger = logging.getLogger(__name__)
+
+# Finding #27: raw_report is a plain unbounded String column — a single
+# malformed/huge tool report (e.g. a runaway ZAP or Trivy scan) could store
+# tens of MB per row with no guard, bloating the table and slow-loading the
+# download endpoint. Findings/severity data (the fields actually used by the
+# app) are parsed out separately before this cap is applied, so capping only
+# affects the raw-download convenience endpoint, not app functionality.
+_RAW_REPORT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_RAW_REPORT_TRUNCATION_NOTICE = "\n... [truncated: raw report exceeded 5MB storage limit]"
+
+
+def _cap_raw_report(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    encoded = raw.encode("utf-8", errors="ignore")
+    if len(encoded) <= _RAW_REPORT_MAX_BYTES:
+        return raw
+    notice = _RAW_REPORT_TRUNCATION_NOTICE.encode("utf-8")
+    truncated = encoded[: _RAW_REPORT_MAX_BYTES - len(notice)]
+    logger.warning(
+        "raw_report exceeded %d bytes (%d); truncating before storage",
+        _RAW_REPORT_MAX_BYTES,
+        len(encoded),
+    )
+    return truncated.decode("utf-8", errors="ignore") + _RAW_REPORT_TRUNCATION_NOTICE
 
 
 TOOL_PARSERS = {
@@ -84,9 +113,43 @@ class ReportFetcher:
         raw_json = await self.fetch_artifact(filename)
         if not raw_json:
             logger.info(f"No report found for {tool_name} ({filename})")
-            return None
+            report = ScanReportDB(
+                scan_id=scan_id,
+                project_id=project_id,
+                tool_name=tool_name,
+                severity_summary={},
+                findings=[],
+                raw_report=None,
+                report_url=f"{self.artifacts_base}/{filename}",
+                created_at=datetime.now(timezone.utc),
+                expires_at=calculate_expires_at(90),
+                parse_status="fetch_failed",
+            )
+            db = SessionLocal()
+            try:
+                db.query(ScanReportDB).filter(
+                    ScanReportDB.scan_id == scan_id,
+                    ScanReportDB.tool_name == tool_name,
+                ).delete(synchronize_session=False)
+                db.add(report)
+                db.commit()
+                db.refresh(report)
+                return report
+            except Exception as e:
+                db.rollback()
+                logger.error("Error storing fetch_failed report for %s: %s", tool_name, e)
+                return None
+            finally:
+                db.close()
 
-        findings = self.parse_tool_report(tool_name, raw_json)
+        parse_status = "ok"
+        findings = []
+        try:
+            findings = self.parse_tool_report(tool_name, raw_json)
+        except ParseError as e:
+            parse_status = "parse_error"
+            logger.error("Parse error for %s: %s", tool_name, e)
+
         severity_summary = calculate_severity_summary(findings)
 
         findings_dict = [f.to_dict() for f in findings]
@@ -97,14 +160,20 @@ class ReportFetcher:
             tool_name=tool_name,
             severity_summary=severity_summary,
             findings=findings_dict,
-            raw_report=raw_json,
+            raw_report=_cap_raw_report(raw_json),
             report_url=f"{self.artifacts_base}/{filename}",
             created_at=datetime.now(timezone.utc),
             expires_at=calculate_expires_at(90),
+            parse_status=parse_status,
         )
 
         db = SessionLocal()
         try:
+            # Upsert: delete existing row for this (scan_id, tool_name) before inserting
+            db.query(ScanReportDB).filter(
+                ScanReportDB.scan_id == scan_id,
+                ScanReportDB.tool_name == tool_name,
+            ).delete(synchronize_session=False)
             db.add(report)
             db.commit()
             db.refresh(report)
@@ -120,13 +189,31 @@ class ReportFetcher:
     async def create_sonar_link(
         self, scan_id: str, project_id: str, sonar_key: Optional[str]
     ) -> Optional[ScanReportDB]:
-        """Create a SonarQube report by fetching actual issues via API"""
+        """Create a SonarQube report by fetching actual issues via API, plus metrics & quality gate."""
         if not sonar_key:
             return None
 
-        # Fetch actual issues from SonarQube API
-        sonar_findings, raw_json = await fetch_sonar_issues(sonar_key)
-        severity_summary = calculate_severity_summary(sonar_findings)
+        parse_status = "ok"
+        try:
+            sonar_findings, raw_json = await fetch_sonar_issues(sonar_key)
+        except SonarAuthError:
+            parse_status = "auth_error"
+            sonar_findings, raw_json = [], ""
+
+        try:
+            hotspot_findings, raw_hotspots_json = await fetch_sonar_hotspots(sonar_key)
+        except SonarAuthError:
+            parse_status = "auth_error"
+            hotspot_findings, raw_hotspots_json = [], ""
+
+        all_findings = sonar_findings + hotspot_findings
+
+        severity_summary = calculate_severity_summary(all_findings)
+
+        # Combine raw JSON payloads
+        combined_raw = raw_json or ""
+        if raw_hotspots_json:
+            combined_raw = combined_raw + "\n--- HOTSPOTS ---\n" + raw_hotspots_json if combined_raw else raw_hotspots_json
 
         report_url = create_sonar_report_link(sonar_key)
 
@@ -135,19 +222,32 @@ class ReportFetcher:
             project_id=project_id,
             tool_name="sonar",
             severity_summary=severity_summary,
-            findings=[f.to_dict() for f in sonar_findings],
-            raw_report=raw_json or None,
+            findings=[f.to_dict() for f in all_findings],
+            raw_report=_cap_raw_report(combined_raw or None),
             report_url=report_url,
             created_at=datetime.now(timezone.utc),
             expires_at=calculate_expires_at(90),
+            parse_status=parse_status,
         )
 
         db = SessionLocal()
         try:
+            # Upsert: delete existing row for this (scan_id, tool_name) before inserting,
+            # matching fetch_and_process_tool — otherwise a second Sonar fetch for the
+            # same scan (e.g. via /retry-reports) hits the unique (scan_id, tool_name)
+            # constraint and raises IntegrityError instead of replacing the old report.
+            db.query(ScanReportDB).filter(
+                ScanReportDB.scan_id == scan_id,
+                ScanReportDB.tool_name == "sonar",
+            ).delete(synchronize_session=False)
             db.add(report)
             db.commit()
             db.refresh(report)
-            logger.info(f"Stored SonarQube report with {len(sonar_findings)} findings")
+            logger.info(f"Stored SonarQube report with {len(all_findings)} findings ({len(sonar_findings)} issues, {len(hotspot_findings)} hotspots)")
+
+            # Persist Sonar metrics (measures + quality gate) as a ScanMetricDB row
+            await self._store_sonar_metrics(scan_id, project_id, sonar_key, db)
+
             return report
         except Exception as e:
             db.rollback()
@@ -155,6 +255,42 @@ class ReportFetcher:
             return None
         finally:
             db.close()
+
+    async def _store_sonar_metrics(
+        self, scan_id: str, project_id: str, sonar_key: str, db
+    ) -> None:
+        """Fetch and persist SonarQube project-level measures and quality gate."""
+        try:
+            measures = await fetch_sonar_project_measures(sonar_key)
+        except SonarAuthError:
+            logger.warning("Sonar auth error fetching project measures for %s", sonar_key)
+            measures = {}
+
+        try:
+            quality_gate = await fetch_sonar_quality_gate(sonar_key)
+        except SonarAuthError:
+            logger.warning("Sonar auth error fetching quality gate for %s", sonar_key)
+            quality_gate = {"status": "UNKNOWN", "conditions": []}
+
+        metric_row = ScanMetricDB(
+            scan_id=scan_id,
+            project_id=project_id,
+            tool_name="sonar",
+            metrics=measures,
+            quality_gate=quality_gate,
+            created_at=datetime.now(timezone.utc),
+        )
+
+        db.query(ScanMetricDB).filter(
+            ScanMetricDB.scan_id == scan_id,
+            ScanMetricDB.tool_name == "sonar",
+        ).delete(synchronize_session=False)
+        db.add(metric_row)
+        db.commit()
+        logger.info(
+            "Stored Sonar metrics for scan %s: %s quality gate=%s",
+            scan_id, measures, quality_gate.get("status"),
+        )
 
     def _get_active_tools(
         self,

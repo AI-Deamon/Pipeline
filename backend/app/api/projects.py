@@ -1,9 +1,11 @@
 import uuid
 import shutil
+import math
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, Depends, status, Request
+from pydantic import BaseModel
 from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
@@ -11,7 +13,7 @@ from app.core.db import get_db
 from app.core.auth import get_current_user, get_rbac
 from app.models.db_models import ProjectDB, ScanDB, UserDB, ProjectAssignmentDB
 from app.core.config import settings
-from app.api.scans.utils import _expire_scan_if_timed_out
+from app.api.scans.utils import _expire_scan_if_timed_out, ACTIVE_STATES as _ACTIVE_SCAN_STATES
 from app.state.scan_state import ScanState
 from app.services.rbac_service import get_rbac_service
 router = APIRouter()
@@ -19,11 +21,9 @@ router = APIRouter()
 _PROJECT_NOT_FOUND = "Project not found"
 _GITHUB_COM = "github.com"
 
-ACTIVE_STATES = {
-    ScanState.CREATED.value,
-    ScanState.QUEUED.value,
-    ScanState.RUNNING.value,
-}
+# Single source of truth for active-scan classification (see app.api.scans.utils).
+# ScanState is a str Enum, so string values from last_scan_state hash/compare equal.
+ACTIVE_STATES = _ACTIVE_SCAN_STATES
 
 
 def _is_api_key_auth(request: Request) -> bool:
@@ -53,7 +53,8 @@ def _filter_projects_by_user(query, request: Request, current_user, db: Session 
     return query
 
 
-def _get_last_scan_map(db: Session) -> dict[str, str]:
+def _get_last_scan_map(db: Session) -> dict[str, ScanDB]:
+    """Return a map of project_id → latest ScanDB object (batch query, no N+1)."""
     subq = (
         db.query(
             ScanDB.project_id,
@@ -63,7 +64,7 @@ def _get_last_scan_map(db: Session) -> dict[str, str]:
         .subquery()
     )
     rows = (
-        db.query(ScanDB.project_id, ScanDB.scan_id)
+        db.query(ScanDB)
         .join(
             subq,
             and_(
@@ -73,42 +74,50 @@ def _get_last_scan_map(db: Session) -> dict[str, str]:
         )
         .all()
     )
-    return {row.project_id: row.scan_id for row in rows}
+    return {row.project_id: row for row in rows}
 
 
 def _expire_active_scans(db: Session, db_projects: list) -> bool:
+    """Batch expire timed-out scans: single query for all active project IDs."""
+    active_project_ids = [
+        p.project_id for p in db_projects if p.last_scan_state in ACTIVE_STATES
+    ]
+    if not active_project_ids:
+        return False
+
+    active_scans = (
+        db.query(ScanDB)
+        .filter(
+            ScanDB.project_id.in_(active_project_ids),
+            ScanDB.state.in_([ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]),
+        )
+        .all()
+    )
+
     now = datetime.now(timezone.utc)
     any_expired = False
-    for p in db_projects:
-        if p.last_scan_state not in ACTIVE_STATES:
-            continue
-        active_scan = (
-            db.query(ScanDB)
-            .filter(
-                ScanDB.project_id == p.project_id,
-                ScanDB.state.in_(
-                    [ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]
-                ),
-            )
-            .first()
-        )
-        if active_scan and _expire_scan_if_timed_out(db, active_scan, p, now, auto_commit=False):
+    scan_by_project = {s.project_id: s for s in active_scans}
+    project_map = {p.project_id: p for p in db_projects}
+
+    for pid in active_project_ids:
+        active_scan = scan_by_project.get(pid)
+        if active_scan and _expire_scan_if_timed_out(db, active_scan, project_map[pid], now, auto_commit=False):
             any_expired = True
     return any_expired
 
 
-def _build_project_list(db: Session, db_projects: list, last_scan_map: dict) -> list:
+def _build_project_list(db: Session, db_projects: list, last_scan_map: dict[str, ScanDB]) -> list:
+    """Build project list using pre-fetched scan map (no N+1)."""
     projects = []
     for p in db_projects:
-        last_scan_id = last_scan_map.get(p.project_id)
+        last_scan = last_scan_map.get(p.project_id)
+        last_scan_id = last_scan.scan_id if last_scan else None
         last_scan_time = None
-        if last_scan_id:
-            last_scan = db.query(ScanDB).filter(ScanDB.scan_id == last_scan_id).first()
-            if last_scan and last_scan.created_at:
-                dt = last_scan.created_at
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                last_scan_time = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        if last_scan and last_scan.created_at:
+            dt = last_scan.created_at
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            last_scan_time = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         projects.append(
             {
                 "project_id": p.project_id,
@@ -121,19 +130,54 @@ def _build_project_list(db: Session, db_projects: list, last_scan_map: dict) -> 
     return projects
 
 
-@router.get("/projects", response_model=list[dict])
-def list_projects(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
+class PaginatedProjectsResponse(BaseModel):
+    items: list[dict]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+@router.get("/projects", response_model=PaginatedProjectsResponse)
+def list_projects(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    page: int = 1,
+    page_size: int = 25,
+):
+    page_size = min(max(page_size, 1), 100)  # Clamp to 1..100
+    offset = (page - 1) * page_size
+
+    # Count total (before pagination)
+    base_query = _filter_projects_by_user(db.query(ProjectDB), request, current_user)
+    total = base_query.count()
+
+    # Paginate
+    db_projects = base_query.offset(offset).limit(page_size).all()
+
     last_scan_map = _get_last_scan_map(db)
-    db_projects = _filter_projects_by_user(db.query(ProjectDB), request, current_user).all()
 
     if _expire_active_scans(db, db_projects):
         db.commit()
 
-    return _build_project_list(db, db_projects, last_scan_map)
+    items = _build_project_list(db, db_projects, last_scan_map)
+    total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return PaginatedProjectsResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("/projects", response_model=ProjectResponse)
 def create_project(project: ProjectCreate, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)]):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to create projects")
     project_id = str(uuid.uuid4())
     user_id = current_user.id if hasattr(current_user, 'id') else None
     db_project = ProjectDB(
@@ -193,6 +237,10 @@ def update_project(
     if not db_project:
         raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project(project_id):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this project")
+
     if db_project.last_scan_state in ACTIVE_STATES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -214,6 +262,7 @@ def update_project(
     )
     project_data = dict(db_project.__dict__)
     project_data.pop("_sa_instance_state", None)
+    project_data["branch"] = db_project.branch or "main"
     project_data["last_scan_state"] = db_project.last_scan_state
     project_data["last_scan_id"] = last_scan.scan_id if last_scan else None
     return project_data
@@ -225,6 +274,11 @@ def delete_project(project_id: str, request: Request, db: Annotated[Session, Dep
     db_project = _filter_projects_by_user(db.query(ProjectDB), request, current_user).filter(ProjectDB.project_id == project_id).first()
     if not db_project:
         raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project(project_id):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this project")
+
     scans = db.query(ScanDB).filter(ScanDB.project_id == project_id).all()
     scan_ids = [scan.scan_id for scan in scans]
     for scan in scans:

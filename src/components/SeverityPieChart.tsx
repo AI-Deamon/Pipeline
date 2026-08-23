@@ -1,29 +1,36 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { SEVERITY_HEX } from '../utils/severity';
 
 interface SeverityPieChartProps {
   critical: number;
   high: number;
   medium: number;
   low: number;
+  info?: number;
+  onSliceClick?: (severity: string) => void;
 }
 
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: '#dc2626',  // red-600
-  high: '#ea580c',      // orange-600
-  medium: '#ca8a04',    // yellow-600
-  low: '#16a34a',      // green-600
-};
+const SEVERITY_COLORS: Record<string, string> = SEVERITY_HEX;
 
-const SeverityPieChart: React.FC<SeverityPieChartProps> = ({ critical, high, medium, low }) => {
+const SeverityPieChart: React.FC<SeverityPieChartProps> = ({ critical, high, medium, low, info = 0, onSliceClick }) => {
   const data = [
     { name: 'Critical', value: critical },
     { name: 'High', value: high },
     { name: 'Medium', value: medium },
     { name: 'Low', value: low },
+    { name: 'Info', value: info },
   ].filter(item => item.value > 0);
 
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: { cx: number; cy: number; midAngle?: number; innerRadius: number; outerRadius: number; percent?: number; name?: string }) => {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  const handleClick = useCallback((_data: unknown, index: number) => {
+    if (onSliceClick && data[index]) {
+      onSliceClick(data[index].name.toLowerCase());
+    }
+  }, [onSliceClick, data]);
+
+  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: { cx: number; cy: number; midAngle?: number; innerRadius: number; outerRadius: number; percent?: number }) => {
     if (!percent || percent === 0) return null;
     const RADIAN = Math.PI / 180;
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
@@ -31,8 +38,8 @@ const SeverityPieChart: React.FC<SeverityPieChartProps> = ({ critical, high, med
     const y = cy + radius * Math.sin(-(midAngle ?? 0) * RADIAN);
 
     return (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central">
-        {`${name ?? ''} ${(percent * 100).toFixed(0)}%`}
+      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12}>
+        {`${(percent * 100).toFixed(0)}%`}
       </text>
     );
   };
@@ -40,27 +47,35 @@ const SeverityPieChart: React.FC<SeverityPieChartProps> = ({ critical, high, med
   return (
     <div className="w-full">
       <h3 className="text-lg font-semibold text-slate-900 mb-4">Severity Distribution</h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            labelLine={false}
-            label={renderCustomLabel}
-            innerRadius={60}
-            outerRadius={100}
-            dataKey="value"
-            nameKey="name"
-          >
-            {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={SEVERITY_COLORS[entry.name.toLowerCase()]} />
-            ))}
-          </Pie>
-          <Tooltip />
-          <Legend />
-        </PieChart>
-      </ResponsiveContainer>
+      {total === 0 ? (
+        <div className="flex items-center justify-center h-[300px] text-slate-400 text-sm">
+          No severity data available
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              label={renderCustomLabel}
+              innerRadius={60}
+              outerRadius={100}
+              dataKey="value"
+              nameKey="name"
+              style={{ cursor: onSliceClick ? 'pointer' : 'default' }}
+              onClick={handleClick}
+            >
+              {data.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={SEVERITY_COLORS[entry.name.toLowerCase()]} />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => [value, 'Findings']} />
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 };

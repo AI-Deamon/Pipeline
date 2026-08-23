@@ -27,24 +27,69 @@ class ProjectGroupingService:
     MIN_AUTO_ASSIGN_CONFIDENCE = 70
 
     @staticmethod
+    def _first_present(finding: dict, keys: tuple[str, ...]) -> str:
+        """Return the first non-empty value among the candidate keys, normalized.
+
+        Different tool parsers name the same concept differently (e.g. host vs uri vs
+        target; package vs pkg_name vs component; cve vs cve_id). Checking a set of
+        aliases per concept means the same vulnerability from two tools hashes equally
+        instead of being treated as distinct (which previously caused under-dedup).
+        """
+        for key in keys:
+            value = finding.get(key)
+            if value:
+                return str(value).lower().strip()
+        return ""
+
+    @staticmethod
     def _compute_finding_hash(finding: dict) -> str:
         """
         Compute a unique hash for a finding to enable deduplication.
-        
-        Uses key attributes that identify the same vulnerability:
-        - title (normalized)
-        - severity
-        - host (if available)
-        - CVE (if available)
-        - package (if available)
+
+        Combines normalized identity attributes, checking field-name aliases across
+        tools, and includes the location (file/line) so that two genuinely different
+        findings that share a title/severity but occur in different places are NOT
+        collapsed into one (which previously caused over-dedup / under-counting).
         """
+        location = finding.get("location") or {}
+        file_path = (
+            finding.get("file_path")
+            or (location.get("file_path") if isinstance(location, dict) else None)
+            or ""
+        )
+        line = (
+            finding.get("line_number")
+            or (location.get("line") if isinstance(location, dict) else None)
+            or ""
+        )
+
         key_parts = [
-            str(finding.get("title", "")).lower().strip(),
-            str(finding.get("severity", "")).lower().strip(),
-            str(finding.get("host", "")).lower().strip(),
-            str(finding.get("cve", "")).lower().strip(),
-            str(finding.get("package", "")).lower().strip(),
+            ProjectGroupingService._first_present(finding, ("title", "message", "name")),
+            # Finding #117: severity deliberately excluded from identity. The same
+            # underlying finding (same title/host/cve/package/file/line) re-reported
+            # with a different severity — e.g. a Sonar rule reclassified Medium->High
+            # between tool versions, or a finding re-triaged — must still be treated
+            # as the same finding, not a second one. Including severity here made a
+            # re-triage silently inflate total_findings/severity_summary by one.
+            ProjectGroupingService._first_present(finding, ("host", "uri", "url", "target")),
+            ProjectGroupingService._first_present(finding, ("cve", "cve_id", "vulnerability_id")),
+            ProjectGroupingService._first_present(finding, ("package", "pkg_name", "component")),
+            str(file_path).lower().strip(),
+            str(line).strip(),
         ]
+
+        # Finding #48: `tool`/`id` are deliberately excluded above so the same CVE
+        # flagged by two different tools (e.g. Trivy + Dependency-Check) correctly
+        # collapses into one finding. But when a finding has *no* positional/identity
+        # signal at all (no host/cve/package/file — common for boilerplate Sonar
+        # CODE_SMELL rule text with no location data), title+severity alone is too
+        # weak a key: two genuinely distinct findings from different tools/rules can
+        # share generic text and collide. Fall back to including `tool` only in that
+        # no-signal case, so cross-tool CVE dedup still works normally while this
+        # edge case no longer silently undercounts.
+        if not any(key_parts[1:5]):
+            key_parts.append(ProjectGroupingService._first_present(finding, ("tool",)))
+
         key_string = "||".join(key_parts)
         return hashlib.sha256(key_string.encode()).hexdigest()[:16]
 
@@ -199,35 +244,60 @@ class ProjectGroupingService:
     def get_group_aggregated_report(
         db: Session,
         group_id: str,
+        allowed_project_ids: set[str] | None = None,
     ) -> dict:
         """
         Generate aggregated security report for all scans in a group.
-        
+
         Includes deduplication to prevent the same finding from appearing
         multiple times when detected by different tools or scans.
+
+        `allowed_project_ids`: finding #116 — cross-project rollups had no RBAC
+        scoping at all, so a caller with access to a single project could pull the
+        full aggregated severity summary for every project in any group. Pass the
+        caller's `RbacService.get_effective_project_ids()` here to restrict the
+        rollup to projects they can actually see; pass None (admin — "all") to
+        skip filtering.
         """
         # Get all assigned scans
-        assignments = (
-            db.query(ScanAssignmentDB)
-            .filter(ScanAssignmentDB.group_id == group_id)
-            .all()
-        )
+        assignments_query = db.query(ScanAssignmentDB).filter(ScanAssignmentDB.group_id == group_id)
+        if allowed_project_ids is not None:
+            assignments_query = assignments_query.filter(ScanAssignmentDB.project_id.in_(allowed_project_ids))
+        assignments = assignments_query.all()
 
         scan_ids = [a.scan_id for a in assignments]
 
-        # Get all reports for these scans
+        # Get all reports for these scans, most recent first, and keep only the
+        # latest report per (project_id, tool_name) — mirrors the same pattern
+        # portfolio.py's overview already uses (finding #112). Without this, every
+        # scan ever matched into the group (find_matching_scans/auto_assign_group_scans
+        # assign every matching scan_id, not just each project's latest) contributed
+        # its findings to the rollup forever: a project scanned Jan 1 with a critical
+        # CVE, then rescanned Feb 1 after patching, still showed the Jan 1 CVE in the
+        # group dashboard indefinitely — deduplicate_findings can only collapse
+        # hash-identical findings within the merged set, it can't detect "this finding
+        # is absent from the newer scan."
         reports = (
             db.query(ScanReportDB)
             .filter(ScanReportDB.scan_id.in_(scan_ids))
+            .order_by(ScanReportDB.project_id, ScanReportDB.tool_name, ScanReportDB.created_at.desc())
             .all()
         )
+        seen_project_tool: set[tuple[str, str]] = set()
+        latest_reports = []
+        for report in reports:
+            key = (report.project_id, report.tool_name)
+            if key in seen_project_tool:
+                continue
+            seen_project_tool.add(key)
+            latest_reports.append(report)
 
         # Aggregate findings with deduplication
         total_findings = 0
         severity_summary = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         all_findings = []
 
-        for report in reports:
+        for report in latest_reports:
             severity = report.severity_summary or {}
             for key in severity_summary:
                 severity_summary[key] += severity.get(key, 0)

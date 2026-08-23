@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Finding #84: pinned by digest, not just the floating `3.11-slim` tag — two
+# builds a month apart could otherwise pull materially different image content
+# under the identical tag with no signal anything changed. Re-resolve and bump
+# this digest periodically to pick up base-image security patches.
+FROM python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode, FC } from 'react';
 import type { Role, Permissions } from '../types';
+import { isLegacyAuthGracePeriodActive } from '../utils/authGracePeriod';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -12,6 +13,7 @@ interface AuthContextType {
   logout: () => void;
   isLoading: boolean;
   refreshUser: () => Promise<void>;
+  refreshAccessToken?: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,72 +27,77 @@ export const useAuth = (): AuthContextType => {
   return context;
 };
 
-function isTokenExpired(token: string): boolean {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return true;
-    const payload = JSON.parse(atob(parts[1]));
-    if (!payload.exp) return true;
-    return Date.now() >= payload.exp * 1000;
-  } catch {
-    return true;
-  }
-}
-
 export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(() => sessionStorage.getItem('token'));
+  const [token, setToken] = useState<string | null>(() => {
+    const legacy = sessionStorage.getItem('token');
+    if (!legacy) {
+      return null;
+    }
+    if (isLegacyAuthGracePeriodActive()) {
+      console.warn('[auth] SessionStorage token detected — grace period active, will be removed after migration window closes.');
+      return legacy;
+    }
+    // Grace period has expired: stop honoring the legacy token entirely.
+    sessionStorage.removeItem('token');
+    return null;
+  });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [role, setRole] = useState<Role | null>(null);
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; role: Role } | null>(null);
 
-  // Check token expiry on mount and periodically
+  // Check token expiry on mount
   useEffect(() => {
-    if (token && isTokenExpired(token)) {
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('API_KEY');
-      setToken(null);
-      setRole(null);
-      setPermissions(null);
-      setCurrentUser(null);
-    }
+    // For cookie-based auth, we rely on the backend to reject expired tokens.
+    // No client-side expiry check needed — the httpOnly cookie handles it.
     setIsLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Periodic expiry check for mid-session expiration (T024)
-  useEffect(() => {
-    if (!token) return;
-
-    const interval = setInterval(() => {
-      if (isTokenExpired(token)) {
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('API_KEY');
-        setToken(null);
-        window.location.href = '/login?reason=token-expired';
-      }
-    }, 60_000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [token]);
-
   const login = useCallback((newToken: string) => {
-    sessionStorage.setItem('token', newToken);
+    // Only write the legacy sessionStorage copy while the migration grace period is
+    // still open; once it closes, the httpOnly cookie set by the backend is the only
+    // credential store, and never writing here removes an XSS-readable copy entirely.
+    if (isLegacyAuthGracePeriodActive()) {
+      sessionStorage.setItem('token', newToken);
+    }
     setToken(newToken);
   }, []);
 
-  const refreshUser = useCallback(async () => {
-    if (!token) return;
+  const refreshToken = useCallback(async (): Promise<boolean> => {
+    try {
+      const response = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setToken(data.access_token);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const refreshUser = useCallback(async (retriesLeft = 2): Promise<void> => {
     try {
       const { api } = await import('../services/api');
       const user = await api.auth.me();
       setRole(user.role);
       setPermissions(user.permissions);
       setCurrentUser({ id: user.id, username: user.username, role: user.role });
-    } catch {
-      // Silently fail; user will be redirected on next protected request
+    } catch (err) {
+      // A 401 is a real auth failure — the response interceptor already handles the
+      // redirect, so there's nothing to retry. For transient errors (network blip,
+      // 5xx), retry with backoff so role/permissions don't get stuck null and leave
+      // role-gated UI incorrectly locked out until a manual refresh.
+      const status = (err as { status?: number })?.status;
+      if (status === 401) return;
+      if (retriesLeft > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (3 - retriesLeft)));
+        return refreshUser(retriesLeft - 1);
+      }
+      console.error('[auth] Failed to load user info after retries:', err);
     }
-  }, [token]);
+  }, []);
 
   // Load user info on mount when token exists
   useEffect(() => {
@@ -103,6 +110,14 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     sessionStorage.removeItem('token');
     sessionStorage.removeItem('API_KEY');
     setToken(null);
+    setRole(null);
+    setPermissions(null);
+    setCurrentUser(null);
+    // The access/refresh cookies are httpOnly — document.cookie cannot read or clear
+    // them at all, so client state alone was never enough (finding #13). Clear them
+    // server-side via /auth/logout; fire-and-forget so a network hiccup doesn't block
+    // the user from being logged out of the UI immediately.
+    fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
   }, []);
 
   const value: AuthContextType = {
@@ -115,6 +130,7 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     logout,
     isLoading,
     refreshUser,
+    refreshAccessToken: refreshToken,
   };
 
   return (

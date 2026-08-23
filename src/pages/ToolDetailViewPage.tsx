@@ -8,19 +8,10 @@ import IssueTypeToggle from '../components/IssueTypeToggle';
 import IssueDetailModal from '../components/IssueDetailModal';
 import { AccessDenied } from '../components/AccessDenied';
 import { ApiError } from '../utils/apiError';
+import { severityPillClass } from '../utils/severity';
 import type { IssueResponse } from '../types';
 
 const PAGE_SIZE = 25;
-
-function severityClass(severity: string): string {
-  switch (severity) {
-    case 'critical': return 'bg-red-100 text-red-700';
-    case 'high': return 'bg-orange-100 text-orange-700';
-    case 'medium': return 'bg-yellow-100 text-yellow-700';
-    case 'low': return 'bg-blue-100 text-blue-700';
-    default: return 'bg-slate-100 text-slate-700';
-  }
-}
 
 function statusLabel(status: string): string {
   switch (status) {
@@ -134,7 +125,7 @@ const ToolDetailViewPage = () => {
                   className="border-b border-slate-100 hover:bg-blue-50 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-3">
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${severityClass(issue.severity)}`}>
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${severityPillClass(issue.severity)}`}>
                       {issue.severity}
                     </span>
                   </td>

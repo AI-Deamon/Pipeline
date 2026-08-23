@@ -1,216 +1,145 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../services/api";
-import type { Project, ReportSummary, SeveritySummary } from "../types";
 import {
   Plus,
   Search,
   X,
-  Trash2,
   Loader2,
   Shield,
   ShieldAlert,
   User,
+  AlertTriangle,
+  CheckCircle,
+  BarChart3,
 } from "lucide-react";
 import { useDebounce } from "../hooks/useDebounce";
 import { useRbac } from "../hooks/useRbac";
 import { PageSkeleton } from "../components/PageSkeleton";
-import { useToast } from "../components/Toast";
-import { StatusBadge } from "../components/ui/StatusBadge";
-import { IconButton } from "../components/ui/IconButton";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import EmptyState from "../components/EmptyState";
-import { ConfirmModal } from "../components/ConfirmModal";
-
-const ProjectRow = ({ project, reportSummaries }: { project: Project; reportSummaries: Record<string, ReportSummary> }) => {
-  const queryClient = useQueryClient();
-  const { addToast } = useToast();
-  const { isAdmin } = useRbac();
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
-  const deleteProjectMutation = useMutation({
-    mutationFn: () => api.projects.delete(project.project_id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      setShowDeleteConfirm(false);
-      addToast({
-        type: "success",
-        title: "Project Deleted",
-        message: `Project "${project.name}" has been removed.`,
-      });
-    },
-    onError: (error) => {
-      console.error("Failed to delete project:", error);
-      addToast({
-        type: "error",
-        title: "Deletion Failed",
-        message: `Failed to delete project "${project.name}".`,
-      });
-    },
-  });
-
-  const isScanning =
-    project.last_scan_state === "RUNNING" ||
-    project.last_scan_state === "QUEUED" ||
-    project.last_scan_state === "CREATED";
-
-  const lastScanDate = project.last_scan_time
-    ? new Date(project.last_scan_time).toLocaleString('en-IN', {
-        dateStyle: 'short',
-        timeStyle: 'short',
-        timeZone: 'Asia/Kolkata',
-      }) + ' IST'
-    : "--";
-
-  // Get report summary for this project
-  const reportSummary = reportSummaries[project.project_id];
-  
-  // Calculate severity color based on highest severity found
-  const getSeverityColor = (severity: SeveritySummary) => {
-    if (severity.critical > 0) return "#dc2626"; // red-600
-    if (severity.high > 0) return "#ea580c"; // orange-600
-    if (severity.medium > 0) return "#ca8a04"; // yellow-600
-    if (severity.low > 0) return "#16a34a"; // green-600
-    return "#4b5563"; // gray-600
-  };
-
-  return (
-    <>
-    <tr className="hover:bg-slate-50/50 transition-colors group">
-      <td className="px-6 py-4">
-        <div className="flex flex-col">
-          <span className="font-medium text-slate-900">{project.name}</span>
-          <span className="text-sm text-slate-500">{project.project_id}</span>
-        </div>
-      </td>
-      <td className="px-6 py-4">
-        <StatusBadge state={project.last_scan_state ?? null} />
-      </td>
-      <td className="px-6 py-4 text-sm text-slate-500">{lastScanDate}</td>
-      <td className="px-6 py-4 text-right">
-          <div className="flex items-center justify-end gap-2">
-            {project.last_scan_id && !isScanning && (
-              <Link
-                to={`/scans/${project.last_scan_id}`}
-                className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
-              >
-                View
-              </Link>
-            )}
-            <Link
-              to={`/projects/${project.project_id}/reports`}
-              className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              View Reports
-            </Link>
-            {reportSummary && (
-              <div className="flex items-center gap-2 ml-3">
-                <div className="relative">
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: getSeverityColor(reportSummary.severity) }}
-                  ></div>
-                  <div className="absolute -top-2 -left-2 w-4 h-4 rounded-full bg-white ring-2 ring-slate-300">
-                    <div className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: getSeverityColor(reportSummary.severity) }}
-                    ></div>
-                  </div>
-                </div>
-                <div className="flex flex-col items-center text-xs">
-                  <div className="font-medium">{reportSummary.total_findings}</div>
-                  <div className="text-slate-500">Findings</div>
-                </div>
-              </div>
-            )}
-            <Link
-              to={`/projects/${project.project_id}`}
-              className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
-            >
-              Manage
-            </Link>
-            {isAdmin && (
-              <IconButton
-                icon={Trash2}
-                label={`Delete ${project.name}`}
-                variant="danger"
-                onClick={() => setShowDeleteConfirm(true)}
-              />
-            )}
-          </div>
-      </td>
-    </tr>
-
-    <ConfirmModal
-      isOpen={showDeleteConfirm}
-      onClose={() => setShowDeleteConfirm(false)}
-      onConfirm={() => deleteProjectMutation.mutate()}
-      title="Delete project?"
-      message={`This will permanently delete "${project.name}" and all associated scans and reports. This action cannot be undone.`}
-      confirmLabel="Delete permanently"
-      variant="danger"
-      isPending={deleteProjectMutation.isPending}
-    />
-    </>
-  );
-};
+import SeverityPieChart from "../components/SeverityPieChart";
+import TrendLineChart from "../components/TrendLineChart";
+import QualityGateOverview from "../components/QualityGateOverview";
+import ProjectRow from "../components/ProjectRow";
+import { getRiskLevel } from "../utils/risk";
 
 const ACTIVE_STATES = new Set(["CREATED", "QUEUED", "RUNNING"]);
+const STATUS_FILTERS = ["All", "Running", "Completed", "Failed"] as const;
+const RISK_FILTERS = ["All", "Low", "Medium", "High", "Critical"] as const;
+
+const StatsCard = ({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number | string;
+  color: string;
+}) => (
+  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+    <div className="flex items-center gap-3">
+      <div className={`p-2 rounded-lg ${color}`}>{icon}</div>
+      <div>
+        <div className="text-2xl font-bold text-slate-900">{value}</div>
+        <div className="text-sm text-slate-500">{label}</div>
+      </div>
+    </div>
+  </div>
+);
 
 const DashboardPage = () => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("All");
+  const [riskFilter, setRiskFilter] = useState<string>("All");
   const { isAdmin, canViewAllProjects } = useRbac();
 
-  const { data: projects = [], isLoading: loading } = useQuery({
+  const { data: projects = [], isLoading: loading, error: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ["projects"],
     queryFn: api.projects.list,
   });
 
-  // Fetch report summaries for all projects
-  const { data: reportSummaries = {}, isLoading: reportsLoading } = useQuery({
-    queryKey: ["report-summaries"],
-    queryFn: async () => {
-      // Fetch summaries for all projects in parallel
-      const summaryPromises = projects
-        .filter((project) => project.project_id)
-        .map((project) => 
-          api.reports.getSummary(project.project_id).then(
-            (summary) => [project.project_id, summary] as const
-          )
-        );
-      
-      const results = await Promise.allSettled(summaryPromises);
-      const summaries: Record<string, ReportSummary> = {};
-      
-      results.forEach((result) => {
-        if (result.status === "fulfilled") {
-          const [projectId, summary] = result.value;
-          summaries[projectId] = summary;
-        }
-      });
-      
-      return summaries;
-    },
-    // Only refetch when projects change
+  const { data: portfolioOverview, isLoading: portfolioLoading } = useQuery({
+    queryKey: ["portfolio-overview"],
+    queryFn: api.portfolio.getOverview,
     enabled: !!projects.length,
+    refetchInterval: 60_000,
+  });
+
+  const { data: portfolioTrends } = useQuery({
+    queryKey: ["portfolio-trends"],
+    queryFn: () => api.portfolio.getTrends(6),
+    enabled: !!projects.length,
+    refetchInterval: 120_000,
   });
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
+  const portfolioProjects = useMemo(() => {
+    if (!portfolioOverview) return [];
+    return portfolioOverview.projects;
+  }, [portfolioOverview]);
+
   const activeScanProjects = useMemo(
-    () => projects.filter((p) => ACTIVE_STATES.has(p.last_scan_state ?? "")),
-    [projects]
+    () => portfolioProjects.filter((p) => ACTIVE_STATES.has(p.last_scan_state ?? "")),
+    [portfolioProjects]
   );
 
-  const filteredProjects = useMemo(() => {
-    if (!debouncedSearchTerm) return projects;
-    const lowerSearch = debouncedSearchTerm.toLowerCase();
-    return projects.filter((project) =>
-      project.name.toLowerCase().includes(lowerSearch)
-    );
-  }, [projects, debouncedSearchTerm]);
+  const stats = useMemo(() => {
+    let totalFindings = 0;
+    let totalCritical = 0;
+    let totalRiskScore = 0;
+    let projectsWithRisk = 0;
 
-  const isLoading = loading || reportsLoading;
+    for (const p of portfolioProjects) {
+      totalFindings += p.total_findings;
+      totalCritical += p.critical;
+      totalRiskScore += p.risk_score;
+      projectsWithRisk++;
+    }
+
+    return {
+      totalProjects: projects.length,
+      totalFindings,
+      totalCritical,
+      avgRiskScore: projectsWithRisk > 0 ? Math.round(totalRiskScore / projectsWithRisk) : 0,
+    };
+  }, [portfolioProjects, projects.length]);
+
+  const filteredProjects = useMemo(() => {
+    let result = portfolioProjects;
+
+    if (debouncedSearchTerm) {
+      const lowerSearch = debouncedSearchTerm.toLowerCase();
+      result = result.filter((p) =>
+        p.name.toLowerCase().includes(lowerSearch)
+      );
+    }
+
+    if (statusFilter !== "All") {
+      result = result.filter((p) => {
+        const state = p.last_scan_state;
+        if (statusFilter === "Running") return ACTIVE_STATES.has(state ?? "");
+        if (statusFilter === "Completed") return state === "COMPLETED";
+        if (statusFilter === "Failed") return state === "FAILED";
+        return true;
+      });
+    }
+
+    if (riskFilter !== "All") {
+      result = result.filter((p) => {
+        const riskLevel = getRiskLevel(p.risk_score);
+        return riskLevel === riskFilter;
+      });
+    }
+
+    return result;
+  }, [portfolioProjects, debouncedSearchTerm, statusFilter, riskFilter]);
+
+  const isLoading = loading || portfolioLoading;
 
   if (isLoading) return <PageSkeleton type="dashboard" />;
 
@@ -250,6 +179,61 @@ const DashboardPage = () => {
       </header>
 
       <OnboardingChecklist />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatsCard
+          icon={<BarChart3 className="w-5 h-5 text-indigo-600" />}
+          label="Total Projects"
+          value={stats.totalProjects}
+          color="bg-indigo-50"
+        />
+        <StatsCard
+          icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
+          label="Critical Issues"
+          value={stats.totalCritical}
+          color="bg-red-50"
+        />
+        <StatsCard
+          icon={<CheckCircle className="w-5 h-5 text-green-600" />}
+          label="Total Findings"
+          value={stats.totalFindings}
+          color="bg-green-50"
+        />
+        <StatsCard
+          icon={<Shield className="w-5 h-5 text-slate-600" />}
+          label="Avg Risk Score"
+          value={stats.avgRiskScore}
+          color="bg-slate-50"
+        />
+      </div>
+
+      {portfolioOverview && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <SeverityPieChart
+              critical={portfolioOverview.severity.critical}
+              high={portfolioOverview.severity.high}
+              medium={portfolioOverview.severity.medium}
+              low={portfolioOverview.severity.low}
+              info={portfolioOverview.severity.info}
+            />
+          </div>
+          <QualityGateOverview projects={portfolioOverview.projects} />
+        </div>
+      )}
+
+      {portfolioTrends && portfolioTrends.trends.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+          <TrendLineChart data={portfolioTrends.trends.map(t => ({
+            date: t.month,
+            critical: t.critical,
+            high: t.high,
+            medium: t.medium,
+            low: t.low,
+            coverage_avg: t.coverage_avg,
+          }))} />
+        </div>
+      )}
 
       {activeScanProjects.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex flex-col gap-2">
@@ -292,9 +276,57 @@ const DashboardPage = () => {
             )}
           </div>
         </div>
+        <div className="px-4 pb-4 flex flex-wrap gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500">Status:</span>
+            <div className="flex gap-1">
+              {STATUS_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setStatusFilter(filter)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                    statusFilter === filter
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-500">Risk:</span>
+            <div className="flex gap-1">
+              {RISK_FILTERS.map((filter) => (
+                <button
+                  key={filter}
+                  onClick={() => setRiskFilter(filter)}
+                  className={`px-3 py-1 text-xs font-medium rounded-lg transition-colors ${
+                    riskFilter === filter
+                      ? "bg-slate-900 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {filteredProjects.length === 0 ? (
+      {projectsError ? (
+        // Previously a failed fetch fell straight through to the "no projects" empty
+        // state below — indistinguishable from a genuinely empty account, so a failed
+        // fetch could read as "this project has no issues" (finding #60).
+        <EmptyState
+          variant="error"
+          title="Couldn't load projects"
+          message={projectsError instanceof Error ? projectsError.message : "Something went wrong."}
+          action={{ label: "Retry", onClick: () => refetchProjects() }}
+        />
+      ) : filteredProjects.length === 0 ? (
         debouncedSearchTerm ? (
           <EmptyState
             variant="empty"
@@ -330,7 +362,10 @@ const DashboardPage = () => {
                   Status
                 </th>
                 <th className="px-6 py-4 text-sm font-medium text-slate-600">
-                  Last Scan
+                  Risk Score
+                </th>
+                <th className="px-6 py-4 text-sm font-medium text-slate-600">
+                  Trend
                 </th>
                 <th className="px-6 py-4 text-sm font-medium text-slate-600 text-right">
                   Actions
@@ -339,10 +374,9 @@ const DashboardPage = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
 {filteredProjects.map((project) => (
-  <ProjectRow 
-    key={project.project_id} 
-    project={project} 
-    reportSummaries={reportSummaries} 
+  <ProjectRow
+    key={project.project_id}
+    project={project}
   />
 ))}
             </tbody>

@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
@@ -217,7 +217,7 @@ def test_running_scan_times_out_when_window_exceeded(client, mock_celery_task):
     try:
         scan = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
         scan.state = ScanState.RUNNING
-        scan.started_at = datetime.utcnow() - timedelta(hours=5)  # Exceeds 2 hour timeout
+        scan.started_at = datetime.now(timezone.utc) - timedelta(hours=5)  # Exceeds 2 hour timeout
         db.commit()
     finally:
         db.close()

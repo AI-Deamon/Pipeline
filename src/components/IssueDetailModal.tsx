@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2 } from 'lucide-react';
+import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2, Bug } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { useIssue, useIssueHistory, useAssignIssue, useTransitionIssue, useAddComment } from '../hooks/useIssues';
 import { useRbac } from '../hooks/useRbac';
@@ -15,7 +15,8 @@ function statusBtnClass(color: string): string {
   return `px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${color}`;
 }
 
-function severityToBadgeVariant(severity: string): 'danger' | 'warning' | 'info' {
+function severityToBadgeVariant(severity: string, findingType?: string): 'danger' | 'warning' | 'info' {
+  if (findingType === 'SECURITY_HOTSPOT') return 'info';
   if (severity === 'critical') return 'danger';
   if (severity === 'high') return 'warning';
   return 'info';
@@ -233,7 +234,7 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="text-slate-400 block text-xs">Severity</span>
-            <Badge variant={severityToBadgeVariant(issue.severity)} size="md">
+            <Badge variant={severityToBadgeVariant(issue.severity, issue.finding_type)} size="md">
               {issue.severity}
             </Badge>
           </div>
@@ -245,6 +246,66 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
             <div>
               <span className="text-slate-400 block text-xs">Tool</span>
               <span className="capitalize">{issue.tool_name}</span>
+            </div>
+          )}
+          {issue.finding_type && (
+            <div>
+              <span className="text-slate-400 block text-xs">Finding Type</span>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                issue.finding_type === 'SECURITY_HOTSPOT'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-slate-100 text-slate-600'
+              }`}>
+                {issue.finding_type === 'SECURITY_HOTSPOT' ? 'Security Hotspot' : issue.finding_type.replace(/_/g, ' ')}
+              </span>
+            </div>
+          )}
+          <div>
+            <span className="text-slate-400 block text-xs">Issue ID</span>
+            <span className="font-mono text-xs text-slate-600">{issue.issue_id}</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-xs">First Seen</span>
+            <span className="text-xs text-slate-600">{new Date(issue.first_seen_at).toLocaleString()}</span>
+          </div>
+          <div>
+            <span className="text-slate-400 block text-xs">Last Seen</span>
+            <span className="text-xs text-slate-600">{new Date(issue.last_seen_at).toLocaleString()}</span>
+          </div>
+          {issue.resolved_at && (
+            <div>
+              <span className="text-slate-400 block text-xs">Resolved At</span>
+              <span className="text-xs text-green-600">{new Date(issue.resolved_at).toLocaleString()}</span>
+            </div>
+          )}
+          {issue.sonar_status && (
+            <div>
+              <span className="text-slate-400 block text-xs">Sonar Status</span>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
+                issue.sonar_status === 'REVIEWED'
+                  ? 'bg-green-50 text-green-700'
+                  : 'bg-amber-50 text-amber-700'
+              }`}>
+                {issue.sonar_status.replace(/_/g, ' ')}
+              </span>
+            </div>
+          )}
+          {issue.sonar_resolution && (
+            <div>
+              <span className="text-slate-400 block text-xs">Sonar Resolution</span>
+              <span className="text-xs text-slate-600 capitalize">{issue.sonar_resolution.replace(/_/g, ' ')}</span>
+            </div>
+          )}
+          {issue.sonar_url && (
+            <div className="col-span-2">
+              <a
+                href={issue.sonar_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                <Bug size={12} /> View in SonarQube <ExternalLink size={10} />
+              </a>
             </div>
           )}
           {issue.assignee_id && (

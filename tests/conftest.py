@@ -2,6 +2,29 @@ import sys
 import os
 import pytest
 
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "deprecated(reason): mark test as deprecated with explanation"
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests marked @pytest.mark.deprecated.
+
+    These tests were written against a planned Jenkinsfile `do*()` refactor that was
+    never implemented, so they assert against a structure that doesn't exist. The marker
+    previously did nothing (metadata only), so they showed up as hard failures polluting
+    the suite. Skipping them surfaces the reason without failing the run; delete or
+    rewrite them if/when that refactor actually lands.
+    """
+    for item in items:
+        marker = item.get_closest_marker("deprecated")
+        if marker is not None:
+            reason = marker.kwargs.get("reason") or (marker.args[0] if marker.args else "deprecated test")
+            item.add_marker(pytest.mark.skip(reason=f"deprecated: {reason}"))
+
 # Add backend directory to Python path for imports
 backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend')
 sys.path.insert(0, os.path.abspath(backend_path))

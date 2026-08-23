@@ -5,16 +5,22 @@ import { api } from '../services/api';
 import FilterChips from '../components/FilterChips';
 import RescanRequestCard from '../components/RescanRequestCard';
 import EmptyState from '../components/EmptyState';
-import { ArrowLeft, BarChart3, Wifi, WifiOff, Info } from 'lucide-react';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { ArrowLeft, BarChart3, Wifi, WifiOff, Info, CheckCircle, XCircle } from 'lucide-react';
 import { useRescanWebSocket } from '../hooks/useRescanWebSocket';
-import type { PendingVerificationResponse } from '../types';
+import type { PendingVerificationResponse, PendingVerificationItem } from '../types';
 
 const PendingVerificationPage = () => {
   const [projectFilter, setProjectFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'pending' | 'approved' | 'completed' | 'rejected'>('pending');
-  const [wsConnected] = useState(true);
+  // Finding #61: Approve/Reject previously fired immediately on click with no
+  // confirmation step — a mis-click could silently approve or reject a fix.
+  const [pendingAction, setPendingAction] = useState<{ type: 'approve' | 'reject'; item: PendingVerificationItem } | null>(null);
   const qc = useQueryClient();
-  useRescanWebSocket(true);
+  // Finding #57: this used to be a hardcoded `useState(true)` with the setter
+  // never called — the indicator lied "Live" even if the socket was actually
+  // disconnected. Reflect the hook's real connection state instead.
+  const { connected: wsConnected } = useRescanWebSocket(true);
 
   const { data, isLoading, error, refetch } = useQuery<PendingVerificationResponse>({
     queryKey: ['pending-verification', statusFilter, projectFilter],
@@ -31,13 +37,22 @@ const PendingVerificationPage = () => {
       api.issues.approveRescan(issueId, { reviewer_note }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending-verification'] });
+      qc.invalidateQueries({ queryKey: ['tool-issues'] });
+      qc.invalidateQueries({ queryKey: ['my-issues'] });
+      qc.invalidateQueries({ queryKey: ['project-overview'] });
     },
   });
   const rejectMutation = useMutation({
-    mutationFn: (issueId: number) =>
-      api.issues.triggerVerifyScan(issueId, 'Manual reject from queue'),
+    mutationFn: ({ issueId, reviewer_note }: { issueId: number; reviewer_note?: string }) =>
+      api.issues.rejectRescan(issueId, { reviewer_note }),
     onSuccess: () => {
+      // Mirrors the websocket handler's invalidation set — a rejected fix reopens
+      // the issue, so the assignee's "My Issues" and Issues Triage must also refresh,
+      // not just this queue (finding #61).
       qc.invalidateQueries({ queryKey: ['pending-verification'] });
+      qc.invalidateQueries({ queryKey: ['tool-issues'] });
+      qc.invalidateQueries({ queryKey: ['my-issues'] });
+      qc.invalidateQueries({ queryKey: ['project-overview'] });
     },
   });
 
@@ -165,20 +180,16 @@ const PendingVerificationPage = () => {
                     request={item}
                     onVerify={
                       statusFilter === 'pending'
-                        ? (r) =>
-                            approveMutation.mutate({
-                              issueId: r.issue_id,
-                              reviewer_note: 'Approved from queue',
-                            })
+                        ? (r) => setPendingAction({ type: 'approve', item: r })
                         : undefined
                     }
                     onReject={
                       statusFilter === 'pending'
-                        ? (r) => rejectMutation.mutate(r.issue_id)
+                        ? (r) => setPendingAction({ type: 'reject', item: r })
                         : undefined
                     }
                     isVerifying={approveMutation.isPending && approveMutation.variables?.issueId === item.issue_id}
-                    isRejecting={rejectMutation.isPending && rejectMutation.variables === item.issue_id}
+                    isRejecting={rejectMutation.isPending && rejectMutation.variables?.issueId === item.issue_id}
                   />
                 ))}
               </div>
@@ -186,6 +197,31 @@ const PendingVerificationPage = () => {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={pendingAction !== null}
+        onClose={() => setPendingAction(null)}
+        onConfirm={() => {
+          if (!pendingAction) return;
+          const { type, item } = pendingAction;
+          if (type === 'approve') {
+            approveMutation.mutate({ issueId: item.issue_id, reviewer_note: 'Approved from queue' });
+          } else {
+            rejectMutation.mutate({ issueId: item.issue_id, reviewer_note: 'Rejected from queue' });
+          }
+          setPendingAction(null);
+        }}
+        title={pendingAction?.type === 'approve' ? 'Approve fix?' : 'Reject fix?'}
+        message={
+          pendingAction?.type === 'approve'
+            ? `Mark "${pendingAction.item.issue_title}" as verified fixed. This closes the issue.`
+            : `Reject "${pendingAction?.item.issue_title}" and reopen the issue for the assignee to address.`
+        }
+        confirmLabel={pendingAction?.type === 'approve' ? 'Approve' : 'Reject'}
+        variant={pendingAction?.type === 'approve' ? 'info' : 'danger'}
+        icon={pendingAction?.type === 'approve' ? <CheckCircle /> : <XCircle />}
+        isPending={approveMutation.isPending || rejectMutation.isPending}
+      />
     </div>
   );
 };

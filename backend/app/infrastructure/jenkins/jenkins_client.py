@@ -19,6 +19,7 @@ class JenkinsClient:
                 "Authorization": f"Basic {auth_string}",
                 "Content-Type": "application/x-www-form-urlencoded",
             },
+            is_jenkins=True,
         )
         self.csrf_token = None
         logger.info(
@@ -98,13 +99,30 @@ class JenkinsClient:
             raise
 
     def get_build_status(self, job_name: str, build_number: int):
+        # Finding #123: the recovery sweep polls every active scan sequentially in
+        # one background thread — a hanging (not erroring) response blocks the
+        # whole sweep for up to the request timeout. This is a lightweight status
+        # check, not a heavy operation, so a short timeout bounds that worst case
+        # to a few seconds per scan instead of the 30s HTTP client default.
         return self.client.request(
             method="GET",
             path=f"job/{job_name}/{build_number}/api/json",
+            timeout=10,
         )
 
     def get_queue_item(self, queue_id: int):
         return self.client.request(
             method="GET",
             path=f"queue/item/{queue_id}/api/json",
+            timeout=10,
+        )
+
+    def stop_build(self, job_name: str, build_number: int):
+        """Abort a running Jenkins build (finding #19). Used when scan_recovery times
+        out a scan — without this, a genuinely-hung Jenkins job keeps consuming an
+        executor/agent slot indefinitely even after Sentinel has already marked the
+        scan FAILED on its side."""
+        return self.client.request(
+            method="POST",
+            path=f"job/{job_name}/{build_number}/stop",
         )

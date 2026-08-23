@@ -1,3 +1,7 @@
+> **Note:** this is a raw, unedited AI-chat paste kept for historical reference, not a
+> curated/maintained doc — treat items in it as ideas to re-verify against current
+> code, not as current state (finding #34).
+
 Let me thoroughly analyze your codebase across all pages and components before giving you a comprehensive UI/UX plan.
 
 After a deep review of all your pages, components, hooks, and services, here is a full, prioritized UI/UX design roadmap for your DevSecOps platform:

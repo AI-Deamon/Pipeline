@@ -33,7 +33,11 @@ export function useApproveRescan() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending-verification'] });
       qc.invalidateQueries({ queryKey: ['issue'] });
+      // Finding #121: useScanHistory's query key now matches ScanHistoryPage's
+      // ('scan-history'), not the old standalone 'scans' key — invalidate that one
+      // too so approving a rescan (which starts a new scan) still refreshes it.
       qc.invalidateQueries({ queryKey: ['scans'] });
+      qc.invalidateQueries({ queryKey: ['scan-history'] });
     },
   });
 }

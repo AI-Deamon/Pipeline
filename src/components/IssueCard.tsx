@@ -1,6 +1,7 @@
 import { memo } from 'react';
-import { AlertTriangle, AlertCircle, Clock, User } from 'lucide-react';
+import { AlertTriangle, Clock, User } from 'lucide-react';
 import type { IssueResponse } from '../types';
+import { severityHex } from '../utils/severity';
 
 function statusColor(status: string): string {
   switch (status) {
@@ -14,14 +15,19 @@ function statusColor(status: string): string {
   }
 }
 
-function severityIcon(severity: string) {
-  switch (severity) {
-    case 'critical':
-    case 'high':
-      return <AlertTriangle size={16} className="text-red-500" />;
-    default:
-      return <AlertCircle size={16} className="text-orange-500" />;
-  }
+// Previously two icon variants (red triangle for critical/high, orange circle for
+// everything else) stood in for severity with no text label at all — medium, low,
+// and info were visually and textually indistinguishable from each other, and
+// critical/high were indistinguishable from each other too. All four levels now get
+// a distinct color (from the shared severity.ts palette) plus the word itself.
+function SeverityIndicator({ severity }: { severity: string }) {
+  const label = severity ? severity.charAt(0).toUpperCase() + severity.slice(1).toLowerCase() : 'Unknown';
+  return (
+    <span className="inline-flex items-center gap-1 shrink-0" style={{ color: severityHex(severity) }}>
+      <AlertTriangle size={16} />
+      <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
+    </span>
+  );
 }
 
 const IssueCard = memo(function IssueCard({
@@ -41,11 +47,9 @@ const IssueCard = memo(function IssueCard({
 
   const content = (
     <>
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          {severityIcon(issue.severity)}
-          <h3 className="font-semibold text-sm text-slate-900 truncate">{issue.title}</h3>
-        </div>
+      <div className="flex items-start justify-between mb-2 gap-2">
+        <h3 className="font-semibold text-sm text-slate-900 truncate min-w-0">{issue.title}</h3>
+        <SeverityIndicator severity={issue.severity} />
       </div>
       <div className="flex items-center gap-2 mb-2">
         <span className="text-xs text-slate-400 capitalize">{issue.tool_name}</span>

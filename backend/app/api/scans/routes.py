@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.db import get_db
 from app.core.rate_limit import limiter
 from app.core.auth import get_current_user
-from app.models.db_models import ProjectDB, ScanDB
+from app.models.db_models import ProjectDB, ScanDB, RescanRequestDB
 from app.schemas.scan import (
     ScanCancelResponse,
     ScanCreate,
@@ -30,6 +30,7 @@ from app.schemas.scan import (
     ScanResultsResponse,
     ScanRetryReportsResponse,
 )
+from app.services.rbac_service import get_rbac_service
 from app.services.validation import validate_scan_request
 from app.state.scan_state import ScanState
 from app.websockets.manager import manager as websocket_manager
@@ -38,6 +39,7 @@ from .utils import (
     ACTIVE_STATES,
     TERMINAL_STATES,
     calculate_scan_timeout,
+    resolve_jenkins_base_url,
     _expire_scan_if_timed_out,
     _scan_to_response,
 )
@@ -74,8 +76,19 @@ def _parse_scan_timeout_header(x_scan_timeout: str | None, calculated_timeout: i
 
 @router.get("/scans", response_model=List[ScanResponse])
 @limiter.limit("1000/minute" if settings.ENV == "test" else "50/minute")
-def list_scans(request: Request, db: Annotated[Session, Depends(get_db)]):
-    scans = db.query(ScanDB).all()
+def list_scans(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    rbac = get_rbac_service(db=db, user=current_user)
+    query = db.query(ScanDB)
+    if not rbac.is_admin:
+        effective_ids = rbac.get_effective_project_ids()
+        if not effective_ids:
+            return []
+        query = query.filter(ScanDB.project_id.in_(effective_ids))
+    scans = query.all()
 
     active_scans = [s for s in scans if s.state not in TERMINAL_STATES]
 
@@ -87,14 +100,15 @@ def list_scans(request: Request, db: Annotated[Session, Depends(get_db)]):
         project_map = {p.project_id: p for p in projects}
 
         now = datetime.now(timezone.utc)
-        timeout_seconds = settings.SCAN_TIMEOUT
         any_expired = False
 
         for scan_obj in active_scans:
             project_obj = project_map.get(scan_obj.project_id)
             if project_obj:
+                # Pass timeout_seconds=None so each scan uses its own persisted
+                # timeout (falling back to the global default inside the helper).
                 if _expire_scan_if_timed_out(
-                    db, scan_obj, project_obj, now, timeout_seconds, auto_commit=False
+                    db, scan_obj, project_obj, now, None, auto_commit=False
                 ):
                     any_expired = True
 
@@ -113,12 +127,17 @@ def trigger_scan(
     scan: ScanCreate,
     background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     x_scan_timeout: Annotated[str | None, Header(alias="X-Scan-Timeout")] = None,
 ):
     try:
         validate_scan_request(scan)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(scan.project_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     project = (
         db.query(ProjectDB)
@@ -154,6 +173,7 @@ def trigger_scan(
             jenkins_queue_id=None,
             stage_results=[],
             callback_digests=[],
+            timeout_seconds=scan_timeout,
         )
         db.add(scan_obj)
         project.last_scan_state = scan_obj.state.value
@@ -205,7 +225,7 @@ def trigger_scan(
 
 
 @router.post("/scans/trigger-verify", response_model=ScanResponse, status_code=status.HTTP_201_CREATED,
-  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
 def trigger_verify_scan(
     project_id: str,
     tool: str,
@@ -220,11 +240,27 @@ def trigger_verify_scan(
     if not rbac.can_approve_rescan(project_id):
         raise HTTPException(status_code=403, detail="Not authorized to trigger verify scan")
 
-    project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
+    # Lock the project row and enforce the one-active-scan-per-project invariant, same
+    # as trigger_scan — otherwise a verify scan can be created in RUNNING state while a
+    # regular scan is already active, leaving two active scans the rest of the code
+    # assumes can't coexist.
+    project = (
+        db.query(ProjectDB)
+        .filter(ProjectDB.project_id == project_id)
+        .with_for_update()
+        .first()
+    )
     if not project:
         raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
-    user_id = getattr(current_user, "username", None) or "api-key-bypass"
+    if project.last_scan_state and project.last_scan_state in [
+        state.value for state in ACTIVE_STATES
+    ]:
+        raise HTTPException(
+            status_code=409,
+            detail="An active scan already exists for this project",
+        )
+
     scan_id = f"verify-{tool}-{uuid.uuid4().hex[:8]}"
     scan_obj = ScanDB(
         scan_id=scan_id,
@@ -234,8 +270,30 @@ def trigger_verify_scan(
         selected_stages=[tool],
     )
     db.add(scan_obj)
+    project.last_scan_state = scan_obj.state.value
     db.commit()
     db.refresh(scan_obj)
+
+    # Link approved RescanRequestDB rows to this scan so auto_verify_pending_rescans
+    # can match them after the scan completes.
+    from app.services.issue_service import IssueService
+    issue_svc = IssueService()
+    pending_rescans = (
+        db.query(RescanRequestDB)
+        .join(IssueDB, IssueDB.id == RescanRequestDB.issue_id)
+        .filter(
+            RescanRequestDB.status == "approved",
+            RescanRequestDB.scan_id.is_(None),
+            IssueDB.project_id == project_id,
+            IssueDB.tool_name == tool,
+        )
+        .all()
+    )
+    for rc in pending_rescans:
+        rc.scan_id = scan_id
+    if pending_rescans:
+        db.commit()
+        logger.info("Linked %d rescan requests to verify scan %s", len(pending_rescans), scan_id)
 
     project_data = {
         "project_id": project.project_id,
@@ -249,16 +307,33 @@ def trigger_verify_scan(
         jenkins_svc.trigger_scan_job(scan_obj, project_data)
     except Exception as e:
         logger.warning(f"Jenkins trigger failed for verify scan {scan_id}: {e}")
+        scan_obj.state = ScanState.FAILED
+        scan_obj.error_message = str(e)
+        scan_obj.error_type = "TRIGGER_ERROR"
+        project.last_scan_state = ScanState.FAILED.value
+        db.commit()
+        raise HTTPException(status_code=502, detail=f"Jenkins trigger failed: {e}")
 
     return _scan_to_response(scan_obj)
 
 
+def _require_scan_access(db: Session, current_user, scan_obj: ScanDB) -> None:
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(scan_obj.project_id):
+        raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
+
+
 @router.get("/scans/{scan_id}", response_model=ScanResponse,
   responses={404: {"description": "Not found"}})
-def get_scan(scan_id: str, db: Annotated[Session, Depends(get_db)]):
+def get_scan(
+    scan_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
         raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
+    _require_scan_access(db, current_user, scan_obj)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -272,10 +347,15 @@ def get_scan(scan_id: str, db: Annotated[Session, Depends(get_db)]):
 
 @router.get("/scans/{scan_id}/results", response_model=ScanResultsResponse,
   responses={404: {"description": "Not found"}})
-def get_scan_results(scan_id: str, db: Annotated[Session, Depends(get_db)]):
+def get_scan_results(
+    scan_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
         raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
+    _require_scan_access(db, current_user, scan_obj)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -292,10 +372,15 @@ def get_scan_results(scan_id: str, db: Annotated[Session, Depends(get_db)]):
 
 @router.post("/scans/{scan_id}/retry-reports", response_model=ScanRetryReportsResponse,
   responses={400: {"description": "Bad request"}, 404: {"description": "Not found"}})
-def retry_scan_reports(scan_id: str, db: Annotated[Session, Depends(get_db)]):
+def retry_scan_reports(
+    scan_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
         raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
+    _require_scan_access(db, current_user, scan_obj)
 
     if not scan_obj.jenkins_build_number:
         raise HTTPException(
@@ -309,11 +394,7 @@ def retry_scan_reports(scan_id: str, db: Annotated[Session, Depends(get_db)]):
     if not project_obj:
         raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
-    jenkins_base_url = (
-        f"http://{project_obj.target_ip}"
-        if project_obj.target_ip
-        else settings.JENKINS_BASE_URL
-    )
+    jenkins_base_url = resolve_jenkins_base_url(project_obj)
 
     from app.tasks.report_tasks import process_scan_reports_task
 
@@ -333,10 +414,15 @@ def retry_scan_reports(scan_id: str, db: Annotated[Session, Depends(get_db)]):
 
 @router.get("/scans/{scan_id}/overview",
   responses={404: {"description": "Not found"}})
-def get_scan_overview(scan_id: str, db: Annotated[Session, Depends(get_db)]):
+def get_scan_overview(
+    scan_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
     scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan_obj:
         raise HTTPException(status_code=404, detail=_SCAN_NOT_FOUND)
+    _require_scan_access(db, current_user, scan_obj)
 
     project_obj = (
         db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
@@ -355,11 +441,16 @@ def get_project_scan_history(
     project_id: str,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
     limit: int = 20,
     offset: int = 0,
 ):
     project_obj = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project_obj:
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
         raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
 
     scans = (
@@ -386,6 +477,7 @@ def get_project_scan_history(
                 scan_id=scan_obj.scan_id,
                 state=scan_obj.state,
                 created_at=scan_obj.created_at,
+                started_at=scan_obj.started_at,
                 finished_at=scan_obj.finished_at,
                 retry_count=int(scan_obj.retry_count or 0),
                 error=error,

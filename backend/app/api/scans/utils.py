@@ -9,8 +9,29 @@ from app.state.scan_state import ScanState
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATES = {ScanState.COMPLETED, ScanState.FAILED, ScanState.CANCELLED}
+TERMINAL_STATES = {ScanState.COMPLETED, ScanState.FAILED, ScanState.CANCELLED, ScanState.SKIPPED}
 ACTIVE_STATES = {ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING}
+
+
+def resolve_jenkins_base_url(project) -> str:
+    """Resolve the Jenkins base URL. Always the global ``JENKINS_BASE_URL`` setting —
+    there is exactly one Jenkins instance in this architecture (see Settings.JENKINS_BASE_URL,
+    a single required string with no pool/failover concept).
+
+    This function previously swapped in the project's ``target_ip`` as the entire
+    Jenkins base URL (``http://{target_ip}``) whenever it was set. That was a real
+    vulnerability (finding #15), not a multi-Jenkins feature: ``target_ip`` is the
+    IP of the *scanned application* (see docs/jenkins_pipeline_architecture.md's Nmap
+    stage, which runs `nmap ... ${PROJECT.target_ip}`), completely unrelated to where
+    Jenkins itself is hosted. Since `fetch_artifact()` attaches
+    `Authorization: Basic base64("admin:"+JENKINS_TOKEN)` to requests against this
+    URL, setting `target_ip` to an attacker-controlled address sent the real Jenkins
+    admin credential straight to them — and, since only IP-shape was validated (no
+    private/loopback/metadata blocklist), it was SSRF-capable against internal
+    targets too. `project` is accepted for signature compatibility with existing
+    callers but is intentionally unused now.
+    """
+    return settings.JENKINS_BASE_URL
 MAX_ARTIFACT_URL_LENGTH = 2048
 MAX_ARTIFACT_SIZE_BYTES = 50 * 1024 * 1024
 
@@ -157,9 +178,10 @@ def _expire_scan_if_timed_out(
         return False
 
     now = now or datetime.now(timezone.utc)
-    timeout_seconds = (
-        timeout_seconds if timeout_seconds is not None else settings.SCAN_TIMEOUT
-    )
+    if timeout_seconds is None:
+        # Honor the per-scan timeout (set from the X-Scan-Timeout header at trigger time)
+        # before falling back to the global default, so a long scan isn't expired early.
+        timeout_seconds = getattr(scan_obj, "timeout_seconds", None) or settings.SCAN_TIMEOUT
 
     reference_time = scan_obj.started_at or scan_obj.created_at
     if reference_time and reference_time.tzinfo is None:

@@ -28,7 +28,8 @@ pytest -v
 python run.py dev       # Foreground, hot-reload
 python run.py test      # Background, isolated DB, mocked execution
 python run.py staging   # Background, real Jenkins/Kali
-python run.py down      # Stops + removes volumes + orphans
+python run.py down      # Stops + removes volumes + orphans for the dev environment only
+python run.py down --env staging  # ...or explicitly target test/staging instead
 ```
 
 ### Default login (staging)
@@ -82,7 +83,7 @@ python run.py down      # Stops + removes volumes + orphans
 - **Celery tasks**: Moving tasks requires updating import path in `app/core/celery_app.py`.
 - **API key lookup order**: Reset/cancel checks `localStorage.getItem('API_KEY')` first, then `import.meta.env.VITE_API_KEY`.
 - **Nginx staging gotcha**: Don't mount `../dist:/usr/share/nginx/html:ro` — Dockerfile already bakes frontend. Causes 403.
-- **Docker rebuild vs restart**: `python run.py down` runs `docker compose down --volumes` — **destroys all postgres data** (scans, reports, projects). Never run it if you want to keep data.
+- **Docker rebuild vs restart**: `python run.py down` runs `docker compose down --volumes` for the dev environment's own Compose project (`sentinel-dev` by default, `--env test`/`--env staging` for the others) — **destroys that environment's postgres data** (scans, reports, projects). Never run it if you want to keep data. Each environment now has its own isolated project/volumes, so `down` no longer touches the other two.
   - Frontend/backend code only → `docker compose -f docker/docker-compose.yml -f docker/docker-compose.staging.yml up -d --build --no-deps backend frontend` (no data loss)
   - Just restart without rebuild → `docker compose -f docker/docker-compose.yml -f docker/docker-compose.staging.yml restart backend frontend`
   - Rebuild a single service → `docker compose -f docker/docker-compose.yml -f docker/docker-compose.staging.yml up -d --build --no-deps <service>`
@@ -95,7 +96,7 @@ python run.py down      # Stops + removes volumes + orphans
 - **Celery worker must be rebuilt too**: When rebuilding backend for code changes, also rebuild celery_worker — it runs `process_scan_reports_task` which calls `fetch_sonar_issues()`. Without rebuilding, old code is used.
 - **SonarQube container can die silently**: If SonarQube is down, celery_worker's fetch fails with "All connection attempts failed" and stores 0 findings. Restart with `docker compose ... up -d --no-deps sonarqube`.
 - **DOCKER_BUILDKIT=1**: Added to docker build in `Agent/Jenkinsfile` `doDockerBuild()`. Required for repos with `# syntax=docker/dockerfile:1` (e.g., open-webui).
-- **SonarQube token**: `squ_38aedbbc9186c8bf59f9e2f70d4cd2b83ca79969` — set in backend env, verified working on 26.5.
+- **SonarQube token**: set via `SONARQUBE_TOKEN` in backend env — see `docs/SECRETS_POLICY.md`. (A live token was previously committed here in plaintext; it's been scrubbed — rotate it if it hasn't been already, per finding #28.)
 - **Jenkins Docker build failures**: Docker build stage in pipeline fails on repos with BuildKit-only Dockerfiles. Fixed by `DOCKER_BUILDKIT=1` env var. Docker daemon itself is healthy — issue is the repo's Dockerfile, not the system.
 - **Generated files are read-only**: Never manually edit generated files (e.g., `src/types.ts` from `npm run generate:types`). Regenerate from source instead.
 - **API contracts are authoritative**: Frontend-backend contracts are defined by OpenAPI schemas. Frontend work must not modify backend contracts unless explicitly requested and the corresponding backend implementation is updated. Backend work must preserve published API contracts unless a contract change is explicitly requested.
@@ -114,9 +115,14 @@ python run.py down      # Stops + removes volumes + orphans
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/011-ux-audit/plan.md
+at specs/014-phase1-remediation/plan.md
 
 The completed UX audit (49 findings, score 0/100) is at
 specs/011-ux-audit/audit-report.md — open it before starting any frontend
 refactor to understand the Critical/Serious issues.
+
+Phase 1 remediation spec: specs/014-phase1-remediation/spec.md
+Phase 1 research: specs/014-phase1-remediation/research.md
+Phase 1 data model: specs/014-phase1-remediation/data-model.md
+Phase 1 API contracts: specs/014-phase1-remediation/contracts/api-changes.md
 <!-- SPECKIT END -->

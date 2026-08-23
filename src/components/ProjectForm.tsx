@@ -43,12 +43,13 @@ export const ProjectForm = ({
 
     if (!formData.git_url.trim()) {
       e.git_url = 'Git URL is required';
-    } else {
-      try {
-        new URL(formData.git_url);
-      } catch {
-        e.git_url = 'Invalid URL format (e.g., https://github.com/org/repo.git)';
-      }
+    } else if (!/^https?:\/\//.test(formData.git_url)) {
+      // Finding #102: match the backend's http(s)://-only requirement
+      // (_validate_git_url_value in schemas/project.py) instead of accepting any
+      // URL scheme (e.g. ssh://) that would only fail later on submit.
+      e.git_url = 'Git URL must start with http:// or https://';
+    } else if (formData.git_url.length > 2048) {
+      e.git_url = 'Git URL must be 2048 characters or fewer';
     }
 
     if (!formData.sonar_key.trim()) e.sonar_key = 'Sonar project key is required';

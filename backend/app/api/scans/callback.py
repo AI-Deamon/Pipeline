@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Annotated
 
+from celery import chain, group
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from .utils import (
     _validate_callback_artifacts,
     _validate_callback_auth,
     _expire_scan_if_timed_out,
+    resolve_jenkins_base_url,
 )
 
 router = APIRouter()
@@ -78,23 +80,49 @@ def _update_finished_at(scan_obj: ScanDB, report: dict) -> None:
         scan_obj.finished_at = datetime.now(timezone.utc)
 
 
-def _schedule_post_processing(scan_obj: ScanDB, normalized_stages: list, build_number: int | None) -> None:
-    if scan_obj.state != ScanState.COMPLETED or not build_number:
+def _schedule_post_processing(scan_obj: ScanDB, normalized_stages: list, build_number: int | None, project_obj: ProjectDB | None = None) -> None:
+    # Process reports for COMPLETED and FAILED scans.  A FAILED scan may still
+    # have PASS and FAIL stages whose findings must reach the issue tracker
+    # (e.g. ZAP found vulnerabilities → FAIL stage with findings).  Terminal
+    # scans that were never started (CANCELLED, SKIPPED) are skipped.
+    if scan_obj.state in TERMINAL_STATES and scan_obj.state not in (ScanState.COMPLETED, ScanState.FAILED):
+        return
+    if not build_number:
         return
 
-    process_scan_reports_task.delay(
+    if scan_obj.state == ScanState.FAILED:
+        logger.info("Scheduling report processing for FAILED scan %s (stages may have findings)", scan_obj.scan_id)
+
+    jenkins_base_url = resolve_jenkins_base_url(project_obj) if project_obj else settings.JENKINS_BASE_URL
+
+    report_task = process_scan_reports_task.si(
         scan_id=scan_obj.scan_id,
         jenkins_build_number=str(build_number),
-        jenkins_base_url=settings.JENKINS_BASE_URL,
+        jenkins_base_url=jenkins_base_url,
     )
 
-    completed_stages = [s for s in normalized_stages if s.get("status") in ("PASSED", "PASS")]
-    for stage in completed_stages:
-        tool_name = stage["stage"]
-        migrate_scan_to_issues.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
-        auto_verify_fixed_issues.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
-        auto_verify_pending_rescans.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
-        detect_regressions.delay(scan_obj.scan_id, scan_obj.project_id, tool_name)
+    # Match the fetcher's _get_active_tools contract: both PASS and FAIL stages
+    # produce reports. A FAIL stage (e.g. ZAP found vulnerabilities) is exactly the
+    # one whose findings must reach the issue tracker.
+    completed_stages = [s for s in normalized_stages if s.get("status") in ("PASS", "FAIL")]
+    if not completed_stages:
+        report_task.apply_async()
+        return
+
+    # Migration/verification read the ScanReportDB row that process_scan_reports_task
+    # creates, so they must not run until that task finishes. Each stage's chain runs
+    # independently once the report fetch completes; stages don't depend on each other.
+    per_stage_chains = [
+        chain(
+            migrate_scan_to_issues.si(scan_obj.scan_id, scan_obj.project_id, stage["stage"]),
+            auto_verify_fixed_issues.si(scan_obj.scan_id, scan_obj.project_id, stage["stage"]),
+            auto_verify_pending_rescans.si(scan_obj.scan_id, scan_obj.project_id, stage["stage"]),
+            detect_regressions.si(scan_obj.scan_id, scan_obj.project_id, stage["stage"]),
+        )
+        for stage in completed_stages
+    ]
+
+    chain(report_task, group(per_stage_chains)).apply_async()
 
 
 @router.post("/scans/{scan_id}/callback",
@@ -108,12 +136,20 @@ def scan_callback(
 ):
     _validate_callback_auth(x_callback_token)
 
-    scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
+    # Lock the scan row for the duration of this request so a concurrent callback
+    # delivery (Jenkins retry) or the recovery background thread can't read-modify-write
+    # the same row in between our read and our commit.
+    scan_obj = (
+        db.query(ScanDB).filter(ScanDB.scan_id == scan_id).with_for_update().first()
+    )
     if not scan_obj:
         raise HTTPException(status_code=404, detail="Scan not found")
 
     project_obj = (
-        db.query(ProjectDB).filter(ProjectDB.project_id == scan_obj.project_id).first()
+        db.query(ProjectDB)
+        .filter(ProjectDB.project_id == scan_obj.project_id)
+        .with_for_update()
+        .first()
     )
     if project_obj:
         _expire_scan_if_timed_out(db, scan_obj, project_obj)
@@ -165,7 +201,7 @@ def scan_callback(
     db.commit()
 
     build_number = report.get("build_number") or report.get("buildNumber")
-    _schedule_post_processing(scan_obj, normalized_stages, build_number)
+    _schedule_post_processing(scan_obj, normalized_stages, build_number, project_obj)
 
     background_tasks.add_task(
         websocket_manager.send_scan_update,

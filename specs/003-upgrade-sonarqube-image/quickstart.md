@@ -74,8 +74,9 @@ curl -s http://localhost:9000/api/server/version
 curl -s -u admin:admin123 "http://localhost:9000/api/projects/search"
 curl -s -u admin:admin123 "http://localhost:9000/api/users/search"
 
-# Verify API token still works
-curl -s -u "squ_38aedbbc9186c8bf59f9e2f70d4cd2b83ca79969:" "http://localhost:9000/api/issues/search?componentKeys=Soner_key&ps=1"
+# Verify API token still works (use your own SONARQUBE_TOKEN — see docs/SECRETS_POLICY.md;
+# a live token was previously committed here in plaintext, scrubbed per finding #28)
+curl -s -u "$SONARQUBE_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=Soner_key&ps=1"
 
 # Verify dashboard access
 curl -s -o /dev/null -w "%{http_code}" "http://localhost:9000/project/issues?id=Soner_key"

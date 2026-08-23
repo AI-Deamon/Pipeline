@@ -198,16 +198,22 @@ pipeline {
 
         stage('Git Checkout') {
             steps {
-                script {
-                    checkout([
-                        $class: 'GitSCM',
-                        branches: [[name: PROJECT.branch ?: 'main']],
-                        userRemoteConfigs: [[
-                            url: PROJECT.git_url,
-                            credentialsId: PROJECT.credentials_id ?: params.CRED_GITHUB
-                        ]]
-                    ])
-                    recordStage('git_checkout', 'PASS', 'Git checkout successful')
+                // Per-stage timeout (finding #52): previously only Sonar Scanner had
+                // one — every other stage relied solely on the whole-pipeline
+                // SCAN_TIMEOUT, so a single hung stage could silently starve every
+                // stage after it of its share of the budget.
+                timeout(time: 5, unit: 'MINUTES') {
+                    script {
+                        checkout([
+                            $class: 'GitSCM',
+                            branches: [[name: PROJECT.branch ?: 'main']],
+                            userRemoteConfigs: [[
+                                url: PROJECT.git_url,
+                                credentialsId: PROJECT.credentials_id ?: params.CRED_GITHUB
+                            ]]
+                        ])
+                        recordStage('git_checkout', 'PASS', 'Git checkout successful')
+                    }
                 }
             }
         }
@@ -237,7 +243,6 @@ pipeline {
                                                -Dsonar.nodejs.executable=/home/kali_linux/node-v20.18.0-linux-x64/bin/node \
                                                -Dsonar.scanner.skipJreProvisioning=true \
                                                -Dsonar.sourceEncoding=UTF-8 \
-                                               -Dsonar.token=\$SONAR_TOKEN \
                                                -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \
                                                > reports/sonar-scanner-output.log 2>&1; cat reports/sonar-scanner-output.log
                                          """
@@ -286,32 +291,48 @@ pipeline {
 
         stage('Dependency Check') {
             when { expression { shouldRun('dependency_check') } }
+            options { timeout(time: 15, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     // Ensure report directory exists before running dependency check
                     sh "mkdir -p reports"
 
-                    // Install npm dependencies so ODC can find Node.js vulnerabilities
-                    def installDirs = sh(
-                        script: "find . -name 'package.json' ! -path '*/node_modules/*' -exec dirname {} \\; | sort -u",
+                    // Check for existing lockfiles first (committed to repo or from previous steps)
+                    def preLockFileCount = sh(
+                        script: "find . -name 'package-lock.json' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
                         returnStdout: true
-                    ).trim().split('\n').findAll { it }
+                    ).trim().toInteger()
+                    def preYarnLockCount = sh(
+                        script: "find . -name 'yarn.lock' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
+                        returnStdout: true
+                    ).trim().toInteger()
+
+                    // Only run npm install if no lockfiles exist yet
                     def npmSucceeded = 0
                     def npmFailed = 0
-                    installDirs.each { dir ->
-                        def ok = sh(
-                            script: "cd ${dir} && npm install --package-lock-only 2>&1 && echo 'OK' || echo 'FAIL'",
+                    def installDirs = []
+                    if (preLockFileCount == 0 && preYarnLockCount == 0) {
+                        installDirs = sh(
+                            script: "find . -name 'package.json' ! -path '*/node_modules/*' -exec dirname {} \\; | sort -u",
                             returnStdout: true
-                        ).trim()
-                        if (ok == 'OK') {
-                            npmSucceeded++
-                        } else {
-                            npmFailed++
-                            echo "WARNING: npm install --package-lock-only failed in ${dir}"
+                        ).trim().split('\n').findAll { it }
+                        installDirs.each { dir ->
+                            def ok = sh(
+                                script: "cd ${dir} && npm install --package-lock-only 2>&1 && echo 'OK' || echo 'FAIL'",
+                                returnStdout: true
+                            ).trim()
+                            if (ok == 'OK') {
+                                npmSucceeded++
+                            } else {
+                                npmFailed++
+                                echo "WARNING: npm install --package-lock-only failed in ${dir}"
+                            }
                         }
+                    } else {
+                        echo "Found ${preLockFileCount} package-lock.json and ${preYarnLockCount} yarn.lock — skipping npm install"
                     }
 
-                    // Check for lock files ANYWHERE in workspace (not just root)
+                    // Count lock files (existing + newly generated)
                     def lockFileCount = sh(
                         script: "find . -name 'package-lock.json' ! -path '*/node_modules/*' 2>/dev/null | wc -l",
                         returnStdout: true
@@ -376,10 +397,20 @@ pipeline {
                         }
                         withEnv(javaEnv) {
                             catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                                def firstArgs = argsWithKey.join(' ')
                                 sh """
                                     mkdir -p "${odcData}"
-                                    ${odcCli} ${argsWithKey.join(' ')} --data "${odcData}" 2>&1 | tee reports/dependency-check-cli.log
-                                    exit \${PIPESTATUS[0]}
+                                    # First attempt: full NVD update
+                                    ${odcCli} ${firstArgs} --data "${odcData}" 2>&1 | tee reports/dependency-check-cli.log
+                                    ODC_EXIT=\${PIPESTATUS[0]}
+                                    # If NVD update failed (exit code 2), retry with cached data
+                                    if [ \$ODC_EXIT -eq 2 ]; then
+                                        echo "" | tee -a reports/dependency-check-cli.log
+                                        echo "=== NVD update failed — retrying with cached data (--disableRetrieval) ===" | tee -a reports/dependency-check-cli.log
+                                        ${odcCli} ${firstArgs} --disableRetrieval --data "${odcData}" 2>&1 | tee -a reports/dependency-check-cli.log
+                                        exit \${PIPESTATUS[0]}
+                                    fi
+                                    exit \$ODC_EXIT
                                 """
                             }
                         }
@@ -421,6 +452,7 @@ pipeline {
 
         stage('Trivy FS Scan') {
             when { expression { shouldRun('trivy_fs_scan') } }
+            options { timeout(time: 10, unit: 'MINUTES') }  // finding #52
             steps {
                 sh """
                     if [ ! -d node_modules ]; then
@@ -444,12 +476,13 @@ pipeline {
 
         stage('Docker Build') {
             when { expression { shouldRun('docker_build') } }
+            options { timeout(time: 15, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     // Find all Dockerfiles in the repository
                     def dockerfiles = []
                     def output = sh(
-                        script: "find . -type f \\( -name 'Dockerfile*' -o -name '*.Dockerfile' \\) ! -name '*.md' | sort",
+                        script: "find . -path './node_modules' -prune -o -path './.git' -prune -o -type f \\( -name 'Dockerfile*' -o -name '*.Dockerfile' \\) ! -name '*.md' -print | sort",
                         returnStdout: true
                     ).trim()
 
@@ -560,6 +593,7 @@ pipeline {
 
         stage('Docker Push') {
             when { expression { shouldRun('docker_push') } }
+            options { timeout(time: 10, unit: 'MINUTES') }  // finding #52
             steps {
                 withCredentials([usernamePassword(credentialsId: params.CRED_DOCKER,
                                                   usernameVariable: 'DOCKER_USER',
@@ -590,8 +624,12 @@ pipeline {
                             def pushSuccess = false
                             try {
                                 sh "docker tag ${imageTag} ${pushTag}"
-                                def loginArgs = dockerRegistry ? "-u \"$DOCKER_USER\" --password-stdin ${dockerRegistry}" : "-u \"$DOCKER_USER\" --password-stdin"
-                                sh "echo \"$DOCKER_PASS\" | docker login ${loginArgs}"
+                                // Groovy-escape the credential vars (backslash-dollar) so the shell
+                                // expands the withCredentials-injected env vars at runtime. Plain
+                                // Groovy interpolation would bake the secret into the command string,
+                                // leaking it into logs and defeating credential masking.
+                                def loginArgs = dockerRegistry ? "-u \"\$DOCKER_USER\" --password-stdin ${dockerRegistry}" : "-u \"\$DOCKER_USER\" --password-stdin"
+                                sh "echo \"\$DOCKER_PASS\" | docker login ${loginArgs}"
                                 sh "docker push ${pushTag} 2>&1"
                                 pushedImages << pushTag
                                 pushSuccess = true
@@ -635,6 +673,7 @@ pipeline {
 
         stage('Trivy Image Scan') {
             when { expression { shouldRun('trivy_image_scan') } }
+            options { timeout(time: 10, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     def allImageTags = env.ALL_IMAGE_TAGS ? env.ALL_IMAGE_TAGS.split(',') as List : []
@@ -706,6 +745,7 @@ print(f'Merged {len(r)} results')
 
         stage('Nmap System Scan') {
             when { expression { shouldRun('nmap_scan') } }
+            options { timeout(time: 5, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     if (!PROJECT.target_ip?.trim()) {
@@ -774,11 +814,26 @@ print(f'Merged {len(r)} results')
                         return
                     }
 
+                    // Built via writeJSON (not shell-interpolated) specifically because
+                    // PROJECT.target_ip is user-controlled: the previous `echo '...${PROJECT.target_ip}...' > targets.json`
+                    // Groovy-interpolated it directly into a shell string, so a crafted
+                    // target_ip (e.g. containing a `'`) could break out of the quoting and
+                    // run arbitrary shell on this agent. writeJSON serializes the value as
+                    // a JSON string with no shell involved at all, closing that off entirely
+                    // regardless of what characters target_ip contains.
+                    writeJSON file: "${scannerDir}/targets.json", json: [
+                        client: "Pipeline Auto Scan",
+                        month: new Date().format("MMMM yyyy"),
+                        targets: [[
+                            ip: PROJECT.target_ip,
+                            name: "scan-target",
+                            environment: "Test",
+                        ]],
+                    ]
+
                     def nmapOutput = sh(returnStdout: true, script: """
                         set +e
                         cd ${scannerDir}
-
-                        echo '{"client":"Pipeline Auto Scan","month":"${new Date().format("MMMM yyyy")}","targets":[{"ip":"${PROJECT.target_ip}","name":"scan-target","environment":"Test"}]}' > targets.json
 
                         python3 scanner.py 2>&1
 
@@ -809,6 +864,7 @@ print(f'Merged {len(r)} results')
 
         stage('ZAP Scan') {
             when { expression { shouldRun('zap_scan') } }
+            options { timeout(time: 30, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     if (!PROJECT.target_url?.trim()) {
@@ -820,12 +876,21 @@ print(f'Merged {len(r)} results')
                         return
                     }
 
-                    // Check target connectivity before starting ZAP
+                    // Check target connectivity before starting ZAP. TARGET_URL is passed
+                    // as a real environment variable and the script below is a single-quoted
+                    // Groovy string (no ${...} interpolation) so bash expands $TARGET_URL
+                    // itself — the same safe pattern used for the ZAP daemon calls further
+                    // down. Previously this Groovy-interpolated PROJECT.target_url directly
+                    // into a shell string, so a crafted target_url could break out of the
+                    // quoting and run arbitrary shell on this agent.
                     echo "Checking target URL connectivity: ${PROJECT.target_url}"
-                    def targetReachable = sh(
-                        script: "curl -s -o /dev/null --max-time 30 '${PROJECT.target_url}' && echo 'reachable' || echo 'unreachable'",
-                        returnStdout: true
-                    ).trim()
+                    def targetReachable = ''
+                    withEnv(["TARGET_URL=${PROJECT.target_url}"]) {
+                        targetReachable = sh(
+                            script: 'curl -s -o /dev/null --max-time 30 "$TARGET_URL" && echo "reachable" || echo "unreachable"',
+                            returnStdout: true
+                        ).trim()
+                    }
                     if (targetReachable != 'reachable') {
                         echo "WARNING: Target URL ${PROJECT.target_url} is unreachable from Jenkins agent"
                         echo "ZAP requires a running target to scan — skipping ZAP scan"
@@ -885,7 +950,7 @@ print(f'Merged {len(r)} results')
                                     fi
 
                                     # Try version endpoint first (more reliable), fallback to root
-                                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
+                                    READY=$(curl -s --max-time 15 -o /dev/null -w "%{http_code}" \
                                         "${ZAP_API_BASE}/JSON/core/view/version/" 2>/dev/null)
 
                                     if [ "$READY" = "200" ]; then
@@ -895,7 +960,7 @@ print(f'Merged {len(r)} results')
                                     fi
 
                                     # Fallback: try root endpoint
-                                    READY=$(curl -s -o /dev/null -w "%{http_code}" \
+                                    READY=$(curl -s --max-time 15 -o /dev/null -w "%{http_code}" \
                                         "${ZAP_API_BASE}/" 2>/dev/null)
 
                                     if [ "$READY" != "000" ]; then
@@ -918,10 +983,19 @@ print(f'Merged {len(r)} results')
                                     exit 1
                                 fi
 
+                                echo "Configuring ZAP scan parameters for stability..."
+                                # Reduce active scanner threads to prevent resource exhaustion
+                                curl -s --max-time 15 "${ZAP_API_BASE}/JSON/ascan/action/setOptionThreadPerHost/?value=4" > /dev/null
+                                # Increase DOM XSS navigation timeout (default 10s is too low for slow pages)
+                                curl -s --max-time 15 "${ZAP_API_BASE}/JSON/domXss/action/setTimeout/?timeout=30000" > /dev/null 2>&1
+                                # Disable DOM XSS scanner (rule 40026) — causes hang on slow-rendering JS pages
+                                curl -s --max-time 15 "${ZAP_API_BASE}/JSON/ascan/action/disableScanners/?ids=40026" > /dev/null
+                                echo "ZAP configured: threads=4, domXssTimeout=30s, rule40026=disabled"
+
                                 echo "Starting spider scan..."
                                 ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
                             
-                                SPIDER_ID=$(curl -s \
+                                SPIDER_ID=$(curl -s --max-time 30 \
                                     "${ZAP_API_BASE}/JSON/spider/action/scan/?url=$TARGET_URL" \
                                     | jq -r '.scan // empty')
 
@@ -952,7 +1026,11 @@ print(f'Merged {len(r)} results')
                                         exit 1
                                     fi
 
-                                    STATUS=$(curl -s \
+                                    # finding #53: --max-time here matters more than anywhere else in this
+                                    # file — this call is inside the polling while-loop, and without a bound
+                                    # a single hung request (ZAP daemon wedged but socket stays open) blocks
+                                    # the loop from ever re-checking SPIDER_ELAPSED against SPIDER_TIMEOUT.
+                                    STATUS=$(curl -s --max-time 15 \
                                         "${ZAP_API_BASE}/JSON/spider/view/status/?scanId=$SPIDER_ID" \
                                         | jq -r '.status // "0"')
 
@@ -971,7 +1049,7 @@ print(f'Merged {len(r)} results')
 
                                 echo "Starting active scan..."
 
-                                ASCAN_ID=$(curl -s \
+                                ASCAN_ID=$(curl -s --max-time 30 \
                                     "${ZAP_API_BASE}/JSON/ascan/action/scan/?url=$TARGET_URL&recurse=true" \
                                     | jq -r '.scan // empty')
 
@@ -1002,7 +1080,10 @@ print(f'Merged {len(r)} results')
                                         exit 1
                                     fi
 
-                                    STATUS=$(curl -s \
+                                    # finding #53: same reasoning as the spider-status poll above — bounds
+                                    # a single hung request so it can't block ASCAN_ELAPSED from being
+                                    # re-checked against ASCAN_TIMEOUT.
+                                    STATUS=$(curl -s --max-time 15 \
                                         "${ZAP_API_BASE}/JSON/ascan/view/status/?scanId=$ASCAN_ID" \
                                         | jq -r '.status // "0"')
 
@@ -1019,11 +1100,11 @@ print(f'Merged {len(r)} results')
 
                                 echo "Generating reports..."
 
-                                curl -s \
+                                curl -s --max-time 60 \
                                     "${ZAP_API_BASE}/OTHER/core/other/htmlreport/" \
                                     -o reports/zap.html
 
-                                curl -s \
+                                curl -s --max-time 60 \
                                     "${ZAP_API_BASE}/OTHER/core/other/jsonreport/" \
                                     -o reports/zap.json
 
@@ -1054,6 +1135,16 @@ print(f'Merged {len(r)} results')
                             def trimmed = zapErrorDetail.length() > 400 ? zapErrorDetail.take(400) + '...' : zapErrorDetail
                             echo "ZAP scan failed: ${trimmed}"
                             recordStage('zap_scan', 'FAIL', "ZAP scan failed: ${trimmed}")
+                        } finally {
+                            sh '''
+                                ZAP_PID=$(ps aux | grep -v grep | grep -i "zap" | awk "{print \$2}" | head -1)
+                                if [ -n "$ZAP_PID" ]; then
+                                    echo "Cleaning up ZAP process (PID: $ZAP_PID)..."
+                                    kill "$ZAP_PID" 2>/dev/null || true
+                                    sleep 2
+                                    kill -0 "$ZAP_PID" 2>/dev/null && kill -9 "$ZAP_PID" 2>/dev/null || true
+                                fi
+                            '''
                         }
                     }
                 }
@@ -1105,14 +1196,17 @@ EOF
 """, label: 'Write callback payload'
 
                 withCredentials([string(credentialsId: params.CRED_CALLBACK, variable: 'CALLBACK_TOKEN')]) {
-                    sh """
-                        curl -sS -X POST \
-                          -H "Content-Type: application/json" \
-                          -H "X-Callback-Token: \$CALLBACK_TOKEN" \
-                          --data @callback.json \
-                          "${CALLBACK_URL}" \
-                        || echo "Callback failed"
-                    """
+                    retry(3) {
+                        sh """
+                            curl -sS --retry 2 --retry-delay 10 -X POST \
+                              -H "Content-Type: application/json" \
+                              -H "X-Callback-Token: \$CALLBACK_TOKEN" \
+                              --data @callback.json \
+                              "${CALLBACK_URL}" \
+                            || { echo "Callback attempt failed"; exit 1; }
+                        """
+                        sleep(time: 10, unit: 'SECONDS')
+                    }
                 }
             }
         }
@@ -1176,7 +1270,7 @@ EOF
     
                 withCredentials([string(credentialsId: params.CRED_CALLBACK, variable: 'CALLBACK_TOKEN')]) {
         sh """
-            curl -sS -X POST \
+            curl -sS --retry 2 --retry-delay 5 -X POST \
               -H "Content-Type: application/json" \
               -H "X-Callback-Token: \$CALLBACK_TOKEN" \
               --data @callback.json \

@@ -41,10 +41,16 @@ vi.mock("../services/api", () => ({
       list: vi.fn(),
       delete: vi.fn(),
     },
-    reports: {
-      getSummary: vi.fn().mockResolvedValue({
+    portfolio: {
+      getOverview: vi.fn().mockResolvedValue({
+        total_projects: 3,
+        total_findings: 0,
         severity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-        by_type: { bug: 0, vulnerability: 0, code_smell: 0, security_hotspot: 0 },
+        projects: [
+          { project_id: "1", name: "Alpha Project", risk_score: 100, total_findings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0, tools: [], last_scan_state: "COMPLETED" },
+          { project_id: "2", name: "Beta Project", risk_score: 100, total_findings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0, tools: [], last_scan_state: "FAILED" },
+          { project_id: "3", name: "Gamma Project", risk_score: 100, total_findings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0, tools: [], last_scan_state: "COMPLETED" },
+        ],
       }),
     },
   },

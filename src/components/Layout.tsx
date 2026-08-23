@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { Outlet, Link, useNavigate, useLocation, useParams } from 'react-router-dom';
-import { Shield, LayoutDashboard, PlusCircle, Bug, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText, ListChecks, FolderTree, Edit3, type LucideIcon } from 'lucide-react';
+import { Shield, LayoutDashboard, PlusCircle, Bug, LogOut, Menu, X, Activity, History, Settings, Key, BookOpen, FileText, ListChecks, FolderTree, Edit3, BarChart3, TrendingUp, Users, type LucideIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../hooks/useAuth';
 import { useRbac } from '../hooks/useRbac';
@@ -35,6 +35,10 @@ const NavLink = ({ to, icon: Icon, isActive, onNavigate, children }: NavLinkProp
 
 function getPageTitle(pathname: string): string {
   if (pathname === '/dashboard') return 'Dashboard';
+  if (pathname === '/dashboard/portfolio') return 'Security Overview';
+  if (pathname === '/dashboard/trends') return 'Trend Analysis';
+  if (pathname === '/dashboard/workload') return 'Team Workload';
+  if (pathname === '/dashboard/executive') return 'Executive Summary';
   if (pathname === '/projects/create') return 'Create Project';
   if (pathname.includes('/projects/') && pathname.includes('/edit')) return 'Edit Project';
   if (pathname.includes('/projects/') && pathname.includes('/manual')) return 'Scan Configuration';
@@ -60,6 +64,10 @@ function CoreNavLinks({ isActive, onNavigate, canAssignIssues, isAdmin, canViewP
       <h3 className="px-4 text-xs font-medium text-slate-400 mb-3">Core</h3>
       <div className="space-y-1">
         <NavLink to="/dashboard" icon={LayoutDashboard} isActive={isActive('/dashboard')} onNavigate={onNavigate}>Dashboard</NavLink>
+        <NavLink to="/dashboard/portfolio" icon={BarChart3} isActive={isActive('/dashboard/portfolio')} onNavigate={onNavigate}>Security Overview</NavLink>
+        <NavLink to="/dashboard/trends" icon={TrendingUp} isActive={isActive('/dashboard/trends')} onNavigate={onNavigate}>Trends</NavLink>
+        <NavLink to="/dashboard/workload" icon={Users} isActive={isActive('/dashboard/workload')} onNavigate={onNavigate}>Team Workload</NavLink>
+        <NavLink to="/dashboard/executive" icon={FileText} isActive={isActive('/dashboard/executive')} onNavigate={onNavigate}>Executive Summary</NavLink>
         <NavLink to="/my-issues" icon={Bug} isActive={isActive('/my-issues')} onNavigate={onNavigate}>My Issues</NavLink>
         {(canAssignIssues || isAdmin) && (
           <NavLink to="/issues" icon={ListChecks} isActive={isActive('/issues')} onNavigate={onNavigate}>Issues</NavLink>
@@ -285,7 +293,12 @@ const Layout = () => {
           
           <div className="flex items-center gap-4">
             <div className="hidden lg:flex flex-col items-end">
-              <span className="text-xs text-slate-400">Server Time</span>
+              {/* Finding #63: this is the browser's own clock (setInterval + `new
+                  Date()`), hardcoded to IST formatting — not server-sourced and not
+                  aware of the viewer's actual timezone. "Server Time" read as
+                  authoritative backend state when it was neither; relabeled to
+                  describe what it actually is. */}
+              <span className="text-xs text-slate-400">Local Clock (IST)</span>
               <span className="text-xs font-medium text-slate-700 font-mono">
                 {serverTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })} IST
               </span>

@@ -66,8 +66,8 @@ function ScanStagesList({ stages, scan, expandedStages, onToggleStage }: ScanSta
     <div className="divide-y divide-slate-100">
       {stages.map((stage, idx) => {
         const isExpanded = expandedStages[stage.stage];
-        const isFailed = stage.status.toLowerCase().includes('fail');
-        const isSuccess = stage.status.toLowerCase().includes('pass') || stage.status.toLowerCase().includes('success');
+        const isFailed = stage.status === 'FAIL';
+        const isSuccess = stage.status === 'PASS';
 
         return (
           <div key={idx}>
@@ -367,6 +367,7 @@ const ScanStatusPage = () => {
         isOpen={showErrorModal}
         onClose={() => setShowErrorModal(false)}
         error={scan?.error || null}
+        finishedAt={scan?.finished_at}
       />
 
       {showCancelConfirm && (

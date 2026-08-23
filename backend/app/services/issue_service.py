@@ -27,7 +27,8 @@ class IssueService:
             existing.last_seen_at = now
             for field in ("severity", "title", "description", "location",
                           "severity_v2", "effort", "rule", "recommendation",
-                          "finding_type", "raw_evidence", "code_snippet",
+                          "finding_type", "sonar_status", "sonar_resolution",
+                          "raw_evidence", "code_snippet",
                           "issue_type", "scan_id"):
                 if field in data:
                     setattr(existing, field, data[field])
@@ -55,6 +56,8 @@ class IssueService:
             rule=data.get("rule"),
             recommendation=data.get("recommendation"),
             finding_type=data.get("finding_type"),
+            sonar_status=data.get("sonar_status"),
+            sonar_resolution=data.get("sonar_resolution"),
             raw_evidence=data.get("raw_evidence"),
             code_snippet=data.get("code_snippet"),
             extra_metadata=data.get("extra_metadata", {}),
@@ -185,6 +188,8 @@ class IssueService:
             "rule": issue.rule,
             "recommendation": issue.recommendation,
             "finding_type": issue.finding_type,
+            "sonar_status": issue.sonar_status,
+            "sonar_resolution": issue.sonar_resolution,
             "raw_evidence": issue.raw_evidence,
             "is_new": issue.is_new,
             "status": issue.status,
@@ -217,11 +222,14 @@ class IssueService:
         session.add(entry)
         session.flush()
         # Invalidate the per-issue cache and the pending-verification list cache so
-        # subsequent reads see the new state immediately.
+        # subsequent reads see the new state immediately. Deferred to after the
+        # caller's commit (finding #96) — invalidating here, at flush time, races a
+        # concurrent read that could repopulate the cache with pre-update data before
+        # this transaction is even committed, and nothing would invalidate it again.
         try:
-            from app.services.cache import cache_delete, cache_delete_pattern
-            cache_delete(f"issue:{issue_id}")
-            cache_delete_pattern("pending_verification:*")
+            from app.services.cache import invalidate_after_commit
+            invalidate_after_commit(session, key=f"issue:{issue_id}")
+            invalidate_after_commit(session, pattern="pending_verification:*")
         except Exception:
             pass
 
@@ -237,15 +245,42 @@ class IssueService:
         if issue is None:
             return None
 
+        from_state = IssueState(issue.status)
         old_assignee = issue.assignee_id
+        # Reassigning an issue that's already being actively worked (ASSIGNED or
+        # IN_PROGRESS) to a different developer is a normal workflow (handoff, someone
+        # goes on leave) and must not force a status change — only OPEN/REJECTED need
+        # a real transition *into* ASSIGNED. Regression note: an earlier version of this
+        # fix only special-cased ASSIGNED, which meant reassigning an IN_PROGRESS issue
+        # hit `is_valid_transition(IN_PROGRESS, ASSIGNED)` (False, since IN_PROGRESS only
+        # permits -> FIXED) and hard-errored on a previously-working reassignment.
+        needs_transition = from_state not in (IssueState.ASSIGNED, IssueState.IN_PROGRESS)
+
+        if needs_transition:
+            # Real state transition (e.g. OPEN -> ASSIGNED, REJECTED -> ASSIGNED) — must
+            # go through the same rules as transition_status, or a closed/verified issue
+            # could be forced back into the active queue via assign().
+            if not is_valid_transition(from_state, IssueState.ASSIGNED):
+                raise ValueError(
+                    f"Invalid transition: {from_state.value} -> {IssueState.ASSIGNED.value}"
+                )
+
         issue.assignee_id = assignee_id
         issue.assigned_by = assigned_by
         if priority is not None:
             issue.priority = priority
-        issue.status = IssueState.ASSIGNED.value
 
         self._record_history(session, issue_id, "assignee_id", old_assignee, assignee_id, actor_id=assigned_by)
-        self._record_history(session, issue_id, "status", IssueState.OPEN.value, IssueState.ASSIGNED.value, actor_id=assigned_by)
+
+        if needs_transition:
+            old_status = issue.status
+            issue.status = IssueState.ASSIGNED.value
+            issue.resolved_at = None  # matches transition_status's clearing for ASSIGNED
+            self._record_history(
+                session, issue_id, "status", old_status, IssueState.ASSIGNED.value, actor_id=assigned_by
+            )
+        # else: reassigning an already-ASSIGNED issue — no status transition needed.
+
         if priority is not None:
             self._record_history(session, issue_id, "priority", None, priority, actor_id=assigned_by)
 
@@ -258,6 +293,7 @@ class IssueService:
         issue_id: int,
         to_status: str,
         changed_by: Optional[str] = None,
+        change_type: str = "update",
     ) -> Optional[IssueDB]:
         issue = self.get_by_id(session, issue_id)
         if issue is None:
@@ -276,10 +312,14 @@ class IssueService:
 
         if to_state == IssueState.VERIFIED:
             issue.resolved_at = datetime.now(timezone.utc)
-        elif to_state == IssueState.REJECTED or to_state == IssueState.ASSIGNED:
+        elif to_state in (IssueState.REJECTED, IssueState.ASSIGNED, IssueState.OPEN):
+            # Reopening (regression) or rejecting clears the resolution timestamp.
             issue.resolved_at = None
 
-        self._record_history(session, issue_id, "status", old_status, to_state.value, actor_id=changed_by)
+        self._record_history(
+            session, issue_id, "status", old_status, to_state.value,
+            actor_id=changed_by, change_type=change_type,
+        )
         session.flush()
         return issue
 

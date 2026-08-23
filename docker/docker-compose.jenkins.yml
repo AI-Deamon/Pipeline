@@ -14,7 +14,12 @@ services:
     environment:
       - JAVA_OPTS=-Djava.awt.headless=true -Xmx7g -Xms512m
       - JENKINS_ADMIN_ID=${JENKINS_ADMIN_ID:-admin}
-      - JENKINS_ADMIN_PASSWORD=${JENKINS_ADMIN_PASSWORD:-admin123}
+      # No insecure default: this container has Docker-socket access and (with
+      # network_mode: host) is reachable on every host interface, not just
+      # localhost — a weak/default admin password here is a near-direct path to
+      # root on the host via a pipeline step. Compose refuses to start rather than
+      # silently falling back to admin123.
+      - JENKINS_ADMIN_PASSWORD=${JENKINS_ADMIN_PASSWORD:?Set JENKINS_ADMIN_PASSWORD - no insecure default is allowed}
       - JENKINS_OPTS=${JENKINS_OPTS:-}
     restart: unless-stopped
 

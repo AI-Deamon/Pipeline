@@ -2,7 +2,7 @@ import hmac
 
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt  # PyJWT
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,6 +16,35 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=F
 
 # Common prefix for scan routes (used in callback path matching)
 _SCAN_PREFIX = "/api/v1/scans"
+
+SERVICE_ACCOUNT_USERNAME = "service-account"
+
+
+def ensure_service_account(db: Session) -> UserDB:
+    """Idempotently create the service-account row used by X-API-Key auth.
+
+    Called once at startup so the hot auth path only ever reads. Safe to call
+    concurrently: on a duplicate-insert race it rolls back and re-reads the winner.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    existing = db.query(UserDB).filter(UserDB.username == SERVICE_ACCOUNT_USERNAME).first()
+    if existing:
+        return existing
+    service_user = UserDB(
+        id=SERVICE_ACCOUNT_USERNAME,
+        username=SERVICE_ACCOUNT_USERNAME,
+        hashed_password=security.get_password_hash("service-account-no-login"),
+        role="admin",
+    )
+    db.add(service_user)
+    try:
+        db.commit()
+        db.refresh(service_user)
+        return service_user
+    except IntegrityError:
+        db.rollback()
+        return db.query(UserDB).filter(UserDB.username == SERVICE_ACCOUNT_USERNAME).first()
 
 
 def _is_callback_route(path: str) -> bool:
@@ -49,21 +78,22 @@ def get_current_user(
         return type("User", (), {"username": "callback-bypass", "id": None, "role": None})()
 
     if not token:
+        # Fallback to cookie-based auth token
+        token = request.cookies.get(settings.COOKIE_NAME)
+
+    if not token:
         # Fallback to API Key logic for Jenkins/external scripts that haven't migrated
         api_key = request.headers.get("X-API-Key")
         if api_key and hmac.compare_digest(api_key, settings.API_KEY):
-            # Return the service account from DB so RBAC checks work correctly
+            # Return the service account from DB so RBAC checks work correctly. The row
+            # is seeded at startup (see main.py `_create_service_account`) — this
+            # dependency is read-only so it can't race two concurrent first-requests
+            # into a duplicate-insert 500, which the previous create-on-miss did.
             service_user = db.query(UserDB).filter(UserDB.username == "service-account").first()
             if not service_user:
-                service_user = UserDB(
-                    id="service-account",
-                    username="service-account",
-                    role="admin",
-                    is_active=True,
-                )
-                db.add(service_user)
-                db.commit()
-                db.refresh(service_user)
+                # Should not happen once startup seeding has run; provision defensively
+                # without committing from the hot auth path.
+                service_user = ensure_service_account(db)
             return service_user
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -83,7 +113,7 @@ def get_current_user(
         if username is None:
             raise credentials_exception
         token_data = TokenData(username=username)
-    except JWTError:
+    except jwt.PyJWTError:
         raise credentials_exception
 
     user = db.query(UserDB).filter(UserDB.username == token_data.username).first()

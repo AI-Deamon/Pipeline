@@ -60,15 +60,33 @@ const CreateProjectPage = () => {
     } else if (currentStep === 2) {
       if (!formData.git_url.trim()) {
         newErrors.git_url = 'Git URL is required';
-      } else {
+      } else if (!/^https?:\/\//.test(formData.git_url)) {
+        // Finding #102: `new URL(...)` accepts any scheme (e.g. `ssh://git@host/repo.git`,
+        // a plausible paste from a real git remote), passing client validation only to
+        // fail on submit with an unmapped 422 — the backend requires http(s)://
+        // (`_validate_git_url_value` in schemas/project.py). Match it here.
+        newErrors.git_url = 'Git URL must start with http:// or https://';
+      } else if (formData.git_url.length > 2048) {
+        newErrors.git_url = 'Git URL must be 2048 characters or fewer';
+      }
+    } else if (currentStep === 3) {
+      // Previously validateStep(3) was never implemented — target_ip/target_url sailed
+      // through the whole wizard unchecked even though the backend rejects malformed
+      // values (finding #101), giving the user a confusing 422 after seemingly
+      // completing every step, with no field/step indication. Mirrors the same
+      // validation ProjectForm.tsx already has for the edit flow.
+      if (formData.target_ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(formData.target_ip)) {
+        newErrors.target_ip = 'Invalid IPv4 address format';
+      }
+      if (formData.target_url) {
         try {
-          new URL(formData.git_url);
+          new URL(formData.target_url);
         } catch {
-          newErrors.git_url = 'Invalid URL format';
+          newErrors.target_url = 'Invalid URL format';
         }
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -341,9 +359,10 @@ const CreateProjectPage = () => {
                       value={formData.target_ip}
                       onChange={handleInputChange}
                       placeholder="192.168.1.1"
-                      className="w-full bg-white border border-slate-200 rounded-lg pl-11 pr-4 py-3 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                      className={`w-full bg-white border ${errors.target_ip ? 'border-rose-500' : 'border-slate-200'} rounded-lg pl-11 pr-4 py-3 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all`}
                     />
                   </div>
+                  {errors.target_ip && <p className="text-rose-500 text-xs">{errors.target_ip}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -359,9 +378,10 @@ const CreateProjectPage = () => {
                       value={formData.target_url}
                       onChange={handleInputChange}
                       placeholder="https://example.com"
-                      className="w-full bg-white border border-slate-200 rounded-lg pl-11 pr-4 py-3 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all"
+                      className={`w-full bg-white border ${errors.target_url ? 'border-rose-500' : 'border-slate-200'} rounded-lg pl-11 pr-4 py-3 text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900 focus:border-transparent transition-all`}
                     />
                   </div>
+                  {errors.target_url && <p className="text-rose-500 text-xs">{errors.target_url}</p>}
                 </div>
               </div>
             )}

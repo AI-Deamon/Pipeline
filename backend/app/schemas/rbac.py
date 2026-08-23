@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 
@@ -8,7 +8,13 @@ class RoleUpdate(BaseModel):
 
 
 class ProjectAccessCreate(BaseModel):
-    scope_type: str  # "project" or "project_group"
+    # Literal, not a bare str (finding #75): a typo'd/wrong-case value (e.g.
+    # "Project") used to be accepted, stored, and audit-logged as a successful grant,
+    # but get_effective_project_ids() filters on an exact string match — so the row
+    # was silently inert and the "granted" user got zero real access despite the API
+    # reporting success. FastAPI now rejects anything but these two values at the
+    # request-validation layer, before it ever reaches the database.
+    scope_type: Literal["project", "project_group"]
     scope_id: str
 
 

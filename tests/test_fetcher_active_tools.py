@@ -1,5 +1,6 @@
-"""Tests for ReportFetcher._get_active_tools logic"""
-import pytest
+"""
+Tests for ReportFetcher._get_active_tools logic
+"""
 from app.services.reporting.fetcher import ReportFetcher
 
 
@@ -10,11 +11,11 @@ class TestGetActiveTools:
         self.fetcher = ReportFetcher("http://localhost:8080", "1")
 
     def test_empty_stage_results_automated_returns_all_tools(self):
-        """When no stage_results and automated mode, return all parsers"""
+        """When no stage_results and automated mode, return all parsers (incl. sonar)."""
         result = self.fetcher._get_active_tools(
             stage_results=None, selected_stages=None, scan_mode="automated"
         )
-        assert result == {"trivy_fs", "trivy_image", "zap", "dependency_check", "nmap"}
+        assert result == {"trivy_fs", "trivy_image", "zap", "dependency_check", "nmap", "sonar"}
 
     def test_empty_stage_results_manual_returns_selected_only(self):
         """BUG FIX: When no stage_results and manual mode, only return selected stages.

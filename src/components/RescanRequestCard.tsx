@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { CheckCircle, XCircle, Loader2, FileCode, Clock, User } from 'lucide-react';
+import { severityPillClass } from '../utils/severity';
 import type { PendingVerificationItem } from '../types';
 
 type RescanRequestCardProps = {
@@ -9,16 +10,6 @@ type RescanRequestCardProps = {
   isVerifying?: boolean;
   isRejecting?: boolean;
 };
-
-function severityClass(severity: string): string {
-  switch (severity.toLowerCase()) {
-    case 'critical': return 'bg-red-100 text-red-700';
-    case 'high': return 'bg-orange-100 text-orange-700';
-    case 'medium': return 'bg-yellow-100 text-yellow-700';
-    case 'low': return 'bg-blue-100 text-blue-700';
-    default: return 'bg-slate-100 text-slate-700';
-  }
-}
 
 const RescanRequestCard = memo(function RescanRequestCard({
   request,
@@ -32,7 +23,7 @@ const RescanRequestCard = memo(function RescanRequestCard({
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${severityClass(request.issue_severity)}`}>
+            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${severityPillClass(request.issue_severity)}`}>
               {request.issue_severity}
             </span>
             <span className="text-xs text-slate-500 inline-flex items-center gap-1">

@@ -88,7 +88,7 @@
 | 16 | Celery worker must be rebuilt too | When rebuilding backend for code changes, also rebuild celery_worker — it runs `process_scan_reports_task` which calls `fetch_sonar_issues()`. Without rebuilding, old code is used. |
 | 17 | SonarQube container can die silently | If SonarQube is down, celery_worker's fetch fails with "All connection attempts failed" and stores 0 findings. Restart with `docker compose ... up -d --no-deps sonarqube`. |
 | 18 | DOCKER_BUILDKIT=1 | Added to docker build in `Agent/Jenkinsfile` `doDockerBuild()`. Required for repos with `# syntax=docker/dockerfile:1` (e.g., open-webui). |
-| 19 | SonarQube token | `squ_38aedbbc9186c8bf59f9e2f70d4cd2b83ca79969` — set in backend env, verified working on 26.5. |
+| 19 | SonarQube token | Set via `SONARQUBE_TOKEN` in backend env — see `docs/SECRETS_POLICY.md`. (A live token was previously committed here in plaintext; scrubbed per finding #28 — rotate it if not already done.) |
 | 20 | Jenkins Docker build failures | Docker build stage in pipeline fails on repos with BuildKit-only Dockerfiles. Fixed by `DOCKER_BUILDKIT=1` env var. Docker daemon itself is healthy — issue is the repo's Dockerfile, not the system. |
 | 21 | Jenkins container port conflict | systemd Jenkins runs on 8080, containerized Jenkins also uses 8080. Use `JENKINS_OPTS=--httpPort=8081` env var to test the container alongside systemd Jenkins without stopping it. |
 | 22 | Jenkins container host networking | With `network_mode: host`, `ports:` directive is ignored. Port is set via `JENKINS_OPTS` (e.g., `--httpPort=8081`). Container reaches all services (SonarQube, backend, ZAP) via localhost. |

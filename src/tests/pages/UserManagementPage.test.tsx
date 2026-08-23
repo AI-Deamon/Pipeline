@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '../../components/Toast';
 import UserManagementPage from '../../pages/UserManagementPage';
+import { useAuth } from '../../hooks/useAuth';
 
 // Mock the API
 vi.mock('../../services/api', () => ({
@@ -31,9 +32,12 @@ vi.mock('../../services/api', () => ({
   },
 }));
 
-// Mock useAuth to return admin user
+// Mock useAuth to return admin user by default; individual tests can override
+// via `vi.mocked(useAuth).mockReturnValue(...)` (finding #105's test needs a
+// different currentUser to prove the self-delete guard isn't just `username
+// !== 'admin'`).
 vi.mock('../../hooks/useAuth', () => ({
-  useAuth: () => ({
+  useAuth: vi.fn(() => ({
     isAuthenticated: true,
     token: 'test-token',
     role: 'admin',
@@ -43,7 +47,7 @@ vi.mock('../../hooks/useAuth', () => ({
     logout: vi.fn(),
     isLoading: false,
     refreshUser: vi.fn(),
-  }),
+  })),
 }));
 
 // Mock useRbac
@@ -152,6 +156,41 @@ describe('UserManagementPage', () => {
     fireEvent.click(confirmBtn);
     await waitFor(() => {
       expect(api.rbac.deleteUser).toHaveBeenCalledWith('3');
+    });
+  });
+
+  describe('finding #105: self-delete protection is by identity, not by literal username', () => {
+    const originalMock = vi.mocked(useAuth).getMockImplementation();
+
+    afterEach(() => {
+      if (originalMock) vi.mocked(useAuth).mockImplementation(originalMock);
+    });
+
+    it("hides the Delete button for the logged-in user's own row even when not literally named 'admin'", async () => {
+      vi.mocked(useAuth).mockReturnValue({
+        isAuthenticated: true,
+        token: 'test-token',
+        role: 'team_lead',
+        permissions: { canManageUsers: true, canManageProjectAccess: true } as ReturnType<typeof useAuth>['permissions'],
+        currentUser: { id: '2', username: 'lead1', role: 'team_lead' as const },
+        login: vi.fn(),
+        logout: vi.fn(),
+        isLoading: false,
+        refreshUser: vi.fn(),
+      });
+
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByText('dev1')).toBeInTheDocument();
+      });
+
+      const allDeleteButtons = screen.queryAllByRole('button', { name: /delete user/i });
+      const labels = allDeleteButtons.map(b => b.getAttribute('aria-label'));
+      // lead1 is logged in as themself — must not see a delete button on their own row,
+      // even though their username isn't literally "admin".
+      expect(labels).not.toContain('Delete user lead1');
+      // dev1 (someone else) still gets one.
+      expect(labels).toContain('Delete user dev1');
     });
   });
 });

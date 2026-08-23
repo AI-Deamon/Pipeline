@@ -1,5 +1,6 @@
 import React from 'react';
 import { Search } from 'lucide-react';
+import { SEVERITY_LEVELS } from '../utils/severity';
 interface FilterBarProps {
   search: string;
   onSearchChange: (value: string) => void;
@@ -9,7 +10,7 @@ interface FilterBarProps {
   onToolChange: (tools: string[]) => void;
   availableTools: string[];
 }
-const SEVERITY_OPTIONS = ['Critical', 'High', 'Medium', 'Low'];
+const SEVERITY_OPTIONS = SEVERITY_LEVELS;
 const FilterBar: React.FC<FilterBarProps> = ({
   search,
   onSearchChange,

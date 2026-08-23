@@ -7,7 +7,7 @@
 
 ## Analysis Summary
 
-The **current Jenkinsfile** (`/home/kali_linux/Agent/Jenkinsfile`) is **already compatible** with the existing backend and frontend. The code review report (`docs/reviwe_reprot.md`) was analyzing a _proposed_ architecture document (`docs/jenkins_pipeline_architecture.md`), not the actual current implementation.
+The **current Jenkinsfile** (`/home/kali_linux/Agent/Jenkinsfile`) is **already compatible** with the existing backend and frontend. The code review report (`docs/jenkinsfile-payload-compatibility-review.md`) was analyzing a _proposed_ architecture document (`docs/jenkins_pipeline_architecture.md`), not the actual current implementation.
 
 ---
 

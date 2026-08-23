@@ -71,6 +71,22 @@ class TestIssueAssignment:
             issue = service.assign(session, created_issue, "user_dev", "user_admin", priority="high")
             assert issue.priority == "high"
 
+    def test_reassign_in_progress_issue_does_not_raise(self, service, created_issue):
+        """Regression test: an earlier version of the #46 fix only special-cased
+        already-ASSIGNED as a reassignment (skip-transition) case, so reassigning an
+        IN_PROGRESS issue hit is_valid_transition(IN_PROGRESS, ASSIGNED) — False, since
+        IN_PROGRESS only permits -> FIXED — and hard-errored on a previously-working
+        handoff workflow (developer goes on leave, work gets reassigned mid-fix)."""
+        with SessionLocal() as session:
+            service.assign(session, created_issue, "user_dev", "user_admin")
+            session.flush()
+            service.transition_status(session, created_issue, "in_progress", "user_dev")
+            session.flush()
+
+            issue = service.assign(session, created_issue, "user_qa", "user_admin")
+            assert issue.assignee_id == "user_qa"
+            assert issue.status == "in_progress"  # must NOT be forced back to "assigned"
+
 
 class TestIssueStatusTransitions:
     def test_transition_to_in_progress(self, service, created_issue):

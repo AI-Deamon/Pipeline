@@ -96,11 +96,28 @@ class TestRbacServiceProjectAccess:
     def test_non_admin_with_assignment(self):
         db = MagicMock()
         db.query.return_value.filter.return_value.filter.return_value.all.return_value = [
-            ("project-x",)
+            ("project", "project-x")
         ]
         svc = RbacService(db=db, user=self._make_user("developer"))
         assert svc.has_project_access("project-x") is True
         assert svc.has_project_access("project-y") is False
+
+    def test_non_admin_with_group_assignment_expands_to_member_projects(self):
+        # Regression test for the bug where a project_group-scoped assignment added the
+        # raw group_id to the effective set instead of expanding it to member projects,
+        # which meant group grants silently gave zero real access.
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = [
+            ("project_group", "group-1")
+        ]
+        db.query.return_value.filter.return_value.distinct.return_value.all.return_value = [
+            ("project-a",), ("project-b",)
+        ]
+        svc = RbacService(db=db, user=self._make_user("developer"))
+        assert svc.has_project_access("project-a") is True
+        assert svc.has_project_access("project-b") is True
+        assert svc.has_project_access("group-1") is False
+        assert svc.has_project_access("project-unrelated") is False
 
 
 class TestRbacServiceIssueActions:
@@ -127,3 +144,37 @@ class TestRbacServiceIssueActions:
         svc = RbacService(db=MagicMock(), user=user)
         assert svc.can_update_issue("project-x", "dev-1") is True
         assert svc.can_update_issue("project-x", "other-dev") is False
+
+
+class TestServiceAccountLeastPrivilege:
+    """Regression tests for finding #74: the shared X-API-Key service account is
+    seeded with role="admin" so scan/project/report automation works, but that's far
+    broader than a shared automation credential needs — user management must stay
+    off-limits regardless of the underlying role."""
+
+    def _make_service_account(self):
+        user = MagicMock()
+        user.id = "service-account"
+        user.username = "service-account"
+        user.role = "admin"
+        return user
+
+    def test_service_account_cannot_manage_users(self):
+        svc = RbacService(db=MagicMock(), user=self._make_service_account())
+        assert svc.is_service_account is True
+        assert svc.can_manage_users() is False
+
+    def test_service_account_still_has_full_project_access(self):
+        # Scan-triggering/report automation must still work — only user management
+        # is restricted.
+        svc = RbacService(db=MagicMock(), user=self._make_service_account())
+        assert svc.has_project_access("any-project-id") is True
+
+    def test_real_admin_user_unaffected(self):
+        user = MagicMock()
+        user.id = "admin-1"
+        user.username = "admin"
+        user.role = "admin"
+        svc = RbacService(db=MagicMock(), user=user)
+        assert svc.is_service_account is False
+        assert svc.can_manage_users() is True

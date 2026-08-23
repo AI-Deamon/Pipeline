@@ -19,6 +19,8 @@ TRANSITIONS: dict[IssueState, set[IssueState]] = {
         IssueState.PENDING_VERIFICATION,
         IssueState.VERIFIED,
         IssueState.REJECTED,
+        # Regression: a fixed issue reappeared in a later scan → reopen.
+        IssueState.OPEN,
     },
     IssueState.PENDING_VERIFICATION: {
         IssueState.VERIFIED,
@@ -26,7 +28,10 @@ TRANSITIONS: dict[IssueState, set[IssueState]] = {
         IssueState.IN_PROGRESS,
     },
     IssueState.REJECTED: {IssueState.ASSIGNED},
-    IssueState.VERIFIED: set(),
+    # Regression: a verified issue reappeared in a later scan → reopen. This is the only
+    # way out of VERIFIED, and it exists specifically so detect_regressions doesn't have
+    # to bypass the state machine by writing issue.status directly.
+    IssueState.VERIFIED: {IssueState.OPEN},
 }
 
 

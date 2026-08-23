@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -21,6 +21,11 @@ export function useScanStatus() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
+  // Tracks live WebSocket connectivity for the poll-interval decision below. A ref is
+  // used because `useScanWebSocket` is called after this query, but `refetchInterval`
+  // is a function evaluated at refetch time, so it reads the up-to-date value.
+  const wsConnectedRef = useRef(false);
+
   const toggleStage = (stageId: string) => {
     setExpandedStages(prev => ({ ...prev, [stageId]: !prev[stageId] }));
   };
@@ -37,7 +42,10 @@ export function useScanStatus() {
       if (data?.scan && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.scan.state)) {
         return false;
       }
-      return 3000;
+      // When the WebSocket is live it already pushes updates into this query's cache,
+      // so drop to an infrequent safety-net poll (30s) instead of hammering every 3s.
+      // If the socket drops, we fall back to the responsive 3s poll automatically.
+      return wsConnectedRef.current ? 30000 : 3000;
     },
     enabled: !!scanId,
   });
@@ -64,6 +72,10 @@ export function useScanStatus() {
       setLastUpdated(new Date());
     }
   });
+
+  useEffect(() => {
+    wsConnectedRef.current = wsConnected;
+  }, [wsConnected]);
 
   useEffect(() => {
     if (scanData) {

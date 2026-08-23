@@ -16,58 +16,54 @@ describe('ToolsTable getToolStatus', () => {
     info: 0,
   };
 
-  test('shows Warning badge for WARN status', () => {
+  test('shows warning icon for WARN status', () => {
     render(
       <ToolsTable
         tools={[baseTool]}
-        reports={[]}
         stages={makeStages({ zap_scan: 'WARN' })}
       />
     );
-    expect(screen.getByText('Warning')).toBeInTheDocument();
+    // Check for the warning icon (!)
+    expect(screen.getByText('!')).toBeInTheDocument();
   });
 
-  test('shows Warning badge for UNSTABLE status', () => {
+  test('shows warning icon for UNSTABLE status', () => {
     render(
       <ToolsTable
         tools={[baseTool]}
-        reports={[]}
         stages={makeStages({ zap_scan: 'UNSTABLE' })}
       />
     );
-    expect(screen.getByText('Warning')).toBeInTheDocument();
+    expect(screen.getByText('!')).toBeInTheDocument();
   });
 
-  test('shows Pass badge for PASS status', () => {
+  test('shows pass icon for PASS status', () => {
     render(
       <ToolsTable
         tools={[baseTool]}
-        reports={[]}
         stages={makeStages({ zap_scan: 'PASS' })}
       />
     );
-    expect(screen.getByText('Pass')).toBeInTheDocument();
+    expect(screen.getByText('✓')).toBeInTheDocument();
   });
 
-  test('shows Fail badge for FAIL status', () => {
+  test('shows fail icon for FAIL status', () => {
     render(
       <ToolsTable
         tools={[baseTool]}
-        reports={[]}
         stages={makeStages({ zap_scan: 'FAIL' })}
       />
     );
-    expect(screen.getByText('Fail')).toBeInTheDocument();
+    expect(screen.getByText('✗')).toBeInTheDocument();
   });
 
-  test('shows Skipped badge when stage not present', () => {
+  test('shows skipped icon when stage not present', () => {
     render(
       <ToolsTable
         tools={[baseTool]}
-        reports={[]}
         stages={makeStages({ other_stage: 'PASS' })}
       />
     );
-    expect(screen.getByText('Skipped')).toBeInTheDocument();
+    expect(screen.getByText('–')).toBeInTheDocument();
   });
 });

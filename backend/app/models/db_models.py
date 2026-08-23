@@ -47,6 +47,10 @@ class ScanDB(Base):
     retry_count = Column(Integer, default=0, nullable=False)  # Number of retries
     git_commit = Column(String, nullable=True)  # Git commit SHA from build
     git_branch = Column(String, nullable=True)  # Git branch from build
+    # Effective timeout for THIS scan in seconds (may exceed the global SCAN_TIMEOUT via
+    # the X-Scan-Timeout header). Recovery/expiry honor this instead of the global so a
+    # legitimately long scan isn't force-failed early. NULL falls back to settings.SCAN_TIMEOUT.
+    timeout_seconds = Column(Integer, nullable=True)
 
     # Index for faster active scan lookups
     __table_args__ = (
@@ -92,9 +96,13 @@ class ScanReportDB(Base):
     # Issue migration status: pending, processing, completed, failed
     migration_status = Column(String, default="pending", nullable=False)
 
+    # Report parse status: ok, empty, fetch_failed, parse_error, auth_error
+    parse_status = Column(String, default="ok", nullable=False)
+
     # Index for cleanup queries
     __table_args__ = (
         Index('ix_scan_reports_project_created', 'project_id', 'created_at'),
+        Index('ix_scan_reports_scan_tool', 'scan_id', 'tool_name', unique=True),
     )
 
 
@@ -120,6 +128,8 @@ class IssueDB(Base):
     rule = Column(String, nullable=True)
     recommendation = Column(Text, nullable=True)
     finding_type = Column(String, nullable=True)
+    sonar_status = Column(String, nullable=True)
+    sonar_resolution = Column(String, nullable=True)
     raw_evidence = Column(Text, nullable=True)
     code_snippet = Column(Text, nullable=True)
     is_new = Column(Boolean, default=True, nullable=False)
@@ -248,6 +258,28 @@ class AccessChangeDB(Base):
     __table_args__ = (
         Index('ix_access_changes_target_user', 'target_user_id'),
         Index('ix_access_changes_actor', 'actor_id'),
+    )
+
+
+class ScanMetricDB(Base):
+    __tablename__ = "scan_metrics"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    scan_id = Column(String, index=True, nullable=False)
+    project_id = Column(String, index=True, nullable=False)
+    tool_name = Column(String, nullable=False)
+
+    # Numeric metrics as JSON map: {"bugs": 5, "vulnerabilities": 12, "coverage": 78.5, ...}
+    metrics = Column(JSON, default=dict)
+
+    # Quality gate: {"status": "OK", "conditions": [{"metric": "coverage", "status": "OK", ...}]}
+    quality_gate = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index('ix_scan_metrics_scan_tool', 'scan_id', 'tool_name', unique=True),
+        Index('ix_scan_metrics_project_created', 'project_id', 'created_at'),
     )
 
 

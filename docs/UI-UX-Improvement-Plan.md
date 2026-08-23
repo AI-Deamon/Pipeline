@@ -1,4 +1,9 @@
 
+> **Note:** this is a raw, unedited AI-chat paste kept for historical reference, not a
+> curated/maintained doc — treat items in it as ideas to re-verify against current
+> code, not as current state. Filename also fixed (had a space, which broke naive
+> shell scripting/globbing — finding #34).
+
   ✦ 🎨 UI/UX Improvement Plan - User-Centered Design
 
     👤 User Persona: DevSecOps Engineer (You)

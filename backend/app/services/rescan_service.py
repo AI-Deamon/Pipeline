@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 from datetime import datetime, timezone
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.models.db_models import RescanRequestDB
@@ -74,15 +75,32 @@ def update_with_version_check(
     new_version: int,
     **fields: object,
 ) -> RescanRequestDB:
-    """Apply updates and bump the version, or raise RescanVersionConflict."""
-    if record.version != new_version:
+    """Apply updates and bump the version as an atomic compare-and-swap.
+
+    Previously this checked `record.version != new_version` in Python and then did a
+    plain ORM attribute assignment, which flushes as `UPDATE ... WHERE id=:id` — no
+    `WHERE version=:new_version` guard at all (finding #95). Two concurrent requests
+    both reading version=3 would both pass that Python check and both flush
+    successfully; no `RescanVersionConflict` was ever raised, and whichever committed
+    last silently won, defeating the entire point of the version field. The `UPDATE
+    ... WHERE id=:id AND version=:new_version` below is the actual compare-and-swap —
+    if the row's version has moved since it was read, this matches zero rows and we
+    raise instead of quietly overwriting a concurrent change.
+    """
+    update_values = {k: v for k, v in fields.items() if v is not None and hasattr(record, k)}
+    update_values["version"] = RescanRequestDB.version + 1
+    update_values["updated_at"] = datetime.now(timezone.utc)
+
+    result = session.execute(
+        update(RescanRequestDB)
+        .where(RescanRequestDB.id == record.id, RescanRequestDB.version == new_version)
+        .values(**update_values)
+    )
+    if result.rowcount == 0:
+        session.refresh(record)  # pull the real current version for the error message
         raise RescanVersionConflict(record.version, new_version)
-    for key, value in fields.items():
-        if value is not None and hasattr(record, key):
-            setattr(record, key, value)
-    record.version = record.version + 1
-    record.updated_at = datetime.now(timezone.utc)
-    session.flush()
+
+    session.refresh(record)
     return record
 
 
@@ -95,6 +113,27 @@ def cancel(
     if record.status != "pending":
         raise ValueError(f"Cannot cancel request in status '{record.status}'")
     return update_with_version_check(session, record, new_version, status="rejected")
+
+
+def reject(
+    session: Session,
+    record: RescanRequestDB,
+    reviewer_id: str,
+    reviewer_note: Optional[str] = None,
+) -> RescanRequestDB:
+    """Mark a pending request as rejected by a reviewer. Distinct from `cancel`
+    (the requester's own withdrawal, gated separately in the API layer) — this is a
+    reviewer decision, so it records who rejected it and why, mirroring `approve`'s
+    fields instead of just flipping status."""
+    if record.status != "pending":
+        raise ValueError(f"Cannot reject request in status '{record.status}'")
+    record.status = "rejected"
+    record.reviewer_id = reviewer_id
+    record.reviewer_note = reviewer_note
+    record.version = record.version + 1
+    record.updated_at = datetime.now(timezone.utc)
+    session.flush()
+    return record
 
 
 def complete(

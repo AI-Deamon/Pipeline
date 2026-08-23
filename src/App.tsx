@@ -10,6 +10,10 @@ import RegisterPage from './pages/RegisterPage';
 
 // Code splitting: Lazy load page components
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const PortfolioDashboardPage = lazy(() => import('./pages/PortfolioDashboardPage'));
+const TrendAnalysisPage = lazy(() => import('./pages/TrendAnalysisPage'));
+const TeamWorkloadPage = lazy(() => import('./pages/TeamWorkloadPage'));
+const ExecutiveSummaryPage = lazy(() => import('./pages/ExecutiveSummaryPage'));
 const CreateProjectPage = lazy(() => import('./pages/CreateProjectPage'));
 const ProjectControlPage = lazy(() => import('./pages/ProjectControlPage'));
 const ProjectEditPage = lazy(() => import('./pages/ProjectEditPage'));
@@ -21,6 +25,7 @@ const UserManagementPage = lazy(() => import('./pages/UserManagementPage'));
 const DocsPage = lazy(() => import('./pages/DocsPage'));
 const ProjectReportsPage = lazy(() => import('./pages/ProjectReportsPage'));
 const UnifiedReportPage = lazy(() => import('./pages/UnifiedReportPage'));
+const DeveloperReportPage = lazy(() => import('./pages/DeveloperReportPage'));
 const ProjectGroupsPage = lazy(() => import('./pages/ProjectGroupsPage'));
 const ProjectOverviewPage = lazy(() => import('./pages/ProjectOverviewPage'));
 const IssuesTriagePage = lazy(() => import('./pages/IssuesTriagePage'));
@@ -64,6 +69,38 @@ function App() {
                 element={
                   <Suspense fallback={<PageLoader />}>
                     <DashboardPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/dashboard/portfolio"
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <PortfolioDashboardPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/dashboard/trends"
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <TrendAnalysisPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/dashboard/workload"
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <TeamWorkloadPage />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/dashboard/executive"
+                element={
+                  <Suspense fallback={<PageLoader />}>
+                    <ExecutiveSummaryPage />
                   </Suspense>
                 }
               />
@@ -128,6 +165,14 @@ function App() {
                   element={
                     <Suspense fallback={<PageLoader />}>
                       <UnifiedReportPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="/projects/:projectId/reports/:scanId/developer"
+                  element={
+                    <Suspense fallback={<PageLoader />}>
+                      <DeveloperReportPage />
                     </Suspense>
                   }
                 />

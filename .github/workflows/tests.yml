@@ -1,0 +1,44 @@
+name: Tests
+
+# Finding #64: no CI configuration anywhere gated Sentinel's own test suite (45
+# backend test files, the frontend RTL suite) — everything found in the review
+# session that a test *would* have caught, including several confirmed here, shipped
+# regardless of test outcome because nothing ever ran them. This is the actual fix:
+# every push/PR now runs both suites, and a failure blocks the merge (branch
+# protection still needs to require this check — that's a repo setting, not
+# something a workflow file can enforce on its own).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run backend test suite
+        run: pytest tests/ -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Run frontend test suite
+        run: npx vitest run

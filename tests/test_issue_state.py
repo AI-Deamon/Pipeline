@@ -33,8 +33,17 @@ class TestIssueTransitions:
     def test_fixed_to_rejected(self):
         assert is_valid_transition(IssueState.FIXED, IssueState.REJECTED)
 
-    def test_verified_no_transitions(self):
-        assert len(TRANSITIONS[IssueState.VERIFIED]) == 0
+    def test_verified_only_regression_transition(self):
+        # VERIFIED is terminal EXCEPT for a regression reopen (VERIFIED -> OPEN), which
+        # exists so detect_regressions can go through the state machine instead of
+        # writing issue.status directly.
+        assert TRANSITIONS[IssueState.VERIFIED] == {IssueState.OPEN}
+
+    def test_verified_to_open_regression(self):
+        assert is_valid_transition(IssueState.VERIFIED, IssueState.OPEN)
+
+    def test_fixed_to_open_regression(self):
+        assert is_valid_transition(IssueState.FIXED, IssueState.OPEN)
 
     def test_rejected_to_assigned(self):
         assert is_valid_transition(IssueState.REJECTED, IssueState.ASSIGNED)
@@ -42,7 +51,9 @@ class TestIssueTransitions:
     def test_invalid_transition(self):
         assert not is_valid_transition(IssueState.OPEN, IssueState.VERIFIED)
         assert not is_valid_transition(IssueState.ASSIGNED, IssueState.VERIFIED)
-        assert not is_valid_transition(IssueState.VERIFIED, IssueState.OPEN)
+        # A verified issue can only reopen (regression); it cannot jump straight to
+        # any other state.
+        assert not is_valid_transition(IssueState.VERIFIED, IssueState.ASSIGNED)
 
     def test_valid_full_cycle(self):
         states = [

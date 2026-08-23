@@ -1,17 +1,54 @@
 import requests
 import logging
 from typing import Any, Dict, Optional
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from app.core.exceptions import ExternalServiceError
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
+def _build_retrying_session() -> requests.Session:
+    """A session with connection pooling and bounded retry/backoff for transient
+    failures (connection errors, 429, 5xx) against flaky Jenkins/SonarQube endpoints.
+    Only idempotent-ish methods are retried; POST is NOT auto-retried to avoid
+    double-triggering builds."""
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=2,
+        backoff_factor=0.5,  # 0.5s, 1s, 2s
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET", "HEAD", "OPTIONS"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 class HttpClient:
-    def __init__(self, base_url: str, default_headers: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        base_url: str,
+        default_headers: Optional[Dict[str, str]] = None,
+        is_jenkins: bool = False,
+    ):
+        # Finding #20: previously inferred per-request via `"jenkins" in
+        # self.base_url.lower()` — a substring match on whatever URL the caller
+        # configured. A real Jenkins instance reachable at a URL without the
+        # literal word "jenkins" (e.g. `https://ci.internal.example.com`) would
+        # silently skip CSRF-crumb issuance and break every POST. The caller
+        # already knows which service this client talks to, so take it as an
+        # explicit constructor flag instead of re-guessing from the URL string
+        # on every request.
         self.base_url = base_url.rstrip("/")
         self.default_headers = default_headers or {}
-        self.session = requests.Session()
+        self.is_jenkins = is_jenkins
+        self.session = _build_retrying_session()
         if self.default_headers:
             self.session.headers.update(self.default_headers)
 
@@ -52,14 +89,26 @@ class HttpClient:
             headers=request_headers, timeout=timeout,
         )
 
-    def _process_response(self, response, is_jenkins_request: bool):
+    def _process_response(self, response, is_jenkins_request: bool, method: str = "GET"):
         if not response.ok:
             raise ExternalServiceError(
                 service=response.url,
                 status_code=response.status_code,
                 message=response.text,
             )
-        if is_jenkins_request:
+        # The raw-response passthrough only exists for Jenkins POST (trigger_pipeline
+        # needs the Location header to extract a queue id — see
+        # JenkinsClient._extract_queue_id, which already defensively handles both this
+        # raw-Response shape and the parsed-dict shape). GET requests — including
+        # get_build_status/get_queue_item's status polls — have no such need and
+        # every caller expects a parsed dict. Previously *all* Jenkins requests (GET
+        # included) returned the raw response whenever `is_jenkins_request` was true,
+        # so `scan_recovery.py`'s `.get("building", ...)` calls raised an uncaught
+        # AttributeError (requests.Response has no `.get()`) the moment
+        # JENKINS_BASE_URL happened to contain "jenkins" (finding #119) — which also
+        # silently aborted that recovery cycle's separate timeout-based sweep, since
+        # both run in the same try block.
+        if is_jenkins_request and method == "POST":
             return response
         if response.content:
             return response.json()
@@ -80,7 +129,7 @@ class HttpClient:
             request_headers.update(headers)
 
         try:
-            is_jenkins_request = "jenkins" in self.base_url.lower()
+            is_jenkins_request = self.is_jenkins
 
             if is_jenkins_request and method == "POST":
                 request_headers = self._get_jenkins_crumb(request_headers)
@@ -92,7 +141,7 @@ class HttpClient:
             else:
                 response = self._send_generic(url, method, data, params, request_headers, timeout)
 
-            return self._process_response(response, is_jenkins_request)
+            return self._process_response(response, is_jenkins_request, method)
 
         except requests.RequestException as e:
             raise ExternalServiceError(

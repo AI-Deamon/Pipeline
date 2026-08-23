@@ -1,5 +1,11 @@
 # FINALIZED ARCHITECTURE: UI ↔ BACKEND WIRING
 
+> **Note (partner review finding #23):** despite the title, this document only covers the original
+> project/scan CRUD contract and is missing everything added since: authentication (JWT, refresh tokens),
+> RBAC, the Issue lifecycle API, project groups/portfolio rollups, and WebSocket events. What it *does*
+> describe below is still accurate (verified against `backend/app/state/scan_state.py` and the current
+> API), but treat `AGENTS.md` as the actual source of truth for the full current contract, not this file.
+
 This document defines the authoritative and finalized architectural contracts for the DevSecOps scanning platform. These specifications supersede all earlier implicit assumptions.
 
 ## 1. API BASE CONTRACT
@@ -49,3 +55,4 @@ This document defines the authoritative and finalized architectural contracts fo
 - `COMPLETED` -> UI: Finished
 - `FAILED` -> UI: Failed
 - `CANCELLED` -> UI: Cancelled
+- `SKIPPED` -> UI: Skipped (was missing from this list; confirmed against `ScanState` enum)

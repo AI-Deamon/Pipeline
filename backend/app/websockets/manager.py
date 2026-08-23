@@ -2,11 +2,30 @@
 WebSocket Manager for real-time scan status updates
 Manages client connections and broadcasts scan state changes
 """
+import asyncio
 import logging
 from typing import Dict, Set
 from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
+
+
+def safe_broadcast(event: str, data: dict) -> None:
+    """Broadcast a WebSocket event, logging failures instead of swallowing them.
+
+    Every caller is sync code with no running event loop (FastAPI `def` route
+    handlers run in a threadpool; Celery tasks are plain sync) — `broadcast_event`
+    is `async def`, so calling it directly here previously just created a coroutine
+    object that was never awaited and silently discarded (finding #90; surfaced as
+    `RuntimeWarning: coroutine 'ConnectionManager.broadcast_event' was never
+    awaited`). `asyncio.run()` actually executes it, which is safe specifically
+    because there is no already-running loop in these call sites to conflict with.
+    """
+    try:
+        from app.websockets.manager import manager
+        asyncio.run(manager.broadcast_event(event, data))
+    except Exception as exc:
+        logger.warning("WebSocket broadcast failed for %s: %s", event, exc)
 
 
 class ConnectionManager:
@@ -59,46 +78,50 @@ class ConnectionManager:
         """Send message to all clients subscribed to a specific scan"""
         if scan_id not in self.scan_connections:
             return
-        
+
         disconnected = set()
-        for connection in self.scan_connections[scan_id]:
+        # Finding #98: iterate a snapshot, not the live set. A client disconnecting
+        # mid-broadcast (suspended at `await connection.send_json(...)`) calls
+        # disconnect(), which mutates this same set concurrently — iterating it
+        # directly raises `RuntimeError: Set changed size during iteration` on resume.
+        for connection in list(self.scan_connections[scan_id]):
             try:
                 await connection.send_json(message)
             except Exception as e:
                 logger.error(f"Error sending to WebSocket: {e}")
                 disconnected.add(connection)
-        
+
         # Clean up disconnected clients
         for conn in disconnected:
             self.scan_connections[scan_id].discard(conn)
-    
+
     async def broadcast_to_project(self, project_id: str, message: dict):
         """Send message to all clients subscribed to a specific project"""
         if project_id not in self.project_connections:
             return
-        
+
         disconnected = set()
-        for connection in self.project_connections[project_id]:
+        for connection in list(self.project_connections[project_id]):
             try:
                 await connection.send_json(message)
             except Exception as e:
                 logger.error(f"Error sending to WebSocket: {e}")
                 disconnected.add(connection)
-        
+
         # Clean up disconnected clients
         for conn in disconnected:
             self.project_connections[project_id].discard(conn)
-    
+
     async def broadcast_global(self, message: dict):
         """Send message to all connected clients"""
         disconnected = set()
-        for connection in self.global_connections:
+        for connection in list(self.global_connections):
             try:
                 await connection.send_json(message)
             except Exception as e:
                 logger.error(f"Error sending to WebSocket: {e}")
                 disconnected.add(connection)
-        
+
         # Clean up disconnected clients
         for conn in disconnected:
             self.global_connections.discard(conn)
@@ -112,10 +135,19 @@ class ConnectionManager:
             "data": data
         }
         
-        # Send to all relevant subscribers
-        await self.broadcast_to_scan(scan_id, message)
-        await self.broadcast_to_project(project_id, message)
-        await self.broadcast_global(message)
+        # Finding #98: each tier is independent — an exception from one (e.g. a
+        # future bug in a single connection's send) must not skip delivery to the
+        # others, since this is fired via background_tasks.add_task with nothing
+        # downstream to retry a partial failure.
+        for coro in (
+            self.broadcast_to_scan(scan_id, message),
+            self.broadcast_to_project(project_id, message),
+            self.broadcast_global(message),
+        ):
+            try:
+                await coro
+            except Exception as e:
+                logger.error(f"Error broadcasting scan update: {e}")
 
     async def broadcast_issue_event(self, event_type: str, issue_id: int, project_id: str, data: dict):
         """Broadcast issue-related events to project and global subscribers."""

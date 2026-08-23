@@ -57,4 +57,27 @@ describe('IssueCard', () => {
     render(<IssueCard issue={issue} />);
     expect(screen.getByText('1/15/2026')).toBeInTheDocument();
   });
+
+  // Regression tests for finding #58: severity was previously conveyed by icon color
+  // alone, with medium/low/info sharing one icon and critical/high sharing another —
+  // no text label existed anywhere on the card.
+  test.each(['critical', 'high', 'medium', 'low', 'info'] as const)(
+    'renders the severity level as text for %s',
+    (severity) => {
+      render(<IssueCard issue={{ ...issue, severity }} />);
+      expect(screen.getByText(new RegExp(`^${severity}$`, 'i'))).toBeInTheDocument();
+    }
+  );
+
+  test('medium and low severities render visually distinct labels, not identical', () => {
+    const { unmount } = render(<IssueCard issue={{ ...issue, severity: 'medium' }} />);
+    const mediumColor = screen.getByText(/^medium$/i).closest('[style]')?.getAttribute('style');
+    unmount();
+
+    render(<IssueCard issue={{ ...issue, severity: 'low' }} />);
+    const lowColor = screen.getByText(/^low$/i).closest('[style]')?.getAttribute('style');
+
+    expect(mediumColor).toBeTruthy();
+    expect(mediumColor).not.toEqual(lowColor);
+  });
 });

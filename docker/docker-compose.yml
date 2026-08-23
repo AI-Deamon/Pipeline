@@ -20,7 +20,11 @@ services:
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
-    command: [ "celery", "-A", "app.core.celery_app.celery_app", "worker", "--loglevel=info" ]
+    # -B runs the beat scheduler embedded in this worker process (finding #16) — fires
+    # celery_app.py's beat_schedule (cleanup_expired_reports, daily at 3 AM). Only
+    # correct with a single worker replica; if this is ever scaled, move beat to its
+    # own single-instance service instead, or the schedule fires once per replica.
+    command: [ "celery", "-A", "app.core.celery_app.celery_app", "worker", "-B", "--loglevel=info" ]
     restart: unless-stopped
     network_mode: host
     env_file:

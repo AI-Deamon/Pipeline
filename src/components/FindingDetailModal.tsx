@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Bug, Plus, Loader2 } from 'lucide-react';
+import { Bug, Plus, Loader2, ExternalLink, Package, Shield, Zap } from 'lucide-react';
 import { useRbac } from '../hooks/useRbac';
 import { useCreateIssue } from '../hooks/useIssues';
 import { api } from '../services/api';
 import { useToast } from './Toast';
 import { Modal } from './ui/Modal';
 import { Badge } from './ui/Badge';
+import { isSafeHttpUrl } from '../utils/url';
 import type { Finding } from '../types';
 
 interface FindingDetailModalProps {
@@ -90,15 +91,16 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Finding Details" size="lg">
-      <div className="mb-4">
-        <Badge variant={severityVariant[finding.severity] || 'default'} size="md">
-          {finding.severity}
-        </Badge>
-      </div>
+      <div className="max-h-[60vh] overflow-y-auto">
+        <div className="mb-4">
+          <Badge variant={severityVariant[finding.severity] || 'default'} size="md">
+            {finding.severity}
+          </Badge>
+        </div>
 
-      <h3 className="text-lg font-medium text-slate-900 mb-3">{finding.title}</h3>
+        <h3 className="text-lg font-medium text-slate-900 mb-3">{finding.title}</h3>
 
-      <dl className="space-y-3">
+        <dl className="space-y-3">
         <div>
           <dt className="text-sm font-medium text-slate-500">ID</dt>
           <dd className="text-sm text-slate-900">{finding.id}</dd>
@@ -118,6 +120,18 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
           </div>
         )}
 
+        {finding.cvss_score && finding.cvss_score > 0 && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">CVSS Score</dt>
+            <dd className="text-sm text-slate-900">
+              <span className="font-semibold">{finding.cvss_score}</span>
+              {finding.cvss_severity && (
+                <span className="ml-2 text-xs text-slate-500">({finding.cvss_severity})</span>
+              )}
+            </dd>
+          </div>
+        )}
+
         {finding.host && (
           <div>
             <dt className="text-sm font-medium text-slate-500">Host</dt>
@@ -133,9 +147,20 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
         )}
 
         {finding.package && (
-          <div>
-            <dt className="text-sm font-medium text-slate-500">Package</dt>
-            <dd className="text-sm text-slate-900">{finding.package}</dd>
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-slate-400" />
+            <div>
+              <dt className="text-sm font-medium text-slate-500">Package</dt>
+              <dd className="text-sm text-slate-900">
+                {finding.package}
+                {finding.package_version && (
+                  <span className="ml-1 text-slate-500">v{finding.package_version}</span>
+                )}
+                {finding.fixed_version && (
+                  <span className="ml-2 text-green-600 font-medium">→ {finding.fixed_version}</span>
+                )}
+              </dd>
+            </div>
           </div>
         )}
 
@@ -146,10 +171,64 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
           </div>
         )}
 
+        {finding.fix_command && (
+          <div className="flex items-start gap-2">
+            <Zap className="w-4 h-4 text-green-600 mt-0.5" />
+            <div>
+              <dt className="text-sm font-medium text-slate-500">Fix Command</dt>
+              <dd className="text-sm text-slate-900 font-mono bg-slate-900 text-green-400 p-2 rounded">
+                {finding.fix_command}
+              </dd>
+            </div>
+          </div>
+        )}
+
         {finding.recommendation && (
           <div>
             <dt className="text-sm font-medium text-slate-500">Recommendation</dt>
             <dd className="text-sm text-slate-900">{finding.recommendation}</dd>
+          </div>
+        )}
+
+        {finding.cwe_ids && finding.cwe_ids.length > 0 && (
+          <div className="flex items-start gap-2">
+            <Shield className="w-4 h-4 text-slate-400 mt-0.5" />
+            <div>
+              <dt className="text-sm font-medium text-slate-500">CWE IDs</dt>
+              <dd className="flex flex-wrap gap-1 mt-1">
+                {finding.cwe_ids.map((cwe) => (
+                  <span key={cwe} className="px-2 py-0.5 text-xs font-mono bg-slate-100 text-slate-700 rounded">
+                    {cwe}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          </div>
+        )}
+
+        {finding.references && finding.references.length > 0 && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">References</dt>
+            <dd className="space-y-1 mt-1">
+              {finding.references.slice(0, 5).map((ref, idx) =>
+                isSafeHttpUrl(ref) ? (
+                  <a
+                    key={idx}
+                    href={ref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 truncate"
+                  >
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{ref}</span>
+                  </a>
+                ) : (
+                  <span key={idx} className="flex items-center gap-1 text-xs text-slate-500 truncate">
+                    <span className="truncate">{ref}</span>
+                  </span>
+                )
+              )}
+            </dd>
           </div>
         )}
 
@@ -207,6 +286,7 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
           )}
         </div>
       )}
+      </div>
     </Modal>
   );
 };

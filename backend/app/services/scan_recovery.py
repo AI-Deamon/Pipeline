@@ -15,12 +15,12 @@ from app.core.config import settings
 from app.infrastructure.jenkins.jenkins_client import JenkinsClient
 from app.core.exceptions import ExternalServiceError
 from app.tasks.report_tasks import process_scan_reports_task
+from app.api.scans.utils import TERMINAL_STATES
+from app.metrics import JENKINS_POLL_ERRORS_TOTAL
 
 logger = logging.getLogger(__name__)
 
 shutdown_event = threading.Event()
-
-TERMINAL_STATES = {ScanState.COMPLETED, ScanState.FAILED, ScanState.CANCELLED}
 JENKINS_JOB_NAME = "Security-pipeline"
 
 def _jenkins_console_url(build_number: str | None) -> str | None:
@@ -46,16 +46,18 @@ def _set_terminal_state(
     if project_obj:
         project_obj.last_scan_state = state.value
 
-def _trigger_report_processing(scan_obj: ScanDB) -> None:
+def _trigger_report_processing(scan_obj: ScanDB, project_obj: ProjectDB | None = None) -> None:
     """Trigger report fetching when recovery completes a scan without a callback."""
     if not scan_obj.jenkins_build_number:
         logger.warning(f"No jenkins_build_number for scan {scan_obj.scan_id}, skipping report processing")
         return
+    from app.api.scans.utils import resolve_jenkins_base_url
+    jenkins_base_url = resolve_jenkins_base_url(project_obj) if project_obj else settings.JENKINS_BASE_URL
     logger.info(f"Triggering report processing for scan {scan_obj.scan_id} (recovery path, build {scan_obj.jenkins_build_number})")
     process_scan_reports_task.delay(
         scan_id=scan_obj.scan_id,
         jenkins_build_number=scan_obj.jenkins_build_number,
-        jenkins_base_url=settings.JENKINS_BASE_URL,
+        jenkins_base_url=jenkins_base_url,
     )
 
 
@@ -76,7 +78,7 @@ def _handle_build_number_scan(scan_obj, project_obj, client, now):
                 None, None, now,
                 _jenkins_console_url(scan_obj.jenkins_build_number),
             )
-            _trigger_report_processing(scan_obj)
+            _trigger_report_processing(scan_obj, project_obj)
             return 1, True
 
         if result in {"FAILURE", "ABORTED", "UNSTABLE"}:
@@ -95,6 +97,7 @@ def _handle_build_number_scan(scan_obj, project_obj, client, now):
                 _jenkins_console_url(scan_obj.jenkins_build_number),
             )
             return 1, True
+        JENKINS_POLL_ERRORS_TOTAL.labels(check_type="build_status").inc()
         logger.warning(f"Failed to fetch Jenkins build status for scan {scan_obj.scan_id}: {e}")
 
     return 0, False
@@ -128,6 +131,7 @@ def _handle_queue_item_scan(scan_obj, project_obj, client, now):
                 _jenkins_console_url(scan_obj.jenkins_build_number),
             )
             return 1, True
+        JENKINS_POLL_ERRORS_TOTAL.labels(check_type="queue_status").inc()
         logger.warning(f"Failed to fetch Jenkins queue status for scan {scan_obj.scan_id}: {e}")
 
     return 0, False
@@ -144,31 +148,61 @@ def poll_jenkins_for_active_scans() -> int:
     updated_count = 0
     any_changes = False
     try:
-        active_scans = db.query(ScanDB).filter(
-            ScanDB.state.in_([ScanState.QUEUED, ScanState.RUNNING])
-        ).all()
+        # Candidate IDs only — the Jenkins HTTP call below can be slow, so we don't
+        # hold row locks across it. Each scan is re-fetched and locked individually
+        # right before it's mutated (see below), immediately after the network call.
+        candidate_ids = [
+            scan_id for (scan_id,) in db.query(ScanDB.scan_id).filter(
+                ScanDB.state.in_([ScanState.QUEUED, ScanState.RUNNING])
+            ).all()
+        ]
         now = datetime.now(timezone.utc)
 
-        for scan_obj in active_scans:
-            project_obj = db.query(ProjectDB).filter(
-                ProjectDB.project_id == scan_obj.project_id
-            ).first()
-
-            if scan_obj.jenkins_build_number:
-                count, changed = _handle_build_number_scan(scan_obj, project_obj, client, now)
-                updated_count += count
-                if changed:
-                    any_changes = True
+        for scan_id in candidate_ids:
+            # Re-fetch (unlocked) to decide which Jenkins call to make.
+            scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
+            if not scan_obj:
                 continue
 
-            if scan_obj.jenkins_queue_id:
-                count, changed = _handle_queue_item_scan(scan_obj, project_obj, client, now)
-                updated_count += count
-                if changed:
-                    any_changes = True
+            if not scan_obj.jenkins_build_number and not scan_obj.jenkins_queue_id:
+                continue
 
-        if any_changes:
-            db.commit()
+            # Lock the row now, immediately before mutating, and re-verify it hasn't
+            # already been moved to a terminal state by a callback in the meantime.
+            locked_scan = (
+                db.query(ScanDB).filter(ScanDB.scan_id == scan_id).with_for_update().first()
+            )
+            if not locked_scan or locked_scan.state not in {ScanState.QUEUED, ScanState.RUNNING}:
+                continue
+
+            project_obj = (
+                db.query(ProjectDB)
+                .filter(ProjectDB.project_id == locked_scan.project_id)
+                .with_for_update()
+                .first()
+            )
+
+            try:
+                # Finding #123: _handle_build_number_scan/_handle_queue_item_scan
+                # already catch the exception types Jenkins calls are expected to
+                # raise (finding #119), but this is a sequential single-thread sweep
+                # over every active scan — an uncaught exception of any other type
+                # for one scan must not abort checking the rest of the candidate
+                # list for the remainder of this cycle. Defense in depth beyond #119.
+                if locked_scan.jenkins_build_number:
+                    count, changed = _handle_build_number_scan(locked_scan, project_obj, client, now)
+                else:
+                    count, changed = _handle_queue_item_scan(locked_scan, project_obj, client, now)
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Skipping recovery poll for scan {scan_id}: {e}")
+                continue
+
+            updated_count += count
+            if changed:
+                any_changes = True
+                db.commit()  # release this scan's lock before moving to the next
+
         return updated_count
     finally:
         db.close()
@@ -178,35 +212,73 @@ def recover_stuck_scans() -> int:
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
-        timeout_threshold = now - timedelta(seconds=settings.SCAN_TIMEOUT)
 
-        stuck_scans = db.query(ScanDB).filter(
-            ScanDB.state.in_([ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]),
-            ScanDB.created_at < timeout_threshold
-        ).all()
+        # Consider all active scans and apply each scan's OWN timeout after locking —
+        # a coarse created_at prefilter on the global timeout would either miss scans
+        # with a smaller computed timeout or wrongly flag ones with a larger override.
+        # Active scans are bounded in number, so scanning them all is cheap.
+        candidate_ids = [
+            scan_id for (scan_id,) in db.query(ScanDB.scan_id).filter(
+                ScanDB.state.in_([ScanState.CREATED, ScanState.QUEUED, ScanState.RUNNING]),
+            ).all()
+        ]
 
         recovered_count = 0
-        for scan_obj in stuck_scans:
+        for scan_id in candidate_ids:
+            scan_obj = (
+                db.query(ScanDB).filter(ScanDB.scan_id == scan_id).with_for_update().first()
+            )
+            if not scan_obj or scan_obj.state in TERMINAL_STATES:
+                continue
+
+            # Honor the per-scan timeout; only recover if THIS scan has actually exceeded
+            # its own budget, not merely the global default.
+            effective_timeout = scan_obj.timeout_seconds or settings.SCAN_TIMEOUT
+            reference_time = scan_obj.started_at or scan_obj.created_at
+            if reference_time and reference_time.tzinfo is None:
+                reference_time = reference_time.replace(tzinfo=timezone.utc)
+            if reference_time and (now - reference_time).total_seconds() < effective_timeout:
+                continue  # not actually timed out yet under its own budget
+
             logger.warning(
                 f"Recovering stuck scan {scan_obj.scan_id} "
-                f"(stuck since {scan_obj.created_at}, timeout={settings.SCAN_TIMEOUT}s)"
+                f"(stuck since {reference_time}, timeout={effective_timeout}s)"
             )
+
+            # Best-effort: abort the underlying Jenkins build too (finding #19) — if
+            # it's genuinely still running, it'll otherwise keep consuming an
+            # executor/agent slot indefinitely after Sentinel has already given up on
+            # it. Never let a failure here block marking the scan FAILED on our side;
+            # this is resource hygiene, not correctness.
+            if scan_obj.jenkins_build_number:
+                try:
+                    JenkinsClient().stop_build(JENKINS_JOB_NAME, int(scan_obj.jenkins_build_number))
+                    logger.info(f"Requested Jenkins abort for build {scan_obj.jenkins_build_number}")
+                except Exception as stop_err:
+                    logger.warning(
+                        f"Failed to abort Jenkins build {scan_obj.jenkins_build_number} "
+                        f"for scan {scan_obj.scan_id}: {stop_err}"
+                    )
+
             scan_obj.state = ScanState.FAILED
             scan_obj.finished_at = now
-            scan_obj.error_message = f"Scan timed out after {settings.SCAN_TIMEOUT} seconds"
+            scan_obj.error_message = f"Scan timed out after {effective_timeout} seconds"
             scan_obj.error_type = "TIMEOUT"
 
-            project_obj = db.query(ProjectDB).filter(
-                ProjectDB.project_id == scan_obj.project_id
-            ).first()
+            project_obj = (
+                db.query(ProjectDB)
+                .filter(ProjectDB.project_id == scan_obj.project_id)
+                .with_for_update()
+                .first()
+            )
             if project_obj:
                 project_obj.last_scan_state = ScanState.FAILED.value
 
             recovered_count += 1
+            db.commit()  # release this scan's lock before moving to the next
             logger.info(f"Successfully recovered scan {scan_obj.scan_id}")
 
         if recovered_count > 0:
-            db.commit()
             logger.info(f"Recovery complete: {recovered_count} scan(s) recovered")
 
         return recovered_count
@@ -223,7 +295,9 @@ def recover_single_scan(scan_id: str) -> bool:
     """Recover a specific scan by ID."""
     db = SessionLocal()
     try:
-        scan_obj = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
+        scan_obj = (
+            db.query(ScanDB).filter(ScanDB.scan_id == scan_id).with_for_update().first()
+        )
         if not scan_obj:
             logger.warning(f"Scan {scan_id} not found for recovery")
             return False
@@ -237,9 +311,12 @@ def recover_single_scan(scan_id: str) -> bool:
         scan_obj.error_message = "Recovered by admin request"
         scan_obj.error_type = "ADMIN_RECOVERY"
 
-        project_obj = db.query(ProjectDB).filter(
-            ProjectDB.project_id == scan_obj.project_id
-        ).first()
+        project_obj = (
+            db.query(ProjectDB)
+            .filter(ProjectDB.project_id == scan_obj.project_id)
+            .with_for_update()
+            .first()
+        )
         if project_obj:
             project_obj.last_scan_state = ScanState.FAILED.value
 

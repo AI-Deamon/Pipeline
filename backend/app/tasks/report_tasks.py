@@ -43,11 +43,8 @@ def process_scan_reports_task(
         sonar_key = project_obj.sonar_key
 
         if not jenkins_base_url:
-            jenkins_base_url = (
-                f"http://{project_obj.target_ip}"
-                if project_obj.target_ip
-                else "http://localhost:8080"
-            )
+            from app.api.scans.utils import resolve_jenkins_base_url
+            jenkins_base_url = resolve_jenkins_base_url(project_obj)
 
         reports = asyncio.run(
             process_scan_reports(

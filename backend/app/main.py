@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from app.api import projects, scans, auth, reports, project_groups, scanner_tools, issues
+from app.api import projects, scans, auth, reports, project_groups, scanner_tools, issues, portfolio
 from app.api import users
 from app.websockets import router as websocket_router
 from app.core.auth import get_current_user
@@ -22,27 +22,15 @@ logger = logging.getLogger(__name__)
 
 _API_V1 = "/api/v1"
 
-# Public endpoints that don't require authentication
-PUBLIC_ENDPOINTS = [
-    _API_V1 + "/auth/login",
-    _API_V1 + "/auth/register",
-    "/",
-    "/docs",
-    "/redoc",
-    "/openapi.json",
-    _API_V1 + "/ws",
-]
-
-
-def public_endpoint_only(request):
-    """Dependency that allows access to public endpoints without auth"""
-    if any(request.url.path.startswith(endpoint) for endpoint in PUBLIC_ENDPOINTS):
-        return True
-    return Depends(get_current_user)
-
 
 app = FastAPI(
     title="DevSecOps Control Plane API",
+    # finding #54: Settings.DEBUG was defined and validated (staging must have it
+    # False) but never actually wired to FastAPI — dead code that looked live. Safe
+    # to wire now specifically because that staging guard already exists in
+    # config.py's validate_runtime_rules: DEBUG can never be True outside dev/test,
+    # so this can't leak tracebacks in a real deployment.
+    debug=settings.DEBUG,
 )
 
 app.add_middleware(
@@ -145,6 +133,10 @@ def validate_configuration():
         _backfill_admin_role(db)
         _backfill_user_roles(db)
         _backfill_project_users(db)
+        # Seed the service-account row here so the X-API-Key auth path is read-only
+        # and can't race two concurrent first-requests into a duplicate-insert 500.
+        from app.core.auth import ensure_service_account
+        ensure_service_account(db)
     finally:
         db.close()
 
@@ -189,6 +181,9 @@ app.include_router(
 app.include_router(
     users.router, prefix=_API_V1, tags=["users"], dependencies=protected_deps
 )
+app.include_router(
+    portfolio.router, prefix=_API_V1, tags=["portfolio"], dependencies=protected_deps
+)
 
 
 from fastapi import HTTPException, Response
@@ -232,6 +227,12 @@ def read_root():
     return {"message": "DevSecOps Control Plane is live (via PostgreSQL)"}
 
 
+@app.get("/api/v1/health")
+def health_check():
+    """Health check endpoint for frontend and monitoring."""
+    return {"status": "operational"}
+
+
 def _run_schema_migrations(engine) -> None:
     """Apply idempotent ALTER TABLE migrations for columns added after initial release."""
     from sqlalchemy import text
@@ -239,10 +240,52 @@ def _run_schema_migrations(engine) -> None:
     statements = [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'developer'",
         "ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS migration_status VARCHAR(20) DEFAULT 'pending'",
+        "ALTER TABLE issues ADD COLUMN IF NOT EXISTS sonar_status VARCHAR(50)",
+        "ALTER TABLE issues ADD COLUMN IF NOT EXISTS sonar_resolution VARCHAR(50)",
+        "ALTER TABLE scans ADD COLUMN IF NOT EXISTS timeout_seconds INTEGER",
+        "ALTER TABLE scan_reports ADD COLUMN IF NOT EXISTS parse_status VARCHAR(20) DEFAULT 'ok'",
     ]
     try:
         with engine.begin() as conn:
             for stmt in statements:
                 conn.execute(text(stmt))
+
+            # finding #22: add FK constraints from project_id columns to
+            # projects.project_id, for referential integrity nothing previously
+            # enforced at the DB level (RBAC scoping, project_grouping.py, and
+            # portfolio rollups all silently depend on every project_id here mapping
+            # to a live project). NOT VALID skips checking existing rows — avoids
+            # failing outright if any already-orphaned rows exist, and avoids a
+            # full-table scan/lock on what can be a large table — while still
+            # enforcing the constraint for every new insert/update going forward.
+            # Postgres-only: SQLite (what the test suite runs against) has no ALTER
+            # TABLE ADD CONSTRAINT support at all, so this is skipped there rather
+            # than erroring.
+            if engine.dialect.name == "postgresql":
+                fk_constraints = [
+                    ("fk_scans_project_id", "scans"),
+                    ("fk_scan_reports_project_id", "scan_reports"),
+                    ("fk_issues_project_id", "issues"),
+                    ("fk_scan_assignments_project_id", "scan_assignments"),
+                ]
+                for constraint_name, table_name in fk_constraints:
+                    conn.execute(text(f"""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint WHERE conname = '{constraint_name}'
+                            ) THEN
+                                ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name}
+                                    FOREIGN KEY (project_id) REFERENCES projects(project_id) NOT VALID;
+                            END IF;
+                        END $$;
+                    """))
     except Exception as exc:
-        print(f"Schema migration skipped/failed: {exc}")
+        # Finding #55: previously print()'d — invisible to log aggregation/alerting
+        # in a containerized deployment where logger output is shipped but raw
+        # stdout may not be (or is at a different verbosity). logger.error with
+        # exc_info gives on-call the actual root cause; without it, the only signal
+        # is the more confusing downstream crash in _backfill_admin_role/
+        # _backfill_user_roles when they hit a column that migration should have
+        # added.
+        logger.error(f"Schema migration skipped/failed: {exc}", exc_info=True)

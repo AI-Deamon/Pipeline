@@ -1,3 +1,9 @@
+> **⚠️ SUPERSEDED — see `docs/reports-implementation-refined.md`.**
+> This plan's "Current State" section is factually stale (e.g. claims `ScanReportDB`
+> doesn't exist, claims the frontend only has `ProjectReportsPage.tsx`) — the refined
+> doc is an explicit correction pass with a "What the original plan got WRONG" table.
+> Kept for history; don't build against the claims in this file (finding #29).
+
 # Implementation Plan: Professional Security Reports Dashboard
 
 ## Current State

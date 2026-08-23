@@ -85,6 +85,27 @@ class TestAutoVerify:
             issue = session.query(IssueDB).filter(IssueDB.issue_id == "issue:001").first()
             assert issue.status == "open"
 
+    def test_does_not_auto_verify_pending_verification_issue(self, service):
+        """Regression test for finding #109: pending_verification issues are
+        waiting in the RBAC-gated approve_rescan review queue — they must only be
+        resolved by auto_verify_pending_rescans (which requires an approved
+        RescanRequestDB linked to the specific verify-scan) or a manual
+        approve/reject, never by an unrelated routine scan simply not
+        redetecting the finding. Previously this task's status filter included
+        "pending_verification" alongside "fixed", so any scan could silently
+        verify an issue a reviewer hadn't looked at yet."""
+        with SessionLocal() as session:
+            _create_issue(session, issue_id="issue:001", status="pending_verification")
+            _create_scan_report(session, findings=[])  # absent from this scan too
+            session.commit()
+
+        auto_verify_fixed_issues("scan_2", "proj_1", "sonar")
+
+        with SessionLocal() as session:
+            issue = session.query(IssueDB).filter(IssueDB.issue_id == "issue:001").first()
+            # Must remain pending_verification — untouched by this task.
+            assert issue.status == "pending_verification"
+
 
 class TestRegressionDetection:
     def test_detects_regression(self, service):

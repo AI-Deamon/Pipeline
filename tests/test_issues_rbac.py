@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.db import engine, Base, SessionLocal
-from app.models.db_models import UserDB, IssueDB
+from app.models.db_models import UserDB, IssueDB, ProjectAssignmentDB
 
 
 @pytest.fixture(autouse=True)
@@ -105,3 +105,59 @@ class TestIssueRBAC:
             headers=admin_headers,
         )
         assert response.status_code in (200, 403, 404)
+
+
+class TestIssueRBACCrossProjectDenial:
+    """Regression tests for the IDOR gap (findings #35/#37): a user scoped only to
+    proj-a must not be able to read/comment/see-history/create-issues for proj-b via
+    ID enumeration. TEST_BYPASS_AUTH short-circuits get_current_user before it ever
+    looks at the Authorization header, so these tests disable it and authenticate
+    dev-1 with a real JWT to actually exercise the RBAC check end-to-end.
+    """
+
+    @pytest.fixture
+    def dev1_headers(self, monkeypatch):
+        from app.core import auth as auth_module
+        from app.core import security
+
+        monkeypatch.setattr(auth_module.settings, "TEST_BYPASS_AUTH", False)
+
+        db = SessionLocal()
+        if not db.query(ProjectAssignmentDB).filter(ProjectAssignmentDB.user_id == "dev-1").first():
+            db.add(ProjectAssignmentDB(user_id="dev-1", scope_type="project", scope_id="proj-a", assigned_by="admin-1"))
+            db.commit()
+        db.close()
+
+        token = security.create_access_token({"sub": "dev1"})
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_dev_can_read_own_project_issue(self, client, dev1_headers):
+        # Issue #1 (ISSUE-001) belongs to proj-a, which dev-1 is scoped to.
+        response = client.get("/api/v1/issues/1", headers=dev1_headers)
+        assert response.status_code == 200
+
+    def test_dev_cannot_read_other_project_issue(self, client, dev1_headers):
+        # Issue #2 (ISSUE-002) belongs to proj-b — dev-1 has no assignment there.
+        response = client.get("/api/v1/issues/2", headers=dev1_headers)
+        assert response.status_code == 404
+
+    def test_dev_cannot_comment_on_other_project_issue(self, client, dev1_headers):
+        response = client.post(
+            "/api/v1/issues/2/comments", json={"message": "hi"}, headers=dev1_headers
+        )
+        assert response.status_code == 404
+
+    def test_dev_cannot_view_history_of_other_project_issue(self, client, dev1_headers):
+        response = client.get("/api/v1/issues/2/history", headers=dev1_headers)
+        assert response.status_code == 404
+
+    def test_dev_cannot_create_issue_in_other_project(self, client, dev1_headers):
+        response = client.post(
+            "/api/v1/issues",
+            json={
+                "issue_id": "ISSUE-999", "project_id": "proj-b", "tool_name": "sonar",
+                "severity": "High", "title": "Injected issue",
+            },
+            headers=dev1_headers,
+        )
+        assert response.status_code == 404

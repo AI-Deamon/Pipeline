@@ -26,10 +26,13 @@
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │ API Layer (app/api/)                                                 │  │
 │  │  auth.py          │  projects.py       │  scans/                     │  │
-│  │  POST /login      │  CRUD projects     │  triggers.py (scan start)   │  │
-│  │  POST /register   │  GET/POST/PATCH    │  callbacks.py (Jenkins)     │  │
-│  │                  │  DELETE projects   │  management.py (reset/cancel)│  │
+│  │  POST /login      │  CRUD projects     │  routes.py (scan start,     │  │
+│  │  POST /register   │  GET/POST/PATCH    │    list/get/cancel)         │  │
+│  │                  │  DELETE projects   │  callback.py (Jenkins)      │  │
+│  │  issues.py        │  project_groups.py │  state.py (in-mem tracking) │  │
+│  │  portfolio.py      │  reports.py        │  utils.py (shared helpers) │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
+│  Also present: users.py, scanner_tools.py, rbac_service.py (in services/)   │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │ Service Layer (app/services/)                                        │  │
 │  │  jenkins_service.py  │  scan_orchestrator.py  │  scan_recovery.py   │  │
@@ -151,10 +154,12 @@
 | **Redis Exposed** | ✅ | ❌ | ✅ |
 | **HMR** | ✅ Bind mounts | ✅ Bind mounts | ❌ Baked |
 | **Restart Policy** | No | No | unless-stopped |
-| **Workers** | 1 (--reload) | 1 (--reload) | 4 workers |
+| **Workers** | 1 (--reload) | 1 (--reload) | 1 (no `--workers` flag in `backend.Dockerfile`'s `CMD`, defaults to 1) |
 | **DB Volume** | postgres_data_dev | postgres_data_test | postgres_data_staging |
 | **Mock Execution** | false | false | false |
 | **Scan Timeout** | 7200s | 120s | 7200s |
+
+> **Note (finding #25):** staging runs a single uvicorn worker everywhere today, not four as an earlier version of this doc claimed. If workers are ever scaled up for throughput, two in-process subsystems would silently break without further changes: `main.py`'s scan-recovery loop runs as a `threading.Thread` local to one process (each worker would run its own independent, racing recovery loop), and `websockets/manager.py` keeps live connections in an in-process dict with no cross-process fan-out (e.g. Redis pub/sub) — a WebSocket client connected to one worker would never see a broadcast triggered on another. No test coverage guards either of these; treat multi-worker uvicorn as a real migration, not a flag flip.
 
 ---
 
@@ -270,15 +275,23 @@ updated_at      TIMESTAMP
 | `backend/app/main.py` | FastAPI entry, routers, CORS, startup |
 | `backend/app/core/config.py` | Pydantic Settings validation |
 | `backend/app/core/security.py` | Argon2 password hashing, JWT |
-| `backend/app/api/auth.py` | Login/register endpoints |
+| `backend/app/api/auth.py` | Login/register/refresh/logout endpoints |
 | `backend/app/api/projects.py` | Project CRUD |
-| `backend/app/api/scans/triggers.py` | Scan triggering logic |
-| `backend/app/api/scans/callbacks.py` | Jenkins callback handler |
-| `backend/app/api/scans/management.py` | Reset/cancel/force-unlock |
+| `backend/app/api/scans/routes.py` | Scan trigger/list/get/cancel/retry endpoints |
+| `backend/app/api/scans/callback.py` | Jenkins callback handler |
+| `backend/app/api/scans/state.py` | In-memory scan-state helpers (force-unlock, etc.) |
+| `backend/app/api/scans/utils.py` | Shared helpers for the scans API |
+| `backend/app/api/issues.py` | Issue lifecycle (assign/transition/comment/history) |
+| `backend/app/api/portfolio.py` | Cross-project portfolio rollups |
+| `backend/app/api/project_groups.py` | Project-group aggregated reports |
+| `backend/app/api/reports.py` | Report/raw-report download endpoints |
+| `backend/app/api/users.py` | User management endpoints |
+| `backend/app/services/rbac_service.py` | Role/project-scoped access checks |
 | `backend/app/services/jenkins_service.py` | Jenkins API integration |
 | `backend/app/infrastructure/jenkins/jenkins_client.py` | HTTP client for Jenkins |
 | `backend/app/websockets/manager.py` | WebSocket connection management |
-| `backend/app/tasks/jenkins_tasks.py` | Celery async tasks |
+| `backend/app/tasks/jenkins_tasks.py` | Celery async tasks (Jenkins polling/recovery) |
+| `backend/app/tasks/issue_tasks.py` | Celery tasks: issue migration, auto-verify, regression detection |
 
 ### Infrastructure
 | File | Purpose |

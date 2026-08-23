@@ -1,6 +1,7 @@
 import axios from 'axios';
-import type { Project, Scan, ScanStage, ScanMode, StageId, ProjectGroup, ProjectGroupDetail, ProjectGroupCreate, OverviewResponse, ToolIssuesResponse, MyIssuesResponse, IssueCreatePayload, IssueResponse, IssueAssignPayload, IssueStatusPayload, CommentResponse, IssueHistoryResponse, CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment } from '../types';
+import type { Project, Scan, ScanStage, ScanMode, StageId, ProjectGroup, ProjectGroupDetail, ProjectGroupCreate, OverviewResponse, ToolIssuesResponse, MyIssuesResponse, IssueCreatePayload, IssueResponse, IssueAssignPayload, IssueStatusPayload, CommentResponse, IssueHistoryResponse, CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment, PortfolioOverview, PortfolioTrendsResponse, PortfolioProjectToolDetail, TeamWorkloadResponse } from '../types';
 import { ApiError } from '../utils/apiError';
+import { isLegacyAuthGracePeriodActive } from '../utils/authGracePeriod';
 
 const API_BASE_URL = '/api/v1';
 
@@ -13,12 +14,19 @@ const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // Grace period (24h from the cookie-auth migration): fall back to sessionStorage
+  // only while the window is open. Once it closes we stop reading this value even if
+  // it's still present, so a stale/leftover token can't grant access indefinitely.
+  if (isLegacyAuthGracePeriodActive()) {
+    const legacyToken = sessionStorage.getItem('token');
+    if (legacyToken) {
+      console.warn('[api] Using legacy sessionStorage token — will be removed after migration.');
+      config.headers.Authorization = `Bearer ${legacyToken}`;
+    }
   }
+  // Browser automatically sends httpOnly cookies; no manual header injection needed
 
-  // Always include API Key for backend authentication
+  // API key for server-to-server auth (Jenkins callbacks use backend env var only)
   const apiKey = sessionStorage.getItem('API_KEY') || import.meta.env.VITE_API_KEY;
   if (apiKey) {
     config.headers['X-API-Key'] = apiKey;
@@ -81,12 +89,57 @@ export const api = {
     },
   },
   projects: {
+    // Fetches every project across all pages. GET /projects is paginated server-side
+    // (page_size defaults to 25, max 100) to avoid the N+1/latency issues a single
+    // unbounded query caused at scale — but every caller of this method (dashboards,
+    // portfolio/executive/team-workload/trend-analysis pages) needs the complete set
+    // for correct aggregate totals, not just page 1. This loops through all pages so
+    // those callers keep seeing the full project list instead of silently only the
+    // first 25. A dedicated `listPage` is available for real paginated table UI.
     list: async (): Promise<Project[]> => {
-      const response = await apiClient.get('/projects');
-      if (!Array.isArray(response.data)) {
-        throw new ApiError(500, 'Invalid response format from server');
+      const PAGE_SIZE = 100;
+      const MAX_PAGES = 100; // safety cap: 10,000 projects: well beyond any real deployment
+      const firstPage = await api.projects.listPage(1, PAGE_SIZE);
+      const items = [...firstPage.items];
+      const totalPages = firstPage.total_pages ?? 1;
+
+      if (totalPages > MAX_PAGES) {
+        console.warn(
+          `[api] projects.list: total_pages (${totalPages}) exceeds safety cap (${MAX_PAGES}); ` +
+          `only the first ${MAX_PAGES * PAGE_SIZE} projects will be returned.`
+        );
       }
-      return response.data;
+
+      const pagesToFetch = Math.min(totalPages, MAX_PAGES);
+      for (let page = 2; page <= pagesToFetch; page++) {
+        const next = await api.projects.listPage(page, PAGE_SIZE);
+        items.push(...next.items);
+      }
+
+      return items;
+    },
+    // Fetches a single page directly — use for a real paginated table UI where only
+    // the current page's rows and the pagination metadata are needed.
+    listPage: async (
+      page: number = 1,
+      pageSize: number = 25
+    ): Promise<{ items: Project[]; total: number; page: number; page_size: number; total_pages: number }> => {
+      const response = await apiClient.get('/projects', { params: { page, page_size: pageSize } });
+      // Handle paginated response shape: { items, total, page, page_size, total_pages }
+      if (response.data && Array.isArray(response.data.items)) {
+        return response.data;
+      }
+      // Grace period fallback: if backend still returns a bare array (pre-migration)
+      if (Array.isArray(response.data)) {
+        return {
+          items: response.data,
+          total: response.data.length,
+          page: 1,
+          page_size: response.data.length,
+          total_pages: 1,
+        };
+      }
+      throw new ApiError(500, 'Invalid response format from server');
     },
     get: async (id: string): Promise<Project | undefined> => {
       const response = await apiClient.get(`/projects/${id}`);
@@ -204,7 +257,19 @@ export const api = {
         { responseType: 'blob' }
       );
       return response.data;
-    }
+    },
+    getDeveloperReport: async (projectId: string, scanId: string) => {
+      const response = await apiClient.get(
+        `/reports/projects/${projectId}/reports/${scanId}/developer`
+      );
+      return response.data;
+    },
+    getFileMeasures: async (componentKey: string) => {
+      const response = await apiClient.get(
+        `/reports/file-measures/${encodeURIComponent(componentKey)}`
+      );
+      return response.data;
+    },
   },
   projectGroups: {
     list: async (): Promise<ProjectGroup[]> => {
@@ -325,8 +390,14 @@ export const api = {
       const response = await apiClient.post(`/issues/${issueId}/approve-rescan`, data);
       return response.data;
     },
-    triggerVerifyScan: async (issueId: number, note: string) => {
-      const response = await apiClient.post(`/issues/${issueId}/trigger-verify-scan`, { note });
+    rejectRescan: async (issueId: number, data: { reviewer_note?: string }) => {
+      const response = await apiClient.post(`/issues/${issueId}/reject-rescan`, data);
+      return response.data;
+    },
+    triggerVerifyScan: async (projectId: string, tool: string) => {
+      const response = await apiClient.post(`/scans/trigger-verify`, null, {
+        params: { project_id: projectId, tool },
+      });
       return response.data;
     },
     getPendingVerification: async (params?: {
@@ -424,6 +495,24 @@ export const api = {
       if (changeType) params.append('change_type', changeType);
       const query = params.toString() ? `?${params.toString()}` : '';
       const response = await apiClient.get(`/access-changes${query}`);
+      return response.data;
+    },
+  },
+  portfolio: {
+    getOverview: async (): Promise<PortfolioOverview> => {
+      const response = await apiClient.get('/portfolio/overview');
+      return response.data;
+    },
+    getTrends: async (months: number = 6): Promise<PortfolioTrendsResponse> => {
+      const response = await apiClient.get(`/portfolio/trends?months=${months}`);
+      return response.data;
+    },
+    getProjectToolDetail: async (projectId: string): Promise<PortfolioProjectToolDetail> => {
+      const response = await apiClient.get(`/portfolio/project/${projectId}/tools`);
+      return response.data;
+    },
+    getTeamWorkload: async (): Promise<TeamWorkloadResponse> => {
+      const response = await apiClient.get('/portfolio/team-workload');
       return response.data;
     },
   },

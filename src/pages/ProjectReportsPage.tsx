@@ -1,42 +1,31 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
-import { useRbac } from '../hooks/useRbac';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
-import type { SeveritySummary, ReportSummary, Scan, Finding } from '../types';
+import type { ReportSummary, Scan, Finding } from '../types';
 
 interface LocationState {
   scanId?: string;
 }
-import { ToolsTable } from '../components/reports/ToolsTable';
 import { FindingsTable } from '../components/reports/FindingsTable';
+import { ProjectReportLayout } from '../components/reports/ProjectReportLayout';
 import {
   ChevronLeft,
-  ExternalLink,
   AlertCircle,
   Shield,
   History,
-  Download,
-  ListChecks
 } from 'lucide-react';
-
-const severityColors: Record<string, { text: string; bg: string; border: string }> = {
-  Critical: { text: 'text-[#A32D2D]', bg: 'bg-[#FCEBEB]', border: 'border-[#E24B4A]' },
-  High: { text: 'text-[#854F0B]', bg: 'bg-[#FAEEDA]', border: 'border-[#EF9F27]' },
-  Medium: { text: 'text-[#185FA5]', bg: 'bg-[#E6F1FB]', border: 'border-[#378ADD]' },
-  Low: { text: 'text-[#3B6D11]', bg: 'bg-[#EAF3DE]', border: 'border-[#639922]' },
-  Info: { text: 'text-[#5F5E5A]', bg: 'bg-[#F1EFE8]', border: 'border-slate-400' },
-};
 
 const ProjectReportsPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { canAssignIssues, isAdmin } = useRbac();
   const initialScanId = (location.state as LocationState)?.scanId;
   
   const [exportLoading, setExportLoading] = useState(false);
   const [selectedScanId, setSelectedScanId] = useState<string>(initialScanId || '');
+  const [selectedTool, setSelectedTool] = useState<string | null>(null);
 
   // Fetch project
   const { data: project, isLoading: projectLoading } = useQuery({
@@ -65,7 +54,6 @@ const ProjectReportsPage = () => {
   }, [completedScans, selectedScanId]);
 
   const currentScan = completedScans[currentScanIndex];
-  const previousScan = completedScans[currentScanIndex + 1];
 
   // Fetch report summary for current scan
   const { data: summary, isLoading: summaryLoading } = useQuery<ReportSummary>({
@@ -79,13 +67,6 @@ const ProjectReportsPage = () => {
     queryKey: ['reports', projectId, selectedScanId],
     queryFn: () => api.reports.getAll(projectId!, selectedScanId),
     enabled: !!projectId && !!selectedScanId,
-  });
-
-  // Fetch previous scan summary for delta
-  const { data: previousSummary } = useQuery<ReportSummary>({
-    queryKey: ['reportSummary', projectId, previousScan?.scan_id],
-    queryFn: () => api.reports.getSummary(projectId!, previousScan?.scan_id),
-    enabled: !!projectId && !!previousScan?.scan_id,
   });
 
   // Fetch current scan with stage_results for ToolsTable status
@@ -106,24 +87,6 @@ const ProjectReportsPage = () => {
   }, [completedScans, initialScanId, selectedScanId]);
 
   const isLoading = projectLoading || scansLoading || summaryLoading || reportsLoading;
-
-  // Calculate delta
-  const getDirection = (diff: number): 'up' | 'down' | 'same' => {
-    if (diff > 0) return 'up';
-    if (diff < 0) return 'down';
-    return 'same';
-  };
-
-  const getDelta = (severity: keyof SeveritySummary): { value: number; direction: 'up' | 'down' | 'same' } => {
-    if (!summary?.severity || !previousSummary?.severity) return { value: 0, direction: 'same' };
-    const current = summary.severity[severity] || 0;
-    const previous = previousSummary.severity[severity] || 0;
-    const diff = current - previous;
-    return {
-      value: Math.abs(diff),
-      direction: getDirection(diff),
-    };
-  };
 
   // Format helpers
   const formatDuration = (startedAt?: string, finishedAt?: string): string => {
@@ -241,48 +204,73 @@ const ProjectReportsPage = () => {
 
   const scanNumber = currentScanIndex + 1;
 
+  // Prepare tools for layout - include ALL stages, not just those with findings
+  const allStages = scanDetail?.results || [];
+  const toolsWithFindings = summary?.tools || [];
+  
+  // Create a map of tools with findings
+  const findingsMap = new Map(toolsWithFindings.map(t => [t.tool, t]));
+  
+  // Stage to tool name mapping (mirrors backend STAGE_TO_TOOL)
+  const stageToTool: Record<string, { name: string; type: string; icon: string; key: string | undefined }> = {
+    'git_checkout': { name: 'Git Checkout', type: 'Pipeline', icon: 'G', key: undefined },
+    'sonar_scanner': { name: 'SonarQube', type: 'SAST', icon: 'S', key: 'sonar' },
+    'dependency_check': { name: 'Dependency Check', type: 'SCA', icon: 'D', key: 'dependency_check' },
+    'trivy_fs_scan': { name: 'Trivy FS', type: 'SCA', icon: 'TF', key: 'trivy_fs' },
+    'docker_build': { name: 'Docker Build', type: 'Pipeline', icon: 'DB', key: undefined },
+    'docker_push': { name: 'Docker Push', type: 'Pipeline', icon: 'DP', key: undefined },
+    'trivy_image_scan': { name: 'Trivy Image', type: 'Container', icon: 'TI', key: 'trivy_image' },
+    'nmap_scan': { name: 'Nmap', type: 'Network', icon: 'N', key: 'nmap' },
+    'zap_scan': { name: 'OWASP ZAP', type: 'DAST', icon: 'Z', key: 'zap' },
+  };
+
+  // Build tools list from all stages
+  const toolsForLayout = allStages.map((stage) => {
+    const stageInfo = stageToTool[stage.stage] || {
+      name: stage.stage.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
+      type: 'Unknown',
+      icon: stage.stage[0]?.toUpperCase() ?? '?',
+      key: undefined,
+    };
+    
+    const st = stage.status?.toUpperCase();
+    let status: 'pass' | 'fail' | 'warn' | 'skipped' = 'pass';
+    if (st === 'FAIL' || st === 'FAILED') status = 'fail';
+    else if (st === 'WARN' || st === 'UNSTABLE') status = 'warn';
+    else if (st === 'SKIP' || st === 'SKIPPED') status = 'skipped';
+    
+    // Find findings for this tool using explicit key mapping
+    const toolKey = stageInfo.key || [...findingsMap.keys()].find(k => 
+      k === stage.stage
+    ) || stage.stage;
+    const toolData = findingsMap.get(toolKey);
+    
+    return {
+      name: stageInfo.name,
+      key: toolKey,
+      type: stageInfo.type,
+      icon: stageInfo.icon,
+      status,
+      findings: toolData?.findings ?? 0,
+      critical: toolData?.critical ?? 0,
+      high: toolData?.high ?? 0,
+      medium: toolData?.medium ?? 0,
+      low: toolData?.low ?? 0,
+      info: toolData?.info ?? 0,
+      link: toolData?.link,
+    };
+  });
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
-            <ChevronLeft className="w-5 h-5 text-slate-600" />
-          </button>
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">Scan Report</h1>
-            <p className="text-sm text-slate-500">Dashboard / {project.name} / Reports / Scan #{scanNumber}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {(canAssignIssues || isAdmin) && (
-            <Link
-              to={`/projects/${projectId}/issues`}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
-            >
-              <ListChecks className="w-4 h-4" />
-              Issues
-            </Link>
-          )}
-          <button
-            onClick={handleExport}
-            disabled={exportLoading}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium disabled:opacity-50"
-          >
-            {exportLoading ? (
-              <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Download className="w-4 h-4" />
-            )}
-            Export PDF
-          </button>
-          <button
-            onClick={() => navigate(`/projects/${projectId}/reports/unified`)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-          >
-            <ExternalLink className="w-4 h-4" />
-            View Unified Report
-          </button>
+    <div className="space-y-4">
+      {/* Header with back button */}
+      <div className="flex items-center gap-4">
+        <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
+          <ChevronLeft className="w-5 h-5 text-slate-600" />
+        </button>
+        <div>
+          <h1 className="text-xl font-semibold text-slate-900">Scan Report</h1>
+          <p className="text-sm text-slate-500">Dashboard / {project.name} / Reports / Scan #{scanNumber}</p>
         </div>
       </div>
 
@@ -304,72 +292,51 @@ const ProjectReportsPage = () => {
         </div>
       )}
 
-      {/* Scan Metadata */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-wrap items-center gap-4 divide-x divide-slate-200">
-          <div className="px-4 first:pl-0">
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Scan ID</div>
-            <div className="font-mono text-sm text-slate-900">{currentScan?.scan_id?.slice(0, 12)}...</div>
-          </div>
-          <div className="px-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Date & Time</div>
-            <div className="text-sm text-slate-900">{formatDate(currentScan?.created_at)}</div>
-          </div>
-          <div className="px-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Scan Mode</div>
-            <div className="text-sm text-slate-900 capitalize">{currentScan?.scan_mode || 'Automated'}</div>
-          </div>
-          <div className="px-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Target</div>
-            <div className="font-mono text-sm text-slate-900 truncate max-w-[200px]">
-              {project.target_url || project.target_ip || 'N/A'}
-            </div>
-          </div>
-          <div className="px-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wider">Duration</div>
-            <div className="text-sm text-slate-900">
-              {formatDuration(currentScan?.started_at, currentScan?.finished_at)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Severity Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          {(['Critical', 'High', 'Medium', 'Low', 'Info'] as const).map((severity) => {
-            const count = summary.severity[severity.toLowerCase() as keyof SeveritySummary] || 0;
-            const delta = getDelta(severity.toLowerCase() as keyof SeveritySummary);
-            const colors = severityColors[severity];
-            
-            return (
-              <div key={severity} className={`bg-white rounded-xl border-t-4 ${colors.border} border-x border-b border-slate-200 p-4`}>
-                <div className={`text-3xl font-bold ${colors.text}`}>{count}</div>
-                <div className="text-sm text-slate-500">{severity}</div>
-                {previousSummary && (
-                  <div className="text-xs mt-2">
-                    {delta.direction === 'up' && delta.value > 0 && <span className="text-red-600">↑ +{delta.value} new</span>}
-                    {delta.direction === 'down' && delta.value > 0 && <span className="text-green-600">↓ −{delta.value} fixed</span>}
-                    {delta.direction === 'same' && <span className="text-slate-400">no change</span>}
-                  </div>
-                )}
+      {/* Side Panel Layout */}
+      <ProjectReportLayout
+        scanInfo={{
+          scanId: currentScan?.scan_id || '',
+          date: formatDate(currentScan?.created_at),
+          duration: formatDuration(currentScan?.started_at, currentScan?.finished_at),
+          mode: currentScan?.scan_mode || 'Automated',
+          target: project.target_url || project.target_ip || '',
+        }}
+        severity={{
+          critical: summary?.severity?.critical ?? 0,
+          high: summary?.severity?.high ?? 0,
+          medium: summary?.severity?.medium ?? 0,
+          low: summary?.severity?.low ?? 0,
+          info: summary?.severity?.info ?? 0,
+        }}
+        tools={toolsForLayout}
+        projectId={projectId || ''}
+        scanId={selectedScanId}
+        selectedTool={selectedTool}
+        onToolSelect={setSelectedTool}
+        onExport={handleExport}
+        exportLoading={exportLoading}
+      >
+        {selectedTool ? (
+          <FindingsTable 
+            findings={allFindings} 
+            projectId={projectId} 
+            scanId={selectedScanId}
+            selectedTool={selectedTool}
+          />
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                </svg>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Tools Table */}
-      {summary?.tools && (
-        <ToolsTable
-          tools={summary.tools}
-          reports={reports}
-          stages={scanDetail?.results ?? []}
-        />
-      )}
-
-      {/* Findings Table */}
-      <FindingsTable findings={allFindings} projectId={projectId} scanId={selectedScanId} />
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">Select a Tool</h3>
+              <p className="text-sm text-slate-500">Click on a tool in the sidebar to view its findings</p>
+            </div>
+          </div>
+        )}
+      </ProjectReportLayout>
     </div>
   );
 };

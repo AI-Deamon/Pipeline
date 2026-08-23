@@ -65,6 +65,7 @@ class ScanHistoryResponse(BaseModel):
     scan_id: str
     state: ScanState
     created_at: datetime
+    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     retry_count: int = 0
     error: Optional[ScanError] = None

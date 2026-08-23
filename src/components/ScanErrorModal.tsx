@@ -9,10 +9,17 @@ interface ScanErrorModalProps {
     error_type?: string;
     jenkins_console_url?: string;
   } | null;
+  // Actual time the scan finished/failed. Rendered as the failure timestamp instead
+  // of the modal's render time (which was misleading when debugging when it happened).
+  finishedAt?: string | null;
 }
 
-export function ScanErrorModal({ isOpen, onClose, error }: ScanErrorModalProps) {
+export function ScanErrorModal({ isOpen, onClose, error, finishedAt }: ScanErrorModalProps) {
   if (!isOpen || !error) return null;
+
+  const failureTimestamp = finishedAt
+    ? `${new Date(finishedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`
+    : null;
 
   const getErrorIcon = () => {
     switch (error.error_type) {
@@ -95,8 +102,8 @@ export function ScanErrorModal({ isOpen, onClose, error }: ScanErrorModalProps) 
             <div className="text-sm font-medium text-slate-700">{error.error_type || 'UNKNOWN'}</div>
           </div>
           <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl">
-            <div className="text-xs text-slate-400 mb-1">Timestamp</div>
-            <div className="text-sm font-medium text-slate-700">{new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} IST</div>
+            <div className="text-xs text-slate-400 mb-1">Failed At</div>
+            <div className="text-sm font-medium text-slate-700">{failureTimestamp ?? '—'}</div>
           </div>
         </div>
       </div>

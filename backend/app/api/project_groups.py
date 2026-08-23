@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.auth import get_current_user
 from app.models.db_models import (
     ProjectGroupDB,
     ScanAssignmentDB,
@@ -22,16 +23,51 @@ from app.schemas.project import (
     ProjectGroupDetail,
 )
 from app.services.project_grouping import ProjectGroupingService
+from app.services.rbac_service import get_rbac_service
 
 router = APIRouter(prefix="/project-groups", tags=["project-groups"])
 
 _PROJECT_GROUP_NOT_FOUND = "Project group not found"
 
 
+def _group_has_visible_projects(db: Session, rbac, group_id: str) -> bool:
+    """Finding #116: whether the caller has RBAC access to at least one project
+    assigned to this group. Admins always see everything (empty effective set =
+    "all" per RbacService.get_effective_project_ids)."""
+    if rbac.is_admin:
+        return True
+    effective = rbac.get_effective_project_ids()
+    if not effective:
+        return False
+    return (
+        db.query(ScanAssignmentDB.project_id)
+        .filter(ScanAssignmentDB.group_id == group_id, ScanAssignmentDB.project_id.in_(effective))
+        .first()
+        is not None
+    )
+
+
 @router.get("/", response_model=List[ProjectGroupResponse])
-def list_project_groups(db: Annotated[Session, Depends(get_db)], skip: int = 0, limit: int = 100):
-    """List all project groups."""
-    groups = db.query(ProjectGroupDB).offset(skip).limit(limit).all()
+def list_project_groups(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    skip: int = 0,
+    limit: int = 100,
+):
+    """List all project groups the caller has access to (finding #116)."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    query = db.query(ProjectGroupDB)
+    if not rbac.is_admin:
+        effective = rbac.get_effective_project_ids()
+        if not effective:
+            return []
+        visible_group_ids = (
+            db.query(ScanAssignmentDB.group_id)
+            .filter(ScanAssignmentDB.project_id.in_(effective))
+            .distinct()
+        )
+        query = query.filter(ProjectGroupDB.group_id.in_(visible_group_ids))
+    groups = query.offset(skip).limit(limit).all()
     return [
         ProjectGroupResponse(
             group_id=g.group_id,
@@ -50,10 +86,14 @@ def list_project_groups(db: Annotated[Session, Depends(get_db)], skip: int = 0, 
 def create_project_group(
     group: ProjectGroupCreate,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Create a new project group."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group_id = str(uuid.uuid4())
-    
+
     # Validate naming pattern
     if not group.naming_pattern:
         raise HTTPException(status_code=400, detail="naming_pattern is required")
@@ -85,19 +125,28 @@ def create_project_group(
 def get_project_group(
     group_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Get a project group with its details and aggregated report."""
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
-    # Get assigned scans with confidence
-    assignments = (
-        db.query(ScanAssignmentDB)
-        .filter(ScanAssignmentDB.group_id == group_id)
-        .all()
-    )
-    
+
+    rbac = get_rbac_service(db=db, user=current_user)
+    # Finding #116: previously anyone logged in could fetch any group's full
+    # aggregated cross-project severity summary, regardless of their RBAC grants.
+    # 404 (not 403) so a group entirely outside the caller's scope isn't
+    # distinguishable from one that doesn't exist.
+    if not _group_has_visible_projects(db, rbac, group_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
+    allowed_project_ids = None if rbac.is_admin else rbac.get_effective_project_ids()
+
+    # Get assigned scans with confidence, scoped to projects the caller can see
+    assignments_query = db.query(ScanAssignmentDB).filter(ScanAssignmentDB.group_id == group_id)
+    if allowed_project_ids is not None:
+        assignments_query = assignments_query.filter(ScanAssignmentDB.project_id.in_(allowed_project_ids))
+    assignments = assignments_query.all()
+
     scan_assignments = [
         {
             "scan_id": a.scan_id,
@@ -108,11 +157,11 @@ def get_project_group(
         }
         for a in assignments
     ]
-    
-    # Get aggregated report
+
+    # Get aggregated report, scoped to the same allowed projects
     service = ProjectGroupingService()
-    aggregated = service.get_group_aggregated_report(db, group_id)
-    
+    aggregated = service.get_group_aggregated_report(db, group_id, allowed_project_ids)
+
     return ProjectGroupDetail(
         group_id=group.group_id,
         name=group.name,
@@ -132,12 +181,16 @@ def update_project_group(
     group_id: str,
     group_update: ProjectGroupUpdate,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Update a project group."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     update_data = group_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(group, field, value)
@@ -161,12 +214,16 @@ def update_project_group(
 def delete_project_group(
     group_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Delete a project group and its assignments."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     # Delete assignments first
     db.query(ScanAssignmentDB).filter(ScanAssignmentDB.group_id == group_id).delete()
     
@@ -182,12 +239,16 @@ def delete_project_group(
 def auto_assign_scans(
     group_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Auto-assign scans to a project group based on naming pattern."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     service = ProjectGroupingService()
     result = service.auto_assign_group_scans(db, group_id, group.naming_pattern)
     
@@ -200,17 +261,25 @@ def auto_assign_scans(
 
 @router.post("/{group_id}/refresh",
   responses={404: {"description": "Not found"}})
-def refresh_group(group_id: str, db: Annotated[Session, Depends(get_db)], auto_reassign: bool = True):
+def refresh_group(
+    group_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
+    auto_reassign: bool = True,
+):
     """
     Refresh a project group - re-run auto-assignment and recalculate aggregates.
-    
+
     This is useful for keeping groups up-to-date as new scans are created.
     Set auto_reassign=false to only recalculate without changing assignments.
     """
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     service = ProjectGroupingService()
     result = {"auto_assigned": 0, "refreshed_scans": 0}
     
@@ -272,12 +341,16 @@ def bulk_assign_scans(
     group_id: str,
     scan_ids: List[str],
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Bulk assign multiple scans to a project group."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     assigned = 0
     for scan_id in scan_ids:
         scan = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
@@ -315,12 +388,16 @@ def add_scan_assignment(
     group_id: str,
     scan_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Manually assign a scan to a project group."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     group = db.query(ProjectGroupDB).filter(ProjectGroupDB.group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail=_PROJECT_GROUP_NOT_FOUND)
-    
+
     scan = db.query(ScanDB).filter(ScanDB.scan_id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -358,8 +435,12 @@ def remove_scan_assignment(
     group_id: str,
     scan_id: str,
     db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(get_current_user)],
 ):
     """Remove a scan from a project group."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.can_manage_project():
+        raise HTTPException(status_code=403, detail="Not authorized to manage project groups")
     assignment = (
         db.query(ScanAssignmentDB)
         .filter(

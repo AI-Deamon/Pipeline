@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/ui/Modal';
 import { useRbac } from '../hooks/useRbac';
+import { useAuth } from '../hooks/useAuth';
 import { api } from '../services/api';
 import { ApiError } from '../utils/apiError';
 import type { CurrentUser, UserAccess, AccessChange, ProjectAccessAssignment } from '../types';
@@ -19,6 +20,7 @@ const UserManagementPage = () => {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { canManageUsers } = useRbac();
+  const { currentUser } = useAuth();
   const [users, setUsers] = useState<CurrentUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [userAccess, setUserAccess] = useState<UserAccess | null>(null);
@@ -210,7 +212,15 @@ const UserManagementPage = () => {
                   >
                     <UserCog className="w-4 h-4" />
                   </button>
-                  {user.username !== 'admin' && (
+                  {user.username !== 'admin' && user.id !== currentUser?.id && (
+                    // Finding #105: previously gated only on `username !== 'admin'`
+                    // (a literal string check, not "is this me"). A non-last admin
+                    // (e.g. team_lead or a second admin account) could click Delete
+                    // on their own row with only a generic confirm dialog and no
+                    // warning that they'd be signed out — this relied entirely on
+                    // the backend's last-admin protection, which doesn't catch a
+                    // non-last admin deleting themselves. Hide the control for the
+                    // caller's own account entirely rather than rely on a warning.
                     <button
                       onClick={() => setConfirmDeleteUser({ userId: user.id, username: user.username })}
                       className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg"

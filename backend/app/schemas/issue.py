@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Optional, Any
 from datetime import datetime
 
@@ -21,6 +21,8 @@ class IssueCreate(BaseModel):
     rule: Optional[str] = None
     recommendation: Optional[str] = None
     finding_type: Optional[str] = None
+    sonar_status: Optional[str] = None
+    sonar_resolution: Optional[str] = None
     raw_evidence: Optional[str] = None
     @field_validator("title")
     @classmethod
@@ -74,8 +76,34 @@ class IssueResponse(BaseModel):
     assigned_by: Optional[str] = None
     priority: Optional[str] = None
     extra_metadata: Optional[dict[str, Any]] = None
+    sonar_status: Optional[str] = None
+    sonar_resolution: Optional[str] = None
+    sonar_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode='before')
+    @classmethod
+    def backfill_sonar_fields(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            if not values.get('sonar_status') and values.get('extra_metadata'):
+                meta = values['extra_metadata']
+                if isinstance(meta, dict):
+                    values.setdefault('sonar_status', meta.get('sonar_status'))
+                    values.setdefault('sonar_resolution', meta.get('sonar_resolution'))
+        elif hasattr(values, 'extra_metadata'):
+            meta = getattr(values, 'extra_metadata', None) or {}
+            if not getattr(values, 'sonar_status', None) and meta:
+                try:
+                    values.sonar_status = meta.get('sonar_status')
+                except AttributeError:
+                    pass
+            if not getattr(values, 'sonar_resolution', None) and meta:
+                try:
+                    values.sonar_resolution = meta.get('sonar_resolution')
+                except AttributeError:
+                    pass
+        return values
 
     @property
     def file_path(self) -> Optional[str]:
@@ -237,6 +265,12 @@ class RescanApproveRequest(BaseModel):
     reviewer_note: Optional[str] = None
 
 
+class RescanRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewer_note: Optional[str] = None
+
+
 class RescanEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -265,12 +299,6 @@ class RawFixNoteResponse(BaseModel):
     fix_note_raw: Optional[str] = None
     requested_by: str
     created_at: datetime
-
-
-class TriggerVerifyScanRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    note: Optional[str] = None
 
 
 class PendingVerificationResponse(BaseModel):

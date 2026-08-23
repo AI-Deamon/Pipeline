@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -24,15 +25,18 @@ from app.schemas.issue import (
     RescanRequestCreate,
     RescanRequestResponse,
     RescanApproveRequest,
+    RescanRejectRequest,
     RescanEditRequest,
     RescanCancelRequest,
     RawFixNoteResponse,
-    TriggerVerifyScanRequest,
     PendingVerificationResponse,
 )
-from app.models.db_models import RescanRequestDB, IssueDB
+from app.core.config import settings
+from app.models.db_models import RescanRequestDB, IssueDB, ProjectDB
 from app.state.issue_state import IssueState
 from app.websockets.manager import manager as websocket_manager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 service = IssueService()
@@ -40,6 +44,15 @@ service = IssueService()
 _PROJECT_NOT_FOUND = "Project not found"
 _ISSUE_NOT_FOUND = "Issue not found"
 _RESCAN_REQUEST_NOT_FOUND = "Rescan request not found"
+
+
+def _enrich_sonar_url(db: Session, issue_resp: IssueResponse) -> IssueResponse:
+    project = db.query(ProjectDB).filter(ProjectDB.project_id == issue_resp.project_id).first()
+    if project and project.sonar_key:
+        issue_id = issue_resp.issue_id
+        base = f"{settings.SONARQUBE_PROTOCOL}://{settings.SONARQUBE_URL}"
+        issue_resp.sonar_url = f"{base}/project/issues?id={project.sonar_key}&issues={issue_id}&open={issue_id}"
+    return issue_resp
 
 
 def _build_pending_verification_query(
@@ -152,12 +165,21 @@ def create_issue(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(data.project_id):
+        raise HTTPException(status_code=404, detail=_PROJECT_NOT_FOUND)
     try:
         issue = service.create_issue(db, data.model_dump())
         db.commit()
-        return issue
+        resp = IssueResponse.model_validate(issue)
+        return _enrich_sonar_url(db, resp)
     except Exception:
         db.rollback()
+        # Finding #38: this used to swallow the real exception entirely — a bare
+        # `except Exception` with no logging means any unexpected failure (a DB
+        # constraint violation, a bug in service.create_issue) was indistinguishable
+        # from a legitimate client error, and left zero trail to debug it from.
+        logger.error("Failed to create issue for project %s", data.project_id, exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to create issue")
 
 
@@ -207,18 +229,24 @@ def get_issue(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
+    issue = service.get_by_id(db, issue_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(issue.project_id):
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
+
     from app.services.cache import cache_get, cache_set
     cache_key = f"issue:{issue_id}"
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
-    issue = service.get_by_id(db, issue_id)
-    if issue is None:
-        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
-    payload = IssueResponse.model_validate(issue).model_dump()
+    resp = IssueResponse.model_validate(issue)
+    _enrich_sonar_url(db, resp)
+    payload = resp.model_dump()
     cache_set(cache_key, payload, ttl_seconds=60)
-    return issue
+    return resp
 
 
 @router.post("/issues/{issue_id}/comments",
@@ -232,6 +260,9 @@ def add_comment(
 ):
     issue = service.get_by_id(db, issue_id)
     if issue is None:
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(issue.project_id):
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     entry = service.add_comment(db, issue_id, user_id, data.message)
@@ -257,12 +288,15 @@ def get_issue_history(
     issue = service.get_by_id(db, issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(issue.project_id):
+        raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     history = service.get_history(db, issue_id)
     return IssueHistoryResponse(issue_id=issue_id, history=history)
 
 
 @router.post("/issues/{issue_id}/assign", response_model=IssueResponse,
-  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
+  responses={400: {"description": "Bad request"}, 403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
 def assign_issue(
     issue_id: int,
     data: IssueAssignRequest,
@@ -277,11 +311,15 @@ def assign_issue(
     if not rbac.can_assign_issue(db_issue.project_id):
         raise HTTPException(status_code=403, detail="Not authorized to assign issues")
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
-    issue = service.assign(db, issue_id, data.assignee_id, user_id, data.priority)
+    try:
+        issue = service.assign(db, issue_id, data.assignee_id, user_id, data.priority)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if issue is None:
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
-    return issue
+    resp = IssueResponse.model_validate(issue)
+    return _enrich_sonar_url(db, resp)
 
 
 @router.post("/issues/{issue_id}/transition", response_model=IssueResponse,
@@ -297,8 +335,11 @@ def transition_issue(
     db_issue = service.get_by_id(db, issue_id)
     if db_issue is None:
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
-    if data.status in ("verified", "rejected") and not rbac.can_verify_issue(db_issue.project_id):
-        raise HTTPException(status_code=403, detail="Not authorized to verify or reject issues")
+    if data.status in ("verified", "rejected"):
+        if not rbac.can_verify_issue(db_issue.project_id):
+            raise HTTPException(status_code=403, detail="Not authorized to verify or reject issues")
+    elif not rbac.can_update_issue(db_issue.project_id, db_issue.assignee_id):
+        raise HTTPException(status_code=403, detail="Not authorized to update this issue")
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     try:
         issue = service.transition_status(db, issue_id, data.status, user_id)
@@ -307,7 +348,8 @@ def transition_issue(
     if issue is None:
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     db.commit()
-    return issue
+    resp = IssueResponse.model_validate(issue)
+    return _enrich_sonar_url(db, resp)
 
 
 @router.post("/issues/{issue_id}/request-rescan", response_model=RescanRequestResponse, status_code=201,
@@ -358,7 +400,8 @@ def request_rescan(
     db.refresh(rescan)
     RESCAN_REQUESTS_TOTAL.labels(status="pending").inc()
     try:
-        websocket_manager.broadcast_event(
+        from app.websockets.manager import safe_broadcast
+        safe_broadcast(
             "rescan_requested",
             {
                 "issue_id": issue_id,
@@ -400,7 +443,8 @@ def approve_rescan(
     db.commit()
     db.refresh(rescan)
     try:
-        websocket_manager.broadcast_event(
+        from app.websockets.manager import safe_broadcast
+        safe_broadcast(
             "rescan_approved",
             {
                 "issue_id": issue_id,
@@ -417,27 +461,54 @@ def approve_rescan(
     }
 
 
-@router.post("/issues/{issue_id}/trigger-verify-scan",
-  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
-def trigger_verify_scan(
+@router.post("/issues/{issue_id}/reject-rescan",
+  responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}, 409: {"description": "Conflict"}})
+def reject_rescan(
     issue_id: int,
-    data: TriggerVerifyScanRequest,
+    data: RescanRejectRequest,
     request: Request,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
+    """Reviewer-facing rejection of a pending rescan request — the actual fix for
+    finding #56 (the frontend "Reject" button previously called trigger-verify-scan,
+    the same action "Approve" effectively drives, so rejecting silently re-triggered
+    a scan instead of recording a rejection). Distinct from DELETE /rescan-requests
+    (self-service cancel by the requester) — this requires the same reviewer
+    permission as approve-rescan.
+    """
     issue = service.get_by_id(db, issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail=_ISSUE_NOT_FOUND)
     rbac = get_rbac_service(db=db, user=current_user)
     if not rbac.can_approve_rescan(issue.project_id):
-        raise HTTPException(status_code=403, detail="Not authorized to trigger verify scan")
-    return {
-        "issue_id": issue_id,
-        "scan_id": None,
-        "tool": issue.tool_name,
-        "state": "PENDING",
-    }
+        raise HTTPException(status_code=403, detail="Not authorized to reject rescan")
+    rescan = rescan_service.find_pending_for_issue(db, issue_id)
+    if not rescan:
+        raise HTTPException(status_code=409, detail="No pending rescan request")
+    user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", "reviewer"))
+    try:
+        rescan_service.reject(db, rescan, user_id, data.reviewer_note)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if issue.status == IssueState.PENDING_VERIFICATION.value:
+        service.transition_status(db, issue.id, IssueState.IN_PROGRESS.value, user_id)
+    db.commit()
+    db.refresh(rescan)
+    try:
+        from app.websockets.manager import safe_broadcast
+        safe_broadcast(
+            "rescan_rejected",
+            {
+                "issue_id": issue_id,
+                "rescan_request_id": rescan.id,
+                "rejected_by": user_id,
+                "project_id": issue.project_id,
+            },
+        )
+    except Exception:
+        pass
+    return {"rescan_request": RescanRequestResponse.model_validate(rescan)}
 
 
 @router.patch("/rescan-requests/{request_id}", response_model=RescanRequestResponse,
@@ -504,7 +575,11 @@ def cancel_rescan_request(
         raise HTTPException(status_code=409, detail=str(e))
     issue = service.get_by_id(db, record.issue_id)
     if issue and issue.status == IssueState.PENDING_VERIFICATION.value:
-        service.transition_status(db, issue.id, IssueState.FIXED.value, str(user_id))
+        # PENDING_VERIFICATION -> FIXED is not a legal transition (see issue_state.py
+        # TRANSITIONS); this previously raised ValueError and 500'd whenever a
+        # requester cancelled their own pending-verification rescan. IN_PROGRESS is
+        # both valid and semantically correct — a cancelled/rejected fix needs more work.
+        service.transition_status(db, issue.id, IssueState.IN_PROGRESS.value, str(user_id))
     db.commit()
     return {"detail": "Rescan request cancelled", "id": record.id, "version": record.version}
 

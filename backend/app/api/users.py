@@ -47,13 +47,22 @@ def list_users(
         query = query.filter(UserDB.role == role)
     users = query.all()
 
-    result = []
-    for u in users:
-        assignments = (
+    # Batch-fetch all assignments for these users in one query, then group in Python,
+    # instead of issuing one query per user (N+1).
+    user_ids = [str(u.id) for u in users]
+    assignments_by_user: dict[str, list[ProjectAssignmentDB]] = {uid: [] for uid in user_ids}
+    if user_ids:
+        all_assignments = (
             db.query(ProjectAssignmentDB)
-            .filter(ProjectAssignmentDB.user_id == str(u.id))
+            .filter(ProjectAssignmentDB.user_id.in_(user_ids))
             .all()
         )
+        for a in all_assignments:
+            assignments_by_user.setdefault(str(a.user_id), []).append(a)
+
+    result = []
+    for u in users:
+        assignments = assignments_by_user.get(str(u.id), [])
         result.append(
             UserWithRole(
                 id=str(u.id),

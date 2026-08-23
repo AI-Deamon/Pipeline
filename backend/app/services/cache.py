@@ -77,3 +77,38 @@ def cache_delete_pattern(pattern: str) -> None:
             client.delete(key)
     except Exception:
         return
+
+
+def invalidate_after_commit(session, key: str | None = None, pattern: str | None = None) -> None:
+    """Queue a cache invalidation to run only once `session`'s transaction actually
+    commits (finding #96).
+
+    Calling cache_delete/cache_delete_pattern directly at flush-time — before the
+    caller's later db.commit() — invalidates the cache while the DB write is still
+    only visible inside this transaction. A concurrent request can hit the
+    now-empty cache in that window, read the pre-update row under READ COMMITTED,
+    and repopulate the cache with stale data that then survives the writer's commit
+    for the rest of its TTL, with nothing left to invalidate it again. Deferring to
+    an `after_commit` hook means the invalidation only fires once the new value is
+    actually visible to a fresh read, closing that window.
+    """
+    pending = session.info.setdefault("_cache_invalidations", [])
+    pending.append((key, pattern))
+
+    if not session.info.get("_cache_invalidation_hooked"):
+        from sqlalchemy import event
+
+        def _flush_pending(sess):
+            items = sess.info.pop("_cache_invalidations", [])
+            for k, p in items:
+                if k:
+                    cache_delete(k)
+                if p:
+                    cache_delete_pattern(p)
+
+        def _clear_pending(sess):
+            sess.info.pop("_cache_invalidations", None)
+
+        event.listen(session, "after_commit", _flush_pending)
+        event.listen(session, "after_rollback", _clear_pending)
+        session.info["_cache_invalidation_hooked"] = True

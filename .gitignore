@@ -1,3 +1,7 @@
+# Generated frontend types — regenerate via `npm run generate:types`, never commit
+# a stale snapshot (finding #120)
+src/types-generated.ts
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,10 +24,13 @@ build/
 .env.*
 !.env.example
 
+# Playwright test artifacts
+test-results/
+playwright-report/
+
 # Node / Frontend
 node_modules/
 pnpm-lock.yaml
-package-lock.json
 yarn.lock
 dist/
 build/

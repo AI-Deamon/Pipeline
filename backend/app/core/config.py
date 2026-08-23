@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     SONARQUBE_PROTOCOL: str = "http"
     SONARQUBE_TOKEN: str = ""
 
+    # Cookie-based auth settings (FR-4)
+    COOKIE_NAME: str = "access_token"
+    REFRESH_COOKIE_NAME: str = "refresh_token"
+    COOKIE_MAX_AGE: int = 3600  # 1 hour in seconds
+    COOKIE_SECURE: bool = False  # True in staging/production (HTTPS); False in dev/test (HTTP)
+
     model_config = SettingsConfigDict(
         extra="ignore",
         env_file=None,  # Don't load from .env file, use environment variables
@@ -38,6 +44,10 @@ class Settings(BaseSettings):
 
         if self.SCAN_TIMEOUT <= 0:
             raise ValueError("SCAN_TIMEOUT must be a positive integer")
+
+        # Force secure cookies in staging (HTTPS)
+        if self.ENV == "staging" and self.COOKIE_SECURE is not False:
+            self.COOKIE_SECURE = True
 
         # Note: Removed test-specific mock requirement to allow real Jenkins testing
         # Test can now use either mocked Jenkins or real Jenkins server

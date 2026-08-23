@@ -3,6 +3,43 @@ from typing import Optional
 from datetime import datetime
 import re
 
+# Shared validation logic (finding #76): ProjectUpdate previously redeclared these
+# same fields as bare Optional[str] with zero validators, so a PATCH with a malformed
+# target_ip/git_url/target_url succeeded where the equivalent POST would 422 —
+# unvalidated values from PATCH are the origin point for values that eventually flow
+# into the Jenkinsfile (see the target_ip shell-injection finding, #49). Factored out
+# so ProjectCreate and ProjectUpdate can't drift from each other again.
+
+
+def _validate_name_value(v: str) -> str:
+    if not v or len(v.strip()) == 0:
+        raise ValueError("Name cannot be empty")
+    if len(v) > 255:
+        raise ValueError("Name must be 255 characters or fewer")
+    return v.strip()
+
+
+def _validate_git_url_value(v: Optional[str]) -> Optional[str]:
+    if v and not re.match(r'^https?://', v):
+        raise ValueError("Git URL must start with http:// or https://")
+    if v and len(v) > 2048:
+        raise ValueError("Git URL must be 2048 characters or fewer")
+    return v
+
+
+def _validate_target_ip_value(v: Optional[str]) -> Optional[str]:
+    if v and not re.match(r'^(\d{1,3}\.){3}\d{1,3}$', v):
+        raise ValueError("Target IP must be a valid IPv4 address")
+    return v
+
+
+def _validate_target_url_value(v: Optional[str]) -> Optional[str]:
+    if v and not re.match(r'^https?://', v):
+        raise ValueError("Target URL must start with http:// or https://")
+    if v and len(v) > 2048:
+        raise ValueError("Target URL must be 2048 characters or fewer")
+    return v
+
 
 class ProjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -18,36 +55,22 @@ class ProjectCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Name cannot be empty")
-        if len(v) > 255:
-            raise ValueError("Name must be 255 characters or fewer")
-        return v.strip()
+        return _validate_name_value(v)
 
     @field_validator("git_url")
     @classmethod
     def validate_git_url(cls, v: Optional[str]) -> Optional[str]:
-        if v and not re.match(r'^https?://', v):
-            raise ValueError("Git URL must start with http:// or https://")
-        if v and len(v) > 2048:
-            raise ValueError("Git URL must be 2048 characters or fewer")
-        return v
+        return _validate_git_url_value(v)
 
     @field_validator("target_ip")
     @classmethod
     def validate_target_ip(cls, v: Optional[str]) -> Optional[str]:
-        if v and not re.match(r'^(\d{1,3}\.){3}\d{1,3}$', v):
-            raise ValueError("Target IP must be a valid IPv4 address")
-        return v
+        return _validate_target_ip_value(v)
 
     @field_validator("target_url")
     @classmethod
     def validate_target_url(cls, v: Optional[str]) -> Optional[str]:
-        if v and not re.match(r'^https?://', v):
-            raise ValueError("Target URL must start with http:// or https://")
-        if v and len(v) > 2048:
-            raise ValueError("Target URL must be 2048 characters or fewer")
-        return v
+        return _validate_target_url_value(v)
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -57,6 +80,26 @@ class ProjectUpdate(BaseModel):
     sonar_key: Optional[str] = None
     target_ip: Optional[str] = None
     target_url: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        return None if v is None else _validate_name_value(v)
+
+    @field_validator("git_url")
+    @classmethod
+    def validate_git_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_git_url_value(v)
+
+    @field_validator("target_ip")
+    @classmethod
+    def validate_target_ip(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_target_ip_value(v)
+
+    @field_validator("target_url")
+    @classmethod
+    def validate_target_url(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_target_url_value(v)
 
 class ProjectResponse(ProjectCreate):
     model_config = ConfigDict(from_attributes=True, extra="forbid")

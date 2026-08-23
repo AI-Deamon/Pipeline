@@ -41,7 +41,7 @@ class TestJWTSecretSeparation:
 
     def test_jwt_token_roundtrip(self):
         """JWT tokens can be created and decoded."""
-        from jose import jwt
+        import jwt  # PyJWT
         from app.core.security import SECRET_KEY, ALGORITHM
 
         payload = {"sub": "testuser"}
