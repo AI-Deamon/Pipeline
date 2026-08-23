@@ -198,7 +198,29 @@ def get_reports_summary(
     query = db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id)
     if scan_id:
         query = query.filter(ScanReportDB.scan_id == scan_id)
-    reports = query.all()
+        reports = query.all()
+    else:
+        # Bug found while investigating a live "reporting is unusable" report:
+        # with no scan_id filter this returned every ScanReportDB row ever
+        # created for the project — every past scan's report for every tool,
+        # accumulating duplicates forever as more scans ran. A tool could show
+        # up 5-6+ times in the response (several stale, all-zero) and severity
+        # totals were massively inflated by double/triple-counting old reports.
+        # Same "keep only the latest report per (project_id, tool_name)"
+        # pattern already applied to portfolio.py and project_grouping.py —
+        # this endpoint was missed. Only apply this collapse for the
+        # no-scan_id "current state" view; an explicit scan_id is a genuine
+        # historical lookup and must return exactly that scan's reports.
+        all_reports = (
+            query.order_by(ScanReportDB.tool_name, ScanReportDB.created_at.desc()).all()
+        )
+        seen_tools = set()
+        reports = []
+        for r in all_reports:
+            if r.tool_name in seen_tools:
+                continue
+            seen_tools.add(r.tool_name)
+            reports.append(r)
 
     total_findings = 0
     severity = SeveritySummary()
