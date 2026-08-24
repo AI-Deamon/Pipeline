@@ -1,6 +1,8 @@
 import uuid
 import shutil
 import math
+import re
+import html
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -334,6 +336,17 @@ def _fetch_workspace_content(project_id: str, file: str) -> tuple[str | None, st
     return None, "none"
 
 
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_sonar_source_markup(code: str) -> str:
+    """SonarQube's /api/sources/show wraps each line's code in syntax-highlighting
+    <span> tags (e.g. '<span class="k">const</span> x = 1;'), not plain text — feeding
+    that straight into the frontend's own syntax highlighter would render the literal
+    tags instead of the code. Strip the markup and unescape entities to get plain text."""
+    return html.unescape(_HTML_TAG_RE.sub("", code))
+
+
 def _build_git_blob_url(git_url: str, use_branch: str, file: str, line: int) -> str | None:
     if _GITHUB_COM not in (git_url or ""):
         return None
@@ -345,7 +358,7 @@ def _build_git_blob_url(git_url: str, use_branch: str, file: str, line: int) -> 
 
 @router.get("/projects/{project_id}/code-snippet",
   responses={403: {"description": "Forbidden"}, 404: {"description": "Not found"}})
-def get_code_snippet(
+async def get_code_snippet(
     project_id: str,
     file: str,
     line: int,
@@ -394,6 +407,39 @@ def get_code_snippet(
             content, source = _fetch_workspace_content(project_id, file)
         except HTTPException:
             raise
+        except Exception:
+            pass
+
+    # Neither GitHub nor a local workspace clone had it — the common case is a
+    # private repo (confirmed live: Meraki's git_url returns 404 from GitHub's
+    # own API, so raw.githubusercontent.com can never work for it regardless
+    # of the URL-corruption bug fixed earlier). SonarQube already indexed the
+    # source when it scanned the project, so it works regardless of repo
+    # visibility — fetch_sonar_source existed fully built but was never
+    # called from anywhere until now, the same "wired nowhere" gap already
+    # found once in this endpoint's other fallback.
+    if content is None and project.sonar_key:
+        try:
+            from app.services.reporting.parsers.sonar import fetch_sonar_source
+
+            sonar_start = max(1, line - context)
+            sonar_end = line + context
+            sources = await fetch_sonar_source(
+                f"{project.sonar_key}:{file}", from_line=sonar_start, to_line=sonar_end
+            )
+            if sources:
+                snippet = "\n".join(_strip_sonar_source_markup(s.get("code", "")) for s in sources)
+                return {
+                    "file": file,
+                    "language": language,
+                    "branch": use_branch,
+                    "start_line": sources[0].get("line", sonar_start),
+                    "end_line": sources[-1].get("line", sonar_end),
+                    "highlight_line": line,
+                    "content": snippet,
+                    "git_url": None,
+                    "source": "sonar",
+                }
         except Exception:
             pass
 

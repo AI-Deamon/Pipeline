@@ -65,3 +65,40 @@ async def test_fetch_sonar_rules_requests_html_desc_field():
     assert "f" in sent_params, "rules/search call must request extra fields explicitly"
     for required_field in ("htmlDesc", "htmlNote"):
         assert required_field in sent_params["f"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_sonar_source_requests_the_given_line_range():
+    """fetch_sonar_source (used as a code-snippet fallback for private repos,
+    where GitHub raw fetch can never work) should only ask SonarQube for the
+    requested line window, not the whole file, when from/to are given."""
+    from app.services.reporting.parsers.sonar import fetch_sonar_source
+
+    with patch('app.services.reporting.parsers.sonar.httpx.AsyncClient') as mock_client:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"sources": [{"line": 5, "code": "x = 1"}]}
+        mock_get = AsyncMock(return_value=mock_resp)
+        mock_client.return_value.__aenter__.return_value.get = mock_get
+
+        result = await fetch_sonar_source("my-project:src/app.py", from_line=5, to_line=10)
+
+        assert result == [{"line": 5, "code": "x = 1"}]
+        _, kwargs = mock_get.call_args
+        assert kwargs["params"]["from"] == 5
+        assert kwargs["params"]["to"] == 10
+
+
+@pytest.mark.asyncio
+async def test_fetch_sonar_source_returns_empty_without_token():
+    from app.services.reporting.parsers.sonar import fetch_sonar_source
+    from app.core.config import settings
+
+    original = settings.SONARQUBE_TOKEN
+    settings.SONARQUBE_TOKEN = ""
+    try:
+        result = await fetch_sonar_source("my-project:src/app.py")
+    finally:
+        settings.SONARQUBE_TOKEN = original
+
+    assert result == []

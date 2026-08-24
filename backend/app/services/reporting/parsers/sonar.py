@@ -465,9 +465,13 @@ async def fetch_sonar_quality_gate(sonar_key: str) -> dict:
         return {"status": "UNKNOWN", "conditions": []}
 
 
-async def fetch_sonar_source(component_key: str) -> list:
+async def fetch_sonar_source(component_key: str, from_line: int | None = None, to_line: int | None = None) -> list:
     """
     Fetch source code for a component.
+
+    `from_line`/`to_line` request just that window from SonarQube's API
+    instead of the whole file — matters for large files when this is only
+    being used to show a few lines of context around one finding.
 
     Returns:
         [
@@ -483,7 +487,11 @@ async def fetch_sonar_source(component_key: str) -> list:
             return []
 
         url = f"{get_sonar_protocol()}://{get_sonar_url()}/api/sources/show"
-        params = {"key": component_key}
+        params: dict[str, str | int] = {"key": component_key}
+        if from_line is not None:
+            params["from"] = max(1, from_line)
+        if to_line is not None:
+            params["to"] = to_line
         auth = (token, "")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
