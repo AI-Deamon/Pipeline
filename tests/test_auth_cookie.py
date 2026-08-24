@@ -103,6 +103,40 @@ class TestAuthCookieFlow:
         cookie_names = [h.split("=")[0] for h in set_cookie_headers]
         assert "access_token" in cookie_names
 
+    def test_refresh_cookie_is_not_deleted_on_arrival(self):
+        """Regression test: `max_age=0` on the refresh_token cookie doesn't mean
+        "session-only" — it's the standard browser signal to delete a cookie
+        immediately, so the cookie never actually reached the client's jar at all.
+        """
+        _ensure_admin_user()
+        response = client.post(
+            "/api/v1/auth/login",
+            data={"username": "admin", "password": "admin123"},
+        )
+        set_cookie_headers = response.headers.get_list("set-cookie")
+        refresh_cookie = [h for h in set_cookie_headers if h.startswith("refresh_token=")][0]
+        assert "max-age=0" not in refresh_cookie.lower()
+
+    def test_refresh_cookie_path_matches_the_endpoint_that_needs_it(self):
+        """Regression test: the refresh cookie was scoped to Path=/auth, but the
+        router is actually mounted at /api/v1/auth (see main.py) — "/api/v1/auth"
+        never prefix-matches "/auth", so a real browser would withhold the cookie
+        from the one request that needs it. Uses the TestClient's own cookie jar
+        (not a manually-forwarded header) so Path scoping is actually exercised,
+        the way the manual-header tests above do not.
+        """
+        _ensure_admin_user()
+        fresh_client = TestClient(app)
+        login_response = fresh_client.post(
+            "/api/v1/auth/login",
+            data={"username": "admin", "password": "admin123"},
+        )
+        assert login_response.status_code == 200
+
+        refresh_response = fresh_client.post("/api/v1/auth/refresh")
+        assert refresh_response.status_code == 200
+        assert "access_token" in refresh_response.json()
+
     def test_refresh_token_has_bounded_expiry(self):
         """Regression test for finding #1: the refresh token JWT previously had no
         `exp` claim at all, so it was valid forever server-side if ever extracted."""

@@ -39,11 +39,18 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str) 
     response.set_cookie(
         key=settings.REFRESH_COOKIE_NAME,
         value=refresh_token,
-        max_age=0,  # session-only: destroyed when browser closes
+        # No max_age/expires: an actual session cookie, kept until the browser closes.
+        # `max_age=0` (the previous value here) doesn't mean "session-only" — it's the
+        # standard signal browsers use to delete a cookie immediately, so the refresh
+        # cookie never survived past the login response and every hydrate-on-reload
+        # or `/auth/refresh` call silently had nothing to read.
         httponly=True,
         samesite="Lax",
         secure=settings.COOKIE_SECURE,
-        path="/auth",
+        # Must match the router's actual mount point (`/api/v1/auth`, see main.py) —
+        # a plain "/auth" never prefix-matches "/api/v1/auth/refresh", so the browser
+        # would silently withhold the cookie from the one endpoint that needs it.
+        path="/api/v1/auth",
     )
 
 def _validate_password_strength(password: str) -> None:
@@ -204,7 +211,7 @@ def logout(response: Response):
     )
     response.delete_cookie(
         key=settings.REFRESH_COOKIE_NAME,
-        path="/auth",
+        path="/api/v1/auth",
         samesite="Lax",
         secure=settings.COOKIE_SECURE,
     )

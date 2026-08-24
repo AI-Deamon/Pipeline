@@ -393,7 +393,7 @@ def get_unified_report(
 
     # Combine all findings
     all_findings = []
-    total_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    total_severity = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
 
     for report in reports:
         findings = report.findings or []
@@ -421,7 +421,7 @@ def get_unified_report(
     previous_severity = (
         previous.severity_summary
         if previous
-        else {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        else {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     )
     previous_score = calculator.calculate(previous_severity)
     risk_trend = calculator.get_trend(risk_score, previous_score)
