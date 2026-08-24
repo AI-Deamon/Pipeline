@@ -25,7 +25,6 @@ const ProjectReportsPage = () => {
   
   const [exportLoading, setExportLoading] = useState(false);
   const [selectedScanId, setSelectedScanId] = useState<string>(initialScanId || '');
-  const [selectedTool, setSelectedTool] = useState<string | null>(null);
 
   // Fetch project
   const { data: project, isLoading: projectLoading } = useQuery({
@@ -292,7 +291,7 @@ const ProjectReportsPage = () => {
         </div>
       )}
 
-      {/* Side Panel Layout */}
+      {/* Compact header + findings, all tools shown by default */}
       <ProjectReportLayout
         scanInfo={{
           scanId: currentScan?.scan_id || '',
@@ -308,34 +307,22 @@ const ProjectReportsPage = () => {
           low: summary?.severity?.low ?? 0,
           info: summary?.severity?.info ?? 0,
         }}
-        tools={toolsForLayout}
         projectId={projectId || ''}
         scanId={selectedScanId}
-        selectedTool={selectedTool}
-        onToolSelect={setSelectedTool}
         onExport={handleExport}
         exportLoading={exportLoading}
       >
-        {selectedTool ? (
-          <FindingsTable 
-            findings={allFindings} 
-            projectId={projectId} 
-            scanId={selectedScanId}
-            selectedTool={selectedTool}
-          />
-        ) : (
-          <div className="bg-white rounded-xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">Select a Tool</h3>
-              <p className="text-sm text-slate-500">Click on a tool in the sidebar to view its findings</p>
-            </div>
-          </div>
-        )}
+        <FindingsTable
+          findings={allFindings}
+          projectId={projectId}
+          scanId={selectedScanId}
+          tools={toolsForLayout.filter((t) => t.findings > 0 || t.status !== 'skipped').map((t) => ({
+            key: t.key,
+            name: t.name,
+            status: t.status,
+            findings: t.findings,
+          }))}
+        />
       </ProjectReportLayout>
     </div>
   );

@@ -124,7 +124,6 @@ const DeveloperReportPage = () => {
           low: totalSeverity['Low'] || 0,
           info: totalSeverity['Info'] || 0,
         }}
-        tools={[]}
         projectId={projectId || ''}
         onExport={() => {}}
         exportLoading={false}

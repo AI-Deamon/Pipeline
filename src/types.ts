@@ -282,6 +282,8 @@ export type Finding = {
   finding_type?: string;
   rule_name?: string;
   language?: string;
+  file_path?: string;
+  line_number?: number;
   // Developer-friendly fields
   cvss_score?: number;
   cvss_severity?: string;

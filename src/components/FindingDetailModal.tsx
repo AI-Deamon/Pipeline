@@ -132,6 +132,16 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
           </div>
         )}
 
+        {finding.file_path && (
+          <div>
+            <dt className="text-sm font-medium text-slate-500">File</dt>
+            <dd className="text-sm text-slate-900 font-mono">
+              {finding.file_path}
+              {finding.line_number && <span className="text-slate-500">:{finding.line_number}</span>}
+            </dd>
+          </div>
+        )}
+
         {finding.host && (
           <div>
             <dt className="text-sm font-medium text-slate-500">Host</dt>
