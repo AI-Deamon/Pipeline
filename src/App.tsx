@@ -10,9 +10,6 @@ import RegisterPage from './pages/RegisterPage';
 
 // Code splitting: Lazy load page components
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const PortfolioDashboardPage = lazy(() => import('./pages/PortfolioDashboardPage'));
-const TrendAnalysisPage = lazy(() => import('./pages/TrendAnalysisPage'));
-const TeamWorkloadPage = lazy(() => import('./pages/TeamWorkloadPage'));
 const ExecutiveSummaryPage = lazy(() => import('./pages/ExecutiveSummaryPage'));
 const CreateProjectPage = lazy(() => import('./pages/CreateProjectPage'));
 const ProjectControlPage = lazy(() => import('./pages/ProjectControlPage'));
@@ -72,30 +69,13 @@ function App() {
                   </Suspense>
                 }
               />
-              <Route
-                path="/dashboard/portfolio"
-                element={
-                  <Suspense fallback={<PageLoader />}>
-                    <PortfolioDashboardPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/dashboard/trends"
-                element={
-                  <Suspense fallback={<PageLoader />}>
-                    <TrendAnalysisPage />
-                  </Suspense>
-                }
-              />
-              <Route
-                path="/dashboard/workload"
-                element={
-                  <Suspense fallback={<PageLoader />}>
-                    <TeamWorkloadPage />
-                  </Suspense>
-                }
-              />
+              {/* Security Overview, Trends, and Team Workload are now tabs on
+                  /dashboard (?tab=trends / ?tab=workload) instead of separate
+                  pages — they showed heavily overlapping data as standalone
+                  pages. These redirects keep old bookmarks/links working. */}
+              <Route path="/dashboard/portfolio" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard/trends" element={<Navigate to="/dashboard?tab=trends" replace />} />
+              <Route path="/dashboard/workload" element={<Navigate to="/dashboard?tab=workload" replace />} />
               <Route
                 path="/dashboard/executive"
                 element={

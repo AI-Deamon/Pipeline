@@ -33,6 +33,21 @@ class TestIssueCreate:
         with pytest.raises(ValidationError):
             IssueCreate(issue_id="x")
 
+    def test_severity_is_lowercased(self):
+        """Regression test for a real bug found live: a mixed-case severity
+        value ("Critical" alongside "critical") made the frontend Triage
+        page's case-sensitive severity filter silently return zero results
+        for a query that should have matched. The scan-ingestion path
+        already lowercased severity, but nothing enforced it here — any
+        caller hitting this schema directly (a manual POST /issues, a future
+        integration) could still insert mixed case.
+        """
+        s = IssueCreate(
+            issue_id="x", project_id="proj_1", tool_name="sonar",
+            severity="Critical", title="Test",
+        )
+        assert s.severity == "critical"
+
     def test_empty_title_rejected(self):
         with pytest.raises(ValidationError):
             IssueCreate(

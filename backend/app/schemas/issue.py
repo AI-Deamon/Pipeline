@@ -31,6 +31,19 @@ class IssueCreate(BaseModel):
             raise ValueError("Title cannot be empty")
         return v.strip()
 
+    # The scan-ingestion path (backend/app/tasks/issue_tasks.py) already
+    # lowercases severity before creating an issue, but that's only enforced
+    # in that one call site — anything hitting this schema directly (a manual
+    # POST /issues, a future integration) could insert mixed-case severity.
+    # Found live: one stray "Critical"-cased row alongside 26 "critical" ones
+    # made the Triage page's case-sensitive severity filter silently return
+    # zero results for a query that should have matched. Enforcing it here,
+    # not just at the one call site, is what actually prevents a repeat.
+    @field_validator("severity")
+    @classmethod
+    def normalize_severity_case(cls, v: str) -> str:
+        return v.lower()
+
 
 class IssueUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -44,6 +57,11 @@ class IssueUpdate(BaseModel):
     location: Optional[dict[str, Any]] = None
     issue_type: Optional[str] = None
     is_new: Optional[bool] = None
+
+    @field_validator("severity")
+    @classmethod
+    def normalize_severity_case(cls, v: Optional[str]) -> Optional[str]:
+        return v.lower() if v else v
 
 
 class IssueResponse(BaseModel):

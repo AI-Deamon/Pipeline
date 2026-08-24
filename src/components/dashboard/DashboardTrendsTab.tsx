@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../services/api";
-import type { TrendData } from "../types";
-import { PageSkeleton } from "../components/PageSkeleton";
-import { ErrorDisplay } from "../components/ui/ErrorDisplay";
-import { getTrendIcon, getTrendDirection } from "../utils/risk";
+import { api } from "../../services/api";
+import type { TrendData } from "../../types";
+import { PageSkeleton } from "../PageSkeleton";
+import { ErrorDisplay } from "../ui/ErrorDisplay";
+import { getTrendIcon, getTrendDirection } from "../../utils/risk";
 import { TrendingUp, TrendingDown, Minus, Calendar } from "lucide-react";
 import {
   LineChart,
@@ -149,7 +149,6 @@ const KeyInsights = ({
     const last = data[data.length - 1];
     const insights: { text: string; type: "positive" | "negative" | "neutral" }[] = [];
 
-    // Critical trend
     const criticalChange = last.critical - first.critical;
     if (criticalChange < 0) {
       insights.push({
@@ -163,7 +162,6 @@ const KeyInsights = ({
       });
     }
 
-    // High trend
     const highChange = last.high - first.high;
     if (highChange < 0) {
       insights.push({
@@ -177,7 +175,6 @@ const KeyInsights = ({
       });
     }
 
-    // Overall trend
     const totalFirst = first.critical + first.high + first.medium + first.low;
     const totalLast = last.critical + last.high + last.medium + last.low;
     const totalChange = totalLast - totalFirst;
@@ -239,19 +236,17 @@ const KeyInsights = ({
   );
 };
 
-const TrendAnalysisPage = () => {
+const DashboardTrendsTab = () => {
   const { data: projects = [], isLoading: loadingProjects, isError: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ["projects"],
     queryFn: api.projects.list,
   });
 
   // Finding #106: queryFn closes over `projects` from the separate query above,
-  // but the key never reflected that — TanStack Query only considers `["trends",
-  // "all"]` for staleness, so a project created/deleted while this page was
-  // mounted wouldn't fold into the aggregate until a full remount (a stale key
-  // means "same cache entry," no refetch trigger). Deriving a stable key from
-  // the actual project id set means the trends query is treated as genuinely
-  // different data once that set changes.
+  // but the key never reflected that — a project created/deleted while this tab
+  // was mounted wouldn't fold into the aggregate until a full remount. Deriving
+  // a stable key from the actual project id set means the trends query is
+  // treated as genuinely different data once that set changes.
   const projectIdsKey = useMemo(
     () => projects.map((p) => p.project_id).filter(Boolean).sort().join(","),
     [projects]
@@ -278,7 +273,6 @@ const TrendAnalysisPage = () => {
         }
       });
 
-      // Aggregate trends by date
       const aggregated: Record<string, TrendData> = {};
       allTrends.forEach((trend) => {
         if (!aggregated[trend.date]) {
@@ -307,18 +301,10 @@ const TrendAnalysisPage = () => {
 
   if (isLoading) return <PageSkeleton type="dashboard" />;
   if (projectsError) {
-    return (
-      <div className="max-w-7xl mx-auto p-8">
-        <ErrorDisplay message="Couldn't load project data." onRetry={refetchProjects} />
-      </div>
-    );
+    return <ErrorDisplay message="Couldn't load project data." onRetry={refetchProjects} />;
   }
   if (trendsError) {
-    return (
-      <div className="max-w-7xl mx-auto p-8">
-        <ErrorDisplay message="Couldn't load trend data." onRetry={refetchTrends} />
-      </div>
-    );
+    return <ErrorDisplay message="Couldn't load trend data." onRetry={refetchTrends} />;
   }
 
   const current = allTrends[allTrends.length - 1] || {
@@ -330,23 +316,11 @@ const TrendAnalysisPage = () => {
   const previous = allTrends[allTrends.length - 2] || current;
 
   return (
-    <div className="max-w-7xl mx-auto p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Trend Analysis</h1>
-        <p className="text-slate-500 mt-1">
-          Security issue trends across all projects over time
-        </p>
-      </header>
-
+    <div>
       {allTrends.length >= 2 && (
         // Finding #107: "current"/"previous" are just the last two calendar
         // dates in the merged multi-project series, not necessarily the same
-        // date across all projects — if project A scanned today but B's last
-        // scan was 3 days ago, "Critical down 12" can mean fewer projects
-        // contributed data that day, not that anything was actually fixed.
-        // Not fixable by relabeling alone (that would need true per-project
-        // date alignment, a bigger change), so surface the actual date being
-        // compared instead of letting the numbers imply same-day parity.
+        // date across all projects.
         <p className="text-xs text-slate-400 mb-3">
           Comparing {new Date(current.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} to{" "}
           {new Date(previous.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} — each date reflects
@@ -394,4 +368,4 @@ const TrendAnalysisPage = () => {
   );
 };
 
-export default TrendAnalysisPage;
+export default DashboardTrendsTab;

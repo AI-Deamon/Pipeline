@@ -1,11 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../services/api";
-import { PageSkeleton } from "../components/PageSkeleton";
-import { ErrorDisplay } from "../components/ui/ErrorDisplay";
+import { Link } from "react-router-dom";
+import { api } from "../../services/api";
+import { PageSkeleton } from "../PageSkeleton";
+import { ErrorDisplay } from "../ui/ErrorDisplay";
 import { Users, AlertTriangle } from "lucide-react";
 
+const WORKLOAD_STATUS_SCOPE = "open,in_progress";
+
 const DeveloperWorkloadCard = ({ developer }: { developer: { username: string; total_issues: number; critical: number; high: number; medium: number; low: number } }) => (
-  <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+  <Link
+    to={`/issues?assignee=${encodeURIComponent(developer.username)}&status=${WORKLOAD_STATUS_SCOPE}`}
+    className="block bg-white rounded-xl border border-slate-200 shadow-sm p-4 transition-shadow hover:shadow-md hover:border-indigo-200"
+  >
     <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 bg-slate-200 rounded-lg flex items-center justify-center font-medium text-slate-600">
@@ -68,10 +74,10 @@ const DeveloperWorkloadCard = ({ developer }: { developer: { username: string; t
         <span className="text-xs text-slate-600 w-8 text-right">{developer.low}L</span>
       </div>
     </div>
-  </div>
+  </Link>
 );
 
-const TeamWorkloadPage = () => {
+const DashboardWorkloadTab = () => {
   const { data: workload, isLoading, isError, refetch } = useQuery({
     queryKey: ["team-workload"],
     queryFn: api.portfolio.getTeamWorkload,
@@ -80,25 +86,14 @@ const TeamWorkloadPage = () => {
 
   if (isLoading) return <PageSkeleton type="dashboard" />;
   if (isError) {
-    return (
-      <div className="max-w-7xl mx-auto p-8">
-        <ErrorDisplay message="Couldn't load team workload data." onRetry={refetch} />
-      </div>
-    );
+    return <ErrorDisplay message="Couldn't load team workload data." onRetry={refetch} />;
   }
 
   const developers = workload?.developers ?? [];
   const unassigned = workload?.unassigned ?? { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 };
 
   return (
-    <div className="max-w-7xl mx-auto p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold text-slate-900">Team Workload</h1>
-        <p className="text-slate-500 mt-1">
-          Developer assignments and unassigned issues across all projects
-        </p>
-      </header>
-
+    <div>
       <div className="mb-6">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
           <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
@@ -106,26 +101,41 @@ const TeamWorkloadPage = () => {
             Unassigned Issues
           </h2>
           <div className="grid grid-cols-5 gap-4 mb-4">
-            <div className="text-center">
+            <Link
+              to={`/issues?assignee=unassigned&status=${WORKLOAD_STATUS_SCOPE}&severity=critical`}
+              className="text-center rounded-lg p-2 -m-2 transition-colors hover:bg-red-50"
+            >
               <div className="text-2xl font-bold text-red-600">{unassigned.critical}</div>
               <div className="text-xs text-slate-500">Critical</div>
-            </div>
-            <div className="text-center">
+            </Link>
+            <Link
+              to={`/issues?assignee=unassigned&status=${WORKLOAD_STATUS_SCOPE}&severity=high`}
+              className="text-center rounded-lg p-2 -m-2 transition-colors hover:bg-orange-50"
+            >
               <div className="text-2xl font-bold text-orange-600">{unassigned.high}</div>
               <div className="text-xs text-slate-500">High</div>
-            </div>
-            <div className="text-center">
+            </Link>
+            <Link
+              to={`/issues?assignee=unassigned&status=${WORKLOAD_STATUS_SCOPE}&severity=medium`}
+              className="text-center rounded-lg p-2 -m-2 transition-colors hover:bg-yellow-50"
+            >
               <div className="text-2xl font-bold text-yellow-600">{unassigned.medium}</div>
               <div className="text-xs text-slate-500">Medium</div>
-            </div>
-            <div className="text-center">
+            </Link>
+            <Link
+              to={`/issues?assignee=unassigned&status=${WORKLOAD_STATUS_SCOPE}&severity=low`}
+              className="text-center rounded-lg p-2 -m-2 transition-colors hover:bg-green-50"
+            >
               <div className="text-2xl font-bold text-green-600">{unassigned.low}</div>
               <div className="text-xs text-slate-500">Low</div>
-            </div>
-            <div className="text-center">
+            </Link>
+            <Link
+              to={`/issues?assignee=unassigned&status=${WORKLOAD_STATUS_SCOPE}`}
+              className="text-center rounded-lg p-2 -m-2 transition-colors hover:bg-slate-50"
+            >
               <div className="text-2xl font-bold text-slate-600">{unassigned.info}</div>
               <div className="text-xs text-slate-500">Info</div>
-            </div>
+            </Link>
           </div>
           <div className="text-sm text-slate-500">
             {unassigned.total} issues need assignment
@@ -133,7 +143,7 @@ const TeamWorkloadPage = () => {
         </div>
       </div>
 
-      <div className="mb-6">
+      <div>
         <h2 className="text-lg font-semibold text-slate-900 mb-4 flex items-center gap-2">
           <Users className="w-5 h-5 text-indigo-600" />
           Developer Assignments
@@ -156,4 +166,4 @@ const TeamWorkloadPage = () => {
   );
 };
 
-export default TeamWorkloadPage;
+export default DashboardWorkloadTab;
