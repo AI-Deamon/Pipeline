@@ -473,6 +473,9 @@ async def fetch_sonar_source(component_key: str, from_line: int | None = None, t
     instead of the whole file — matters for large files when this is only
     being used to show a few lines of context around one finding.
 
+    SonarQube's own response shape is `{"sources": [[line, code], ...]}` — this
+    normalizes it to a list of dicts for callers.
+
     Returns:
         [
             {"line": 1, "code": "function parseInput(data) {"},
@@ -502,9 +505,17 @@ async def fetch_sonar_source(component_key: str, from_line: int | None = None, t
 
             data = response.json()
             sources = data.get("sources", [])
+            # Found live against a real SonarQube instance (26.5.0) — this
+            # function had zero call sites anywhere until wired into the
+            # code-snippet fallback, so this had never actually been
+            # exercised before. Each entry is a [line, code] pair, not a
+            # {"line": ..., "code": ...} dict as originally assumed; the old
+            # parsing raised AttributeError on every real response and was
+            # silently swallowed by this function's own except-block.
             return [
-                {"line": s.get("line", 0), "code": s.get("code", "")}
+                {"line": s[0], "code": s[1]}
                 for s in sources
+                if isinstance(s, (list, tuple)) and len(s) >= 2
             ]
 
     except Exception as e:

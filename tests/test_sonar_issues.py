@@ -77,7 +77,11 @@ async def test_fetch_sonar_source_requests_the_given_line_range():
     with patch('app.services.reporting.parsers.sonar.httpx.AsyncClient') as mock_client:
         mock_resp = Mock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"sources": [{"line": 5, "code": "x = 1"}]}
+        # Real shape confirmed live against SonarQube 26.5.0: each source
+        # entry is a [line, code] pair, not a {"line": ..., "code": ...}
+        # dict — the original implementation assumed the latter and had
+        # never actually been run against a real instance until this.
+        mock_resp.json.return_value = {"sources": [[5, "x = 1"]]}
         mock_get = AsyncMock(return_value=mock_resp)
         mock_client.return_value.__aenter__.return_value.get = mock_get
 

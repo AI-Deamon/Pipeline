@@ -66,10 +66,12 @@ def test_falls_back_to_sonarqube_source_when_github_is_unreachable(client):
 
         mock_resp = Mock()
         mock_resp.status_code = 200
+        # Real shape confirmed live against SonarQube 26.5.0: [line, code]
+        # pairs, not {"line": ..., "code": ...} dicts.
         mock_resp.json.return_value = {
             "sources": [
-                {"line": 40, "code": '<span class="k">const</span> x = 1;'},
-                {"line": 41, "code": "y = 2"},
+                [40, '<span class="k">const</span> x = 1;'],
+                [41, "y = 2"],
             ]
         }
         mock_sonar_client.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_resp)
