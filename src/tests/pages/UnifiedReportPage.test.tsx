@@ -62,6 +62,41 @@ describe('UnifiedReportPage', () => {
     api.scans.getHistory = originalGetHistory;
   });
 
+  // Regression test for a real bug found live: this page's findings table
+  // never grouped repeated findings at all — every occurrence got its own
+  // full row, unlike ProjectReportsPage's table (fixed in tracker #138).
+  // Now reuses the same FindingsTable component, so repeats collapse into
+  // one row with an occurrence count.
+  test('repeated findings collapse into one row with an occurrence count, not one row each', async () => {
+    api.reports.getUnified = vi.fn().mockResolvedValue({
+      project_id: 'test-project',
+      scan_id: 'test-scan',
+      total_findings: 2,
+      severity: { critical: 2, high: 0, medium: 0, low: 0, info: 0 },
+      findings: [
+        { id: 'f-1', severity: 'Critical', title: 'Repeated finding', tool: 'sonar', rule: 'S123' },
+        { id: 'f-2', severity: 'Critical', title: 'Repeated finding', tool: 'sonar', rule: 'S123' },
+      ],
+      generated_at: new Date().toISOString(),
+    });
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText('2 occurrences')).toBeInTheDocument();
+    expect(screen.getAllByText('Repeated finding')).toHaveLength(1);
+  });
+
   test('renders without crashing', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },

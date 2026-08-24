@@ -6,8 +6,7 @@ import SeverityPieChart from '../components/SeverityPieChart';
 import ToolBarChart from '../components/ToolBarChart';
 import TrendLineChart from '../components/TrendLineChart';
 import TableOfContents from '../components/TableOfContents';
-import FilterBar from '../components/FilterBar';
-import FindingDetailModal from '../components/FindingDetailModal';
+import { FindingsTable } from '../components/reports/FindingsTable';
 import { useToast } from '../components/Toast';
 import { useRbac } from '../hooks/useRbac';
 import { useScanHistory } from '../hooks/useScanHistory';
@@ -26,10 +25,6 @@ const UnifiedReportPage = () => {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [currentSection, setCurrentSection] = useState<string>('Summary');
-  const [search, setSearch] = useState('');
-  const [selectedSeverities, setSelectedSeverities] = useState<string[]>([]);
-  const [selectedTools, setSelectedTools] = useState<string[]>([]);
-  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [reportType, setReportType] = useState<'technical' | 'executive' | 'compliance' | 'comparison'>('technical');
   const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
 
@@ -139,9 +134,6 @@ const UnifiedReportPage = () => {
 
   if (!projectId) return null;
 
-  // Compute available tools and filter findings
-  const availableTools = [...new Set(report.findings.map(f => f.tool).filter((tool): tool is string => Boolean(tool)))];
-  
   // Compute tool summaries from findings
   const toolSummaries = report.findings.reduce<Record<string, { tool: string; findings: number; critical: number; high: number; medium: number; low: number }>>((acc, f) => {
     const tool = f.tool || 'unknown';
@@ -157,23 +149,6 @@ const UnifiedReportPage = () => {
     return acc;
   }, {});
   const toolSummariesArray = Object.values(toolSummaries);
-
-  const filteredFindings = report.findings.filter(f => {
-    // Search filter
-    if (search && !f.title.toLowerCase().includes(search.toLowerCase()) &&
-        !f.description?.toLowerCase().includes(search.toLowerCase())) {
-      return false;
-    }
-    // Severity filter
-    if (selectedSeverities.length > 0 && !selectedSeverities.includes(f.severity)) {
-      return false;
-    }
-    // Tool filter
-    if (selectedTools.length > 0 && f.tool && !selectedTools.includes(f.tool)) {
-      return false;
-    }
-    return true;
-  });
 
   return (
     <div className="max-w-6xl mx-auto p-8">
@@ -378,72 +353,24 @@ const UnifiedReportPage = () => {
         </div>
       )}
 
-      {/* Filter Bar */}
-      <FilterBar
-        search={search}
-        onSearchChange={setSearch}
-        selectedSeverities={selectedSeverities}
-        onSeverityChange={setSelectedSeverities}
-        selectedTools={selectedTools}
-        onToolChange={setSelectedTools}
-        availableTools={availableTools}
-      />
-
-      {/* Findings Table */}
-      <div id="Findings" className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
-          Findings ({filteredFindings.length} total)
-        </h3>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left p-2">Severity</th>
-              <th className="text-left p-2">Title</th>
-              <th className="text-left p-2">Tool</th>
-              <th className="text-left p-2">Host/Package</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredFindings.map((finding, idx) => (
-              <tr
-                key={idx}
-                className="border-b cursor-pointer hover:bg-slate-50"
-                tabIndex={0}
-                role="button"
-                onClick={() => setSelectedFinding(finding)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedFinding(finding);
-                  }
-                }}
-              >
-                <td className="p-2">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    finding.severity === 'Critical' ? 'bg-red-100 text-red-700' :
-                    finding.severity === 'High' ? 'bg-orange-100 text-orange-700' :
-                    finding.severity === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-blue-100 text-blue-700'
-                  }`}>
-                    {finding.severity}
-                  </span>
-                </td>
-                <td className="p-2">{finding.title}</td>
-                <td className="p-2">{finding.tool}</td>
-                <td className="p-2">{finding.host || finding.package || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Findings — reuses the same FindingsTable built for ProjectReportsPage
+          (tracker #138): grouped/collapsible by rule with an occurrence count
+          instead of one flat row per occurrence, real file:line display when
+          available, and its own search/severity/tool filter bar (the old
+          separate FilterBar here duplicated that, so it's gone). */}
+      <div id="Findings">
+        <FindingsTable
+          findings={report.findings as (Finding & { tool: string })[]}
+          projectId={projectId}
+          scanId={selectedScanId}
+          tools={toolSummariesArray.map((t) => ({
+            key: t.tool,
+            name: t.tool.replace(/_/g, ' '),
+            status: 'pass' as const,
+            findings: t.findings,
+          }))}
+        />
       </div>
-
-      {/* Finding Detail Modal */}
-      <FindingDetailModal
-        finding={selectedFinding}
-        projectId={projectId}
-        scanId={selectedScanId ?? undefined}
-        onClose={() => setSelectedFinding(null)}
-      />
     </div>
   );
 };
