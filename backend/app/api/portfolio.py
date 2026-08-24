@@ -6,6 +6,7 @@ from app.core.db import get_db
 from app.core.auth import get_current_user
 from app.models.db_models import ProjectDB, ScanReportDB, IssueDB, ScanMetricDB, ScanDB
 from app.services.reporting.risk_calculator import RiskCalculator
+from app.services.rbac_service import get_rbac_service
 
 router = APIRouter()
 _risk_calculator = RiskCalculator()
@@ -14,9 +15,21 @@ _risk_calculator = RiskCalculator()
 @router.get("/portfolio/overview")
 def get_portfolio_overview(
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    projects = db.query(ProjectDB).all()
+    rbac = get_rbac_service(db=db, user=current_user)
+    query = db.query(ProjectDB)
+    if not rbac.is_admin:
+        effective = rbac.get_effective_project_ids()
+        if not effective:
+            return {
+                "total_projects": 0,
+                "total_findings": 0,
+                "severity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                "projects": [],
+            }
+        query = query.filter(ProjectDB.project_id.in_(effective))
+    projects = query.all()
     project_ids = [p.project_id for p in projects]
 
     if not project_ids:
@@ -168,9 +181,15 @@ def get_portfolio_overview(
 def get_project_tool_detail(
     project_id: str,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
     """Per-tool breakdown for a project, including severity summaries and Sonar metrics."""
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.has_project_access(project_id):
+        # 404, not 403 — same convention as project_groups.py (#116): don't
+        # confirm to an out-of-scope caller that this project even exists.
+        return {"error": "Project not found"}
+
     project = db.query(ProjectDB).filter(ProjectDB.project_id == project_id).first()
     if not project:
         return {"error": "Project not found"}
@@ -246,16 +265,23 @@ def get_project_tool_detail(
 def get_portfolio_trends(
     months: int = 6,
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
+    rbac = get_rbac_service(db=db, user=current_user)
+    if not rbac.is_admin:
+        effective = rbac.get_effective_project_ids()
+        if not effective:
+            return {"trends": [], "months": months}
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
 
-    reports = (
+    reports_query = (
         db.query(ScanReportDB.created_at, ScanReportDB.severity_summary, ScanReportDB.project_id)
         .filter(ScanReportDB.created_at >= cutoff)
-        .order_by(ScanReportDB.created_at)
-        .all()
     )
+    if not rbac.is_admin:
+        reports_query = reports_query.filter(ScanReportDB.project_id.in_(effective))
+    reports = reports_query.order_by(ScanReportDB.created_at).all()
 
     monthly: dict[str, dict] = {}
     for created_at, severity_summary, project_id in reports:
@@ -270,15 +296,13 @@ def get_portfolio_trends(
         monthly[month_key]["total"] += sum(s.get(l, 0) for l in ("critical", "high", "medium", "low", "info"))
 
     # Build coverage trend from ScanMetricDB
-    metrics_rows = (
-        db.query(ScanMetricDB.created_at, ScanMetricDB.metrics)
-        .filter(
-            ScanMetricDB.tool_name == "sonar",
-            ScanMetricDB.created_at >= cutoff,
-        )
-        .order_by(ScanMetricDB.created_at)
-        .all()
+    metrics_query = db.query(ScanMetricDB.created_at, ScanMetricDB.metrics).filter(
+        ScanMetricDB.tool_name == "sonar",
+        ScanMetricDB.created_at >= cutoff,
     )
+    if not rbac.is_admin:
+        metrics_query = metrics_query.filter(ScanMetricDB.project_id.in_(effective))
+    metrics_rows = metrics_query.order_by(ScanMetricDB.created_at).all()
     coverage_by_month: dict[str, list[float]] = {}
     for created_at, metrics in metrics_rows:
         month_key = created_at.strftime("%Y-%m")
@@ -309,13 +333,16 @@ def get_portfolio_trends(
 @router.get("/portfolio/team-workload")
 def get_team_workload(
     db: Session = Depends(get_db),
-    _current_user=Depends(get_current_user),
+    current_user=Depends(get_current_user),
 ):
-    open_issues = (
-        db.query(IssueDB)
-        .filter(IssueDB.status.in_(["open", "in_progress"]))
-        .all()
-    )
+    rbac = get_rbac_service(db=db, user=current_user)
+    query = db.query(IssueDB).filter(IssueDB.status.in_(["open", "in_progress"]))
+    if not rbac.is_admin:
+        effective = rbac.get_effective_project_ids()
+        if not effective:
+            return {"developers": [], "unassigned": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "total": 0}}
+        query = query.filter(IssueDB.project_id.in_(effective))
+    open_issues = query.all()
 
     developer_stats: dict = {}
     unassigned = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0, "total": 0}
