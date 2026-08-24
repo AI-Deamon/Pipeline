@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -12,6 +12,8 @@ import {
   FileText,
   AlertTriangle,
 } from 'lucide-react';
+
+const SEVERITY_WEIGHT: Record<string, number> = { Critical: 4, High: 3, Medium: 2, Low: 1, Info: 0 };
 
 const DeveloperReportPage = () => {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
@@ -61,6 +63,42 @@ const DeveloperReportPage = () => {
   };
 
   const selectedFileData = report?.files.find((f) => f.file_path === selectedFile);
+
+  // The worst file/issue first — used only to pick sensible defaults below,
+  // not to reorder the visible lists (file list stays in the order the API
+  // returns it; issue list stays in file order).
+  const worstFileFirst = useMemo(() => {
+    if (!report) return [];
+    return [...report.files].sort((a, b) => {
+      const score = (f: typeof a) => f.issues.reduce((sum, i) => sum + (SEVERITY_WEIGHT[i.severity] ?? 0), 0);
+      return score(b) - score(a);
+    });
+  }, [report]);
+
+  // Previously the page required two clicks (pick a file, then pick an
+  // issue in it) before any real issue content showed at all — same
+  // "content should show immediately" gap fixed on ProjectReportsPage and
+  // UnifiedReportPage (tracker #138/#139). Auto-select the file with the
+  // worst findings on load, so a developer sees something real without
+  // clicking anything first; they can still pick a different file manually.
+  useEffect(() => {
+    if (!selectedFile && worstFileFirst.length > 0) {
+      setSelectedFile(worstFileFirst[0].file_path);
+    }
+  }, [selectedFile, worstFileFirst]);
+
+  // Same principle for the second click: once a file is selected (whether
+  // by the effect above or a manual click), show its worst issue right
+  // away instead of requiring a second click to see any detail.
+  useEffect(() => {
+    if (selectedFileData && (!selectedIssue || !selectedFileData.issues.some((i) => i.id === selectedIssue.id))) {
+      const worst = [...selectedFileData.issues].sort(
+        (a, b) => (SEVERITY_WEIGHT[b.severity] ?? 0) - (SEVERITY_WEIGHT[a.severity] ?? 0),
+      )[0];
+      setSelectedIssue(worst ?? null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFileData]);
 
   if (isLoading) {
     return (
