@@ -254,6 +254,7 @@ const DeveloperReportPage = () => {
           {selectedIssue && (
             <IssueDetailPanel
               issue={selectedIssue}
+              projectId={projectId || ''}
               sonarUrl={`http://localhost:9000/project/issues?id=${project.sonar_key}&issues=${selectedIssue.id.replace('SONAR-', '')}&open=${selectedIssue.id.replace('SONAR-', '')}`}
             />
           )}
