@@ -109,6 +109,27 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText('Use parameterized queries')).toBeInTheDocument();
   });
 
+  test('renders package fix version and fix command for a dependency finding', async () => {
+    // Regression coverage for the dependency-check fix: OWASP's own report has
+    // no fix version, so this data comes from an OSV.dev lookup threaded
+    // through extra_metadata onto the issue (see backend/.../depcheck.py).
+    api.issues.get = vi.fn().mockResolvedValue({
+      ...mockIssue,
+      package: 'lodash-4.17.15.tgz',
+      package_version: '4.17.15',
+      fixed_version: '4.17.21',
+      fix_command: 'Upgrade lodash-4.17.15.tgz to version 4.17.21 or later',
+    });
+    renderModal();
+
+    expect(await screen.findByText('lodash-4.17.15.tgz')).toBeInTheDocument();
+    expect(screen.getByText('v4.17.15')).toBeInTheDocument();
+    expect(screen.getByText('→ 4.17.21')).toBeInTheDocument();
+    expect(
+      screen.getByText('Upgrade lodash-4.17.15.tgz to version 4.17.21 or later'),
+    ).toBeInTheDocument();
+  });
+
   test('renders assign button for open issue', async () => {
     renderModal();
     expect(await screen.findByRole('button', { name: /assign/i })).toBeInTheDocument();

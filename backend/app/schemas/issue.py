@@ -158,6 +158,34 @@ class IssueResponse(BaseModel):
 
     @computed_field
     @property
+    def package(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("package")
+        return None
+
+    @computed_field
+    @property
+    def package_version(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("package_version")
+        return None
+
+    @computed_field
+    @property
+    def fixed_version(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("fixed_version")
+        return None
+
+    @computed_field
+    @property
+    def fix_command(self) -> Optional[str]:
+        if self.extra_metadata and isinstance(self.extra_metadata, dict):
+            return self.extra_metadata.get("fix_command")
+        return None
+
+    @computed_field
+    @property
     def git_url(self) -> Optional[str]:
         return None  # populated by API layer from project git_url + file + line
 

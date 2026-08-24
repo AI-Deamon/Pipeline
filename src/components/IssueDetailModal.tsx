@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2, Bug } from 'lucide-react';
+import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2, Bug, Package, Zap } from 'lucide-react';
 import DOMPurify from 'dompurify';
 import { ApiError } from '../utils/apiError';
 import { useIssue, useIssueHistory, useAssignIssue, useTransitionIssue, useAddComment } from '../hooks/useIssues';
@@ -398,6 +398,33 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
             </div>
           )}
         </div>
+
+          {issue.package && (
+            <div className="flex items-center gap-2">
+              <Package size={14} className="text-slate-400" />
+              <span className="text-sm text-slate-700">
+                {issue.package}
+                {issue.package_version && (
+                  <span className="ml-1 text-slate-500">v{issue.package_version}</span>
+                )}
+                {issue.fixed_version && (
+                  <span className="ml-2 text-green-600 font-medium">→ {issue.fixed_version}</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {issue.fix_command && (
+            <div className="flex items-start gap-2">
+              <Zap size={14} className="text-green-600 mt-0.5" />
+              <div>
+                <span className="text-slate-400 block text-xs mb-1">Fix Command</span>
+                <p className="text-sm font-mono bg-slate-900 text-green-400 p-2 rounded">
+                  {issue.fix_command}
+                </p>
+              </div>
+            </div>
+          )}
 
           {issue.description && (
             <div>

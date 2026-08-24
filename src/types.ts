@@ -412,6 +412,10 @@ export type IssueResponse = {
   code_snippet_language?: string;
   rule_name?: string;
   language?: string;
+  package?: string;
+  package_version?: string;
+  fixed_version?: string;
+  fix_command?: string;
   git_url?: string | null;
   sonar_status?: string;
   sonar_resolution?: string;
