@@ -20,6 +20,8 @@ from app.schemas.issue import (
     IssueResponse,
     OverviewResponse,
     ToolOverview,
+    ToolIssuesResponse,
+    MyIssuesResponse,
     MetricsResponse,
     IssueHistoryResponse,
     RescanRequestCreate,
@@ -141,6 +143,7 @@ def get_project_overview(
 
 
 @router.get("/issues/projects/{project_id}/tools/{tool_name}",
+  response_model=ToolIssuesResponse,
   responses={404: {"description": "Not found"}})
 def get_tool_issues(project_id: str, tool_name: str, request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)], page: int = 1, page_size: int = 25, finding_type: str | None = None):
     rbac = get_rbac_service(db=db, user=current_user)
@@ -150,7 +153,7 @@ def get_tool_issues(project_id: str, tool_name: str, request: Request, db: Annot
     return result
 
 
-@router.get("/issues/my")
+@router.get("/issues/my", response_model=MyIssuesResponse)
 def get_my_issues(request: Request, db: Annotated[Session, Depends(get_db)], current_user: Annotated[dict, Depends(get_current_user)], page: int = 1, page_size: int = 25):
     user_id = getattr(current_user, "username", None) or "api-key-bypass"
     result = service.get_my_issues(db, user_id, page, page_size)

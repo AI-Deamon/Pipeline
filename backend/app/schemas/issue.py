@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, computed_field, field_validator, model_validator
 from typing import Optional, Any
 from datetime import datetime
 
@@ -105,42 +105,58 @@ class IssueResponse(BaseModel):
                     pass
         return values
 
+    # `@computed_field` is required on every one of these — a plain `@property` on a
+    # Pydantic v2 model is never included in `.model_dump()`/the serialized JSON
+    # response at all, only `@computed_field` properties are. Found live: none of
+    # file_path/line_number/tags/etc. ever reached the frontend despite `location`
+    # and `extra_metadata` being fully populated in the database for every real
+    # issue — `issue.file_path` was `undefined` for every single finding, so the
+    # Triage table's "Location" column showed "—" for all 151 real findings on a
+    # project, and the code-snippet fetch (gated on file_path/line_number being
+    # present) never fired for a single one either.
+    @computed_field
     @property
     def file_path(self) -> Optional[str]:
         if self.location and isinstance(self.location, dict):
             return self.location.get("file_path")
         return None
 
+    @computed_field
     @property
     def line_number(self) -> Optional[int]:
         if self.location and isinstance(self.location, dict):
             return self.location.get("line")
         return None
 
+    @computed_field
     @property
     def tags(self) -> list[str]:
         if self.extra_metadata and isinstance(self.extra_metadata, dict):
             return list(self.extra_metadata.get("tags", []))
         return []
 
+    @computed_field
     @property
     def code_snippet_language(self) -> Optional[str]:
         if self.extra_metadata and isinstance(self.extra_metadata, dict):
             return self.extra_metadata.get("code_snippet_language")
         return None
 
+    @computed_field
     @property
     def rule_name(self) -> Optional[str]:
         if self.extra_metadata and isinstance(self.extra_metadata, dict):
             return self.extra_metadata.get("rule_name")
         return None
 
+    @computed_field
     @property
     def language(self) -> Optional[str]:
         if self.extra_metadata and isinstance(self.extra_metadata, dict):
             return self.extra_metadata.get("language")
         return None
 
+    @computed_field
     @property
     def git_url(self) -> Optional[str]:
         return None  # populated by API layer from project git_url + file + line
@@ -211,11 +227,20 @@ class IssueBrief(BaseModel):
     last_seen_at: datetime
 
 
+class ToolIssuesResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    issues: list[IssueResponse]
+
+
 class MyIssuesResponse(BaseModel):
     total: int
     page: int
     page_size: int
     projects: list[dict[str, Any]]
+    issues: list[IssueResponse]
 
 
 class MetricsResponse(BaseModel):

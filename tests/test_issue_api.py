@@ -50,6 +50,25 @@ class TestToolIssues:
         assert data["total"] == 0
         assert data["issues"] == []
 
+    def test_tool_issues_include_file_path_and_line_number(self):
+        """Regression test for a real bug found live: this endpoint (which feeds
+        the Triage table's "Location" column) returned raw ORM objects with no
+        response_model, so it bypassed IssueResponse's file_path/line_number
+        entirely — the column showed "-" for every real finding even though
+        `location.file_path`/`location.line` were populated in the database.
+        """
+        client.post("/api/v1/issues", json={
+            "issue_id": "loc:001", "project_id": "proj_loc", "tool_name": "sonar",
+            "severity": "high", "title": "Located issue",
+            "location": {"file_path": "src/app.ts", "line": 42},
+        })
+
+        resp = client.get("/api/v1/issues/projects/proj_loc/tools/sonar")
+        assert resp.status_code == 200
+        issue = resp.json()["issues"][0]
+        assert issue["file_path"] == "src/app.ts"
+        assert issue["line_number"] == 42
+
 
 class TestMyIssues:
     def test_my_issues_returns_assigned(self):
@@ -73,6 +92,25 @@ class TestMyIssues:
         data = resp.json()
         assert "total" in data
         assert "projects" in data
+
+    def test_my_issues_include_file_path_and_line_number(self):
+        """Same bug as TestToolIssues.test_tool_issues_include_file_path_and_line_number,
+        independently present here: get_my_issues built its own hand-rolled dict
+        (_to_dict) that never included file_path/line_number either.
+        """
+        resp = client.post("/api/v1/issues", json={
+            "issue_id": "my-loc:001", "project_id": "proj_my_loc", "tool_name": "sonar",
+            "severity": "high", "title": "My located issue",
+            "location": {"file_path": "src/thing.py", "line": 7},
+        })
+        issue_id = resp.json()["id"]
+        client.post(f"/api/v1/issues/{issue_id}/assign", json={"assignee_id": "test-bypass"})
+
+        resp = client.get("/api/v1/issues/my")
+        assert resp.status_code == 200
+        my_issue = next(i for i in resp.json()["issues"] if i["id"] == issue_id)
+        assert my_issue["file_path"] == "src/thing.py"
+        assert my_issue["line_number"] == 7
 
 
 class TestCreateIssue:

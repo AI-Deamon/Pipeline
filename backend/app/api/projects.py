@@ -302,8 +302,20 @@ def delete_project(project_id: str, request: Request, db: Annotated[Session, Dep
 def _fetch_github_content(git_url: str, use_branch: str, file: str) -> tuple[str | None, str]:
     if _GITHUB_COM not in git_url:
         return None, "none"
-    raw_url = git_url.replace(_GITHUB_COM, "raw.githubusercontent.com").replace(".git", "")
-    file_url = f"{raw_url}/{use_branch}/{file}"
+    # NOT `git_url.replace(_GITHUB_COM, "raw.githubusercontent.com").replace(".git", "")`
+    # (the previous implementation) — that blind `.replace(".git", "")` doesn't just
+    # strip the repo's trailing ".git" suffix, it also matches the ".git" that's
+    # coincidentally a substring of "raw.githubusercontent.com" itself (right after
+    # "raw"), corrupting the hostname to "rawhubusercontent.com" — which doesn't
+    # resolve. This made every code-snippet fetch fail with a DNS error for every
+    # repo URL in the standard `https://github.com/org/repo.git` form (100% of real
+    # projects here), silently swallowed by the caller's `except Exception: pass`
+    # and surfaced to the user as a plain 404 "File not found in any accessible
+    # source" — indistinguishable from a genuinely missing file.
+    repo_path = git_url.split(f"{_GITHUB_COM}/", 1)[-1]
+    if repo_path.endswith(".git"):
+        repo_path = repo_path[:-len(".git")]
+    file_url = f"https://raw.githubusercontent.com/{repo_path}/{use_branch}/{file}"
     import httpx
     resp = httpx.get(file_url, timeout=10)
     if resp.status_code == 200:

@@ -159,6 +159,12 @@ async def _fetch_sonar_rules(client: httpx.AsyncClient, rule_keys: list[str], au
         params = {
             "rule_keys": ",".join(batch),
             "ps": batch_size,
+            # SonarQube's rules/search omits these from the default field set —
+            # without an explicit `f`, htmlDesc/htmlNote never come back, so
+            # _build_sonar_finding's description/recommendation end up empty for
+            # most rules. Found live: 151/184 real Sonar findings had no
+            # description at all, just a short issue title.
+            "f": "htmlDesc,htmlNote,debtRemFnType,debtRemFnOffset,name,lang",
         }
         try:
             response = await client.get(rules_url, params=params, auth=auth)

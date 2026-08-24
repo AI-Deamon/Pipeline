@@ -95,6 +95,42 @@ class TestIssueResponse:
         assert s.id == 1
         assert s.status == "open"
 
+    def test_derived_fields_are_actually_serialized(self):
+        """Regression test for a real bug found live: file_path, line_number, tags,
+        code_snippet_language, rule_name, and git_url were all plain @property on a
+        Pydantic v2 model instead of @computed_field. A plain @property is never
+        included in .model_dump()/the JSON response at all — only @computed_field
+        properties are — so despite `location` and `extra_metadata` being fully
+        populated in the database, every real issue's API response was missing
+        these fields entirely. Confirmed live: the Triage table's Location column
+        showed "-" for all 151 real findings on a project that all had a real
+        file_path in the database.
+        """
+        now = datetime.now(timezone.utc)
+        s = IssueResponse(
+            id=1,
+            issue_id="test:001",
+            project_id="proj_1",
+            tool_name="sonar",
+            severity="high",
+            title="Test",
+            status="open",
+            first_seen_at=now,
+            last_seen_at=now,
+            is_new=True,
+            created_at=now,
+            updated_at=now,
+            location={"file_path": "src/app.ts", "line": 42},
+            extra_metadata={"tags": ["a", "b"], "code_snippet_language": "typescript", "rule_name": "S1234"},
+        )
+        dumped = s.model_dump()
+        assert dumped["file_path"] == "src/app.ts"
+        assert dumped["line_number"] == 42
+        assert dumped["tags"] == ["a", "b"]
+        assert dumped["code_snippet_language"] == "typescript"
+        assert dumped["rule_name"] == "S1234"
+        assert "git_url" in dumped
+
 
 class TestIssueHistoryResponse:
     def test_valid_history(self):
@@ -158,6 +194,7 @@ class TestMyIssuesResponse:
                     )
                 ],
             }],
+            issues=[],
         )
         assert s.total == 2
         assert s.projects[0]["project_name"] == "Meraki API"
