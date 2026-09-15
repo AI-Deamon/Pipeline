@@ -60,6 +60,15 @@ test('search input has an accessible label', () => {
   expect(screen.getByLabelText('Search findings')).toBeInTheDocument();
 });
 
+test('shows a Filtered chip when severity filter is active', () => {
+  render(<FindingsTable findings={findings} />);
+  expect(screen.queryByText('Filtered')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /^Critical/ }));
+
+  expect(screen.getByText('Filtered')).toBeInTheDocument();
+});
+
 test('the currently open finding row is visually marked', () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(

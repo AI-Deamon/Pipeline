@@ -140,10 +140,13 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         {/* Header */}
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-900">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
             Findings — <span className="tabular-nums">{filteredFindings.length}</span>
             {filteredFindings.length !== findings.length && (
               <span className="text-sm font-normal text-slate-500 tabular-nums"> of {findings.length}</span>
+            )}
+            {(severityFilter !== 'All' || toolFilter !== 'All' || searchText) && (
+              <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Filtered</span>
             )}
           </h3>
           <div className="flex items-center gap-1 bg-slate-200 rounded-lg p-0.5">
