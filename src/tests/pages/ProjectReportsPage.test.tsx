@@ -5,6 +5,7 @@ import { vi, beforeEach, afterEach, test, expect, describe } from 'vitest';
 import ProjectReportsPage from '../../pages/ProjectReportsPage';
 import { api } from '../../services/api';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ToastProvider } from '../../components/Toast';
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: () => ({
@@ -75,11 +76,13 @@ describe('ProjectReportsPage', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <Routes>
-            <Route path="/projects/:projectId/reports" element={<ProjectReportsPage />} />
-          </Routes>
-        </MemoryRouter>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[initialEntry]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports" element={<ProjectReportsPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
       </QueryClientProvider>
     );
   };
@@ -111,6 +114,19 @@ describe('ProjectReportsPage', () => {
 
     await vi.waitFor(() => {
       expect(screen.getByRole('option', { name: /3C 1H/ })).toBeInTheDocument();
+    });
+  });
+
+  test('an All tools entry renders findings across every tool without requiring a tool click', async () => {
+    api.reports.getAll = vi.fn().mockResolvedValue([
+      { tool: 'sonar', findings: [{ id: 'f1', severity: 'High', title: 'Finding one' }] },
+      { tool: 'trivy_fs', findings: [{ id: 'f2', severity: 'Critical', title: 'Finding two' }] },
+    ]);
+
+    renderPage();
+
+    await vi.waitFor(() => {
+      expect(screen.getByText(/Findings —/)).toBeInTheDocument();
     });
   });
 });

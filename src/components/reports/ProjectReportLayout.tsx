@@ -140,6 +140,19 @@ export const ProjectReportLayout = ({
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <h3 className="text-sm font-semibold text-slate-900 mb-3">Tools</h3>
           <div className="space-y-2">
+            <button
+              onClick={() => onToolSelect?.('all')}
+              className={`w-full flex items-center justify-between p-2 rounded-lg transition-colors mb-1 ${
+                selectedTool === 'all' ? 'bg-teal-50 border border-teal-200' : 'hover:bg-slate-50 border border-transparent'
+              }`}
+            >
+              <span className={`text-sm font-medium ${selectedTool === 'all' ? 'text-teal-900' : 'text-slate-900'}`}>
+                All tools
+              </span>
+              <span className={`tabular-nums text-sm ${selectedTool === 'all' ? 'text-teal-700' : 'text-slate-600'}`}>
+                {tools.reduce((sum, t) => sum + t.findings, 0)}
+              </span>
+            </button>
             {tools.map((tool) => {
               const config = statusConfig[tool.status];
               const isSelected = selectedTool === tool.key;

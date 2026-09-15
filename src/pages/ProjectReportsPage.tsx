@@ -37,7 +37,7 @@ const ProjectReportsPage = () => {
       return next;
     }, { replace: true });
   };
-  const [selectedTool, setSelectedTool] = useState<string | null>(null);
+  const [selectedTool, setSelectedTool] = useState<string | null>('all');
 
   // Fetch project
   const { data: project, isLoading: projectLoading } = useQuery({
@@ -374,10 +374,11 @@ const ProjectReportsPage = () => {
             findings={allFindings}
             projectId={projectId}
             scanId={selectedScanId}
-            selectedTool={selectedTool}
+            selectedTool={selectedTool === 'all' ? null : selectedTool}
             previousScanFindingKeys={previousScanFindingKeys}
           />
         ) : (
+          /* unreachable now that default is 'all', kept only as a defensive fallback */
           <div className="bg-white rounded-2xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">
             <div className="text-center">
               <div className="w-14 h-14 bg-teal-50 rounded-full flex items-center justify-center mb-4">
