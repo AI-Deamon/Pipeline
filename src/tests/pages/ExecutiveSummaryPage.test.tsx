@@ -92,4 +92,18 @@ describe('ExecutiveSummaryPage', () => {
     fireEvent.click(row);
     expect(await screen.findByText('Reports page')).toBeInTheDocument();
   });
+
+  test('project row navigates to its reports page on Enter key', async () => {
+    renderPage();
+    const row = await screen.findByRole('button', { name: /Project Alpha/ });
+    fireEvent.keyDown(row, { key: 'Enter' });
+    expect(await screen.findByText('Reports page')).toBeInTheDocument();
+  });
+
+  test('project row navigates to its reports page on Space key', async () => {
+    renderPage();
+    const row = await screen.findByRole('button', { name: /Project Alpha/ });
+    fireEvent.keyDown(row, { key: ' ' });
+    expect(await screen.findByText('Reports page')).toBeInTheDocument();
+  });
 });
