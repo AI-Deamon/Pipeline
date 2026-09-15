@@ -5,6 +5,9 @@ import FindingDetailModal from '../FindingDetailModal';
 import { FindingsFilterBar } from './FindingsFilterBar';
 import { getSeverityColor, getSeverityDotColor } from '../../utils/risk';
 import { findingKey } from '../../utils/scanDiff';
+import { useRbac } from '../../hooks/useRbac';
+import { useCreateIssue } from '../../hooks/useIssues';
+import { useToast } from '../Toast';
 
 const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bug; color: string; bg: string }> = {
   VULNERABILITY: { label: 'Security Vulnerabilities', icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
@@ -27,6 +30,10 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
   const [searchText, setSearchText] = useState('');
   const [selectedFinding, setSelectedFinding] = useState<(Finding & { tool: string }) | null>(null);
   const [expandedTypes, setExpandedTypes] = useState<Record<string, boolean>>({});
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { canAssignIssues } = useRbac();
+  const createMutation = useCreateIssue();
+  const { addToast } = useToast();
 
   const uniqueTools = useMemo(() => {
     const tools = new Set<string>();
@@ -119,6 +126,46 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
     setExpandedTypes((prev) => ({ ...prev, [type]: !prev[type] }));
   };
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllCritical = () => {
+    setSelectedIds(new Set(filteredFindings.filter((f) => f.severity === 'Critical').map((f) => f.id)));
+  };
+
+  const handleBulkCreate = async () => {
+    if (!projectId || !scanId) return;
+    const targets = filteredFindings.filter((f) => selectedIds.has(f.id) && f.tool);
+    let created = 0;
+    for (const finding of targets) {
+      try {
+        await createMutation.mutateAsync({
+          issue_id: `${finding.id}:${scanId}`,
+          project_id: projectId,
+          tool_name: finding.tool,
+          severity: finding.severity,
+          title: finding.title,
+          scan_id: scanId,
+        });
+        created++;
+      } catch {
+        // Tolerate individual failures — keep working through the rest of the
+        // selection rather than aborting the whole batch on the first error.
+      }
+    }
+    addToast({
+      type: created === targets.length ? 'success' : 'error',
+      title: `${created} issue${created === 1 ? '' : 's'} created`,
+    });
+    setSelectedIds(new Set());
+  };
+
   const selectedIndex = selectedFinding ? filteredFindings.indexOf(selectedFinding) : -1;
   const hasPrev = selectedIndex > 0;
   const hasNext = selectedIndex >= 0 && selectedIndex < filteredFindings.length - 1;
@@ -150,23 +197,44 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
               <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Filtered</span>
             )}
           </h3>
-          <div className="flex items-center gap-1 bg-slate-200 rounded-lg p-0.5">
-            <button
-              onClick={() => setViewMode('list')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                viewMode === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              List
-            </button>
-            <button
-              onClick={() => setViewMode('grouped')}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                viewMode === 'grouped' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
-            >
-              Grouped
-            </button>
+          <div className="flex items-center gap-3">
+            {canAssignIssues && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllCritical}
+                  className="px-3 py-1 text-xs font-medium text-slate-600 hover:text-slate-900"
+                >
+                  Select all Critical
+                </button>
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={handleBulkCreate}
+                    disabled={createMutation.isPending}
+                    className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Create issues for selected ({selectedIds.size})
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-1 bg-slate-200 rounded-lg p-0.5">
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                List
+              </button>
+              <button
+                onClick={() => setViewMode('grouped')}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  viewMode === 'grouped' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                Grouped
+              </button>
+            </div>
           </div>
         </div>
 
@@ -273,6 +341,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
             <table className="w-full text-left">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
+                  {canAssignIssues && <th className="px-4 py-3 w-8" />}
                   <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase">Severity</th>
                   <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase">Title</th>
                   <th className="px-4 py-3 text-xs font-medium text-slate-500 uppercase">Location</th>
@@ -282,7 +351,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
               <tbody className="divide-y divide-slate-100">
                 {filteredFindings.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={canAssignIssues ? 5 : 4} className="px-4 py-8 text-center text-slate-500">
                       No findings match the current filters.
                     </td>
                   </tr>
@@ -293,6 +362,16 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                       className={`cursor-pointer ${selectedFinding?.id === finding.id ? 'bg-teal-50' : 'hover:bg-slate-50'}`}
                       onClick={() => setSelectedFinding(finding)}
                     >
+                      {canAssignIssues && (
+                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${finding.title}`}
+                            checked={selectedIds.has(finding.id)}
+                            onChange={() => toggleSelected(finding.id)}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3">
                         <span className={`px-2 py-1 text-xs font-semibold rounded ${getSeverityColor(finding.severity)}`}>
                           {finding.severity}
