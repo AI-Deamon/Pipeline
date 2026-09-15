@@ -58,6 +58,22 @@ const UnifiedReportPage = () => {
     });
   }, [projectId, selectedScanId]);
 
+  useEffect(() => {
+    if (!report) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+        if (visible[0]?.target.id) setCurrentSection(visible[0].target.id);
+      },
+      { rootMargin: '-96px 0px -60% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] }
+    );
+    sections.forEach((s) => {
+      const el = document.getElementById(s);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, [report, sections]);
+
   const handleExport = async (format: 'pdf' | 'html') => {
     setExporting(true);
     try {
@@ -261,11 +277,14 @@ const UnifiedReportPage = () => {
       <TableOfContents
         sections={sections}
         currentSection={currentSection}
-        onSectionClick={setCurrentSection}
+        onSectionClick={(section) => {
+          setCurrentSection(section);
+          document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+      <div id="Summary" className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
         {[
           { label: 'Critical', value: report.severity.critical, bar: 'bg-red-500', text: 'text-red-600' },
           { label: 'High', value: report.severity.high, bar: 'bg-orange-500', text: 'text-orange-600' },

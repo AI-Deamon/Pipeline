@@ -95,4 +95,24 @@ describe('UnifiedReportPage', () => {
     );
     expect(await screen.findByLabelText('Export format')).toBeInTheDocument();
   });
+
+  test('clicking a TOC entry scrolls its section into view', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const link = await screen.findByRole('button', { name: 'Findings' });
+    link.click();
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
 });
