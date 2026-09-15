@@ -178,9 +178,14 @@ const UnifiedReportPage = () => {
 
   const filteredFindings = report.findings.filter(f => {
     // Search filter
-    if (search && !f.title.toLowerCase().includes(search.toLowerCase()) &&
-        !f.description?.toLowerCase().includes(search.toLowerCase())) {
-      return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const matches =
+        f.title.toLowerCase().includes(q) ||
+        f.description?.toLowerCase().includes(q) ||
+        f.rule?.toLowerCase().includes(q) ||
+        f.cwe_ids?.some((c) => c.toLowerCase().includes(q));
+      if (!matches) return false;
     }
     // Severity filter
     if (selectedSeverities.length > 0 && !selectedSeverities.includes(f.severity)) {
@@ -356,7 +361,23 @@ const UnifiedReportPage = () => {
               <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-3">OWASP Top 10, 2021</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {compliance.compliance.owasp_top_10.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100">
+                  <div
+                    key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      setSearch(item.id);
+                      document.getElementById('Findings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSearch(item.id);
+                        document.getElementById('Findings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100 cursor-pointer"
+                  >
                     <div className="min-w-0">
                       <span className="font-medium text-slate-900">{item.id}</span>
                       <span className="ml-2 text-slate-600">{item.name}</span>
@@ -376,7 +397,23 @@ const UnifiedReportPage = () => {
               <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-3">CWE Top 25, 2023</h4>
               <div className="space-y-2">
                 {compliance.compliance.cwe_top_25.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100">
+                  <div
+                    key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      setSearch(item.id);
+                      document.getElementById('Findings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSearch(item.id);
+                        document.getElementById('Findings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }}
+                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100 cursor-pointer"
+                  >
                     <span className="font-medium text-slate-900">{item.id}</span>
                     <span className="tabular-nums px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
                       {item.count}

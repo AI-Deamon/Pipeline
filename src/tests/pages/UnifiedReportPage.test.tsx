@@ -135,4 +135,34 @@ describe('UnifiedReportPage', () => {
     exportBtn.click();
     await vi.waitFor(() => expect(exportSpy).toHaveBeenCalledWith('test-project', 'html', 'test-scan', 'technical'));
   });
+
+  test('clicking an OWASP compliance row filters and scrolls to matching findings', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    api.reports.getCompliance = vi.fn().mockResolvedValue({
+      project_id: 'test-project',
+      compliance: { owasp_top_10: [{ id: 'A01', name: 'Broken Access Control', count: 1 }], cwe_top_25: [] },
+      generated_at: new Date().toISOString(),
+    });
+    api.reports.getUnified = vi.fn().mockResolvedValue({
+      project_id: 'test-project', scan_id: 'test-scan', total_findings: 1,
+      severity: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+      findings: [{ id: 'f1', severity: 'Critical', title: 'Broken Access', tool: 'zap', rule: 'A01' }],
+      generated_at: new Date().toISOString(),
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const row = await screen.findByRole('button', { name: /A01.*Broken Access Control/ });
+    row.click();
+    expect(await screen.findByText('Broken Access')).toBeInTheDocument();
+  });
 });
