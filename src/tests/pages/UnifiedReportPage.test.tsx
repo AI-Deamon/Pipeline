@@ -1,11 +1,19 @@
 /** @jsxImportSource react */
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { vi, beforeEach, afterEach, test, expect, describe } from 'vitest';
 import UnifiedReportPage from '../../pages/UnifiedReportPage';
 import { api } from '../../services/api';
 import { ToastProvider } from '../../components/Toast';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+// MemoryRouter keeps its history in-memory and never syncs window.location in
+// jsdom, so tests that need to observe the URL read it from the router's own
+// location via this probe instead of window.location.
+const LocationProbe = () => {
+  const location = useLocation();
+  return <div data-testid="location-probe">{location.pathname + location.search}</div>;
+};
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: () => ({
@@ -185,5 +193,30 @@ describe('UnifiedReportPage', () => {
     );
     const select = await screen.findByLabelText('Select scan');
     expect(select).toHaveValue('scan-2');
+  });
+
+  test('browser back closes the open finding panel before leaving the page', async () => {
+    api.reports.getUnified = vi.fn().mockResolvedValue({
+      project_id: 'test-project', scan_id: 'test-scan', total_findings: 1,
+      severity: { critical: 1, high: 0, medium: 0, low: 0, info: 0 },
+      findings: [{ id: 'f1', severity: 'Critical', title: 'Finding One', tool: 'zap' }],
+      generated_at: new Date().toISOString(),
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <LocationProbe />
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    (await screen.findByText('Finding One')).click();
+    expect(await screen.findByText('Finding details')).toBeInTheDocument();
+    expect(screen.getByTestId('location-probe').textContent).toContain('finding=f1');
   });
 });

@@ -39,7 +39,6 @@ const UnifiedReportPage = () => {
   const [search, setSearch] = useState('');
   const [selectedSeverities, setSelectedSeverities] = useState<string[]>([]);
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
-  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [reportType, setReportType] = useState<'technical' | 'executive' | 'compliance' | 'comparison'>('technical');
   const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
 
@@ -206,6 +205,19 @@ const UnifiedReportPage = () => {
     }
     return true;
   });
+
+  const openFindingId = searchParams.get('finding');
+  const selectedFinding = openFindingId
+    ? filteredFindings.find((f) => f.id === openFindingId) ?? null
+    : null;
+  const setSelectedFinding = (finding: Finding | null) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (finding) next.set('finding', finding.id);
+      else next.delete('finding');
+      return next;
+    });
+  };
 
   return (
     <div className="max-w-6xl mx-auto p-8">
