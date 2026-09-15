@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, Plus, Loader2, ExternalLink, Package, Shield, Zap } from 'lucide-react';
@@ -45,9 +45,18 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
   const navigate = useNavigate();
   const [hasSearched, setHasSearched] = useState(false);
 
-  useEffect(() => {
+  // Reset hasSearched whenever the viewed finding changes, so stale
+  // "issue found/not found" UI from a previous finding doesn't leak into the
+  // next one during Prev/Next triage navigation. Adjusting state during
+  // render (rather than in a useEffect) avoids an extra commit/render pass
+  // for a value that must always be in sync with the current finding's
+  // identity — see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const findingKey = finding ? `${finding.id}:${finding.tool ?? ''}` : null;
+  const [prevFindingKey, setPrevFindingKey] = useState(findingKey);
+  if (findingKey !== prevFindingKey) {
+    setPrevFindingKey(findingKey);
     setHasSearched(false);
-  }, [finding?.id, finding?.tool]);
+  }
 
   const isOpen = !!finding;
   const { canAssignIssues } = useRbac();
