@@ -51,10 +51,10 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
   // render (rather than in a useEffect) avoids an extra commit/render pass
   // for a value that must always be in sync with the current finding's
   // identity — see https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
-  const findingKey = finding ? `${finding.id}:${finding.tool ?? ''}` : null;
-  const [prevFindingKey, setPrevFindingKey] = useState(findingKey);
-  if (findingKey !== prevFindingKey) {
-    setPrevFindingKey(findingKey);
+  const findingIdentity = finding ? `${finding.id}:${finding.tool ?? ''}` : null;
+  const [prevFindingIdentity, setPrevFindingIdentity] = useState(findingIdentity);
+  if (findingIdentity !== prevFindingIdentity) {
+    setPrevFindingIdentity(findingIdentity);
     setHasSearched(false);
   }
 
@@ -153,7 +153,11 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
       position={position}
       footerContent={footerContent}
       actionKey="c"
-      onAction={hasSearched && !matchedIssue ? handleCreateIssue : undefined}
+      onAction={
+        canAssignIssues && projectId && finding.tool && hasSearched && !matchedIssue
+          ? handleCreateIssue
+          : undefined
+      }
     >
         <div className="mb-4">
           <Badge variant={severityVariant[finding.severity] || 'default'} size="md">

@@ -38,8 +38,10 @@ export function SidePanel({
   useEffect(() => {
     if (!isOpen) return;
     const handleKeys = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+      if (target?.isContentEditable) return;
       if (e.key === 'ArrowLeft' && hasPrev) onPrev?.();
       if (e.key === 'ArrowRight' && hasNext) onNext?.();
       if (actionKey && e.key.toLowerCase() === actionKey.toLowerCase()) onAction?.();
