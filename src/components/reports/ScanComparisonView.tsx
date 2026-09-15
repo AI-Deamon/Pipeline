@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { diffFindings } from '../../utils/scanDiff';
+import { diffFindings, findingKey } from '../../utils/scanDiff';
 import { getSeverityColor } from '../../utils/risk';
 import type { Finding } from '../../types';
 import { CheckCircle2, AlertTriangle, Plus } from 'lucide-react';
@@ -31,7 +31,7 @@ const Section = ({
     ) : (
       <ul className="space-y-2">
         {items.map((f) => (
-          <li key={f.id} className="flex items-center gap-2 text-sm">
+          <li key={findingKey(f)} className="flex items-center gap-2 text-sm">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${getSeverityColor(f.severity)}`}>{f.severity}</span>
             <span className="text-slate-900 truncate">{f.title}</span>
           </li>
