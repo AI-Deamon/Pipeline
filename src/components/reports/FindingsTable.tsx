@@ -53,8 +53,9 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
     // Apply severity filter
     if (severityFilter !== 'All') filtered = filtered.filter((f) => f.severity === severityFilter);
     
-    // Apply tool filter (from dropdown)
-    if (toolFilter !== 'All' && !selectedTool) filtered = filtered.filter((f) => f.tool === toolFilter);
+    // Apply tool filter (from dropdown) — inert whenever selectedTool is set, since the
+    // dropdown is disabled and synced to selectedTool in that case (see render below)
+    if (toolFilter !== 'All') filtered = filtered.filter((f) => f.tool === toolFilter);
     
     // Apply search filter
     if (searchText) {
@@ -185,9 +186,12 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
 
           <div className="flex items-center gap-3">
             <select
-              value={toolFilter}
+              value={selectedTool || toolFilter}
               onChange={(e) => setToolFilter(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
+              disabled={!!selectedTool}
+              aria-label="Filter by tool"
+              title={selectedTool ? 'Tool is set by the sidebar selection' : undefined}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600 disabled:bg-slate-50 disabled:text-slate-400"
             >
               <option value="All">All tools</option>
               {uniqueTools.map((tool) => (
