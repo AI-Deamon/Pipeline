@@ -126,6 +126,24 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
     setExpandedTypes((prev) => ({ ...prev, [type]: !prev[type] }));
   };
 
+  // Keep the selection in sync with what's actually visible: a filter change
+  // (severity/tool/search/selectedTool) can drop a previously-selected finding out
+  // of filteredFindings. Deriving this on every render (rather than pruning
+  // selectedIds itself in an effect, which would cause an extra render pass) means
+  // the displayed count and handleBulkCreate's target list always agree — no
+  // silent undercount, and no need for the raw selection to ever be "wrong".
+  const visibleSelectedIds = useMemo(() => {
+    if (selectedIds.size === 0) return selectedIds;
+    const visible = new Set(filteredFindings.map((f) => f.id));
+    let changed = false;
+    const next = new Set<string>();
+    selectedIds.forEach((id) => {
+      if (visible.has(id)) next.add(id);
+      else changed = true;
+    });
+    return changed ? next : selectedIds;
+  }, [selectedIds, filteredFindings]);
+
   const toggleSelected = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -141,7 +159,9 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
 
   const handleBulkCreate = async () => {
     if (!projectId || !scanId) return;
-    const targets = filteredFindings.filter((f) => selectedIds.has(f.id) && f.tool);
+    // No `f.tool` guard here: the FindingsTableProps type requires `tool: string`
+    // on every finding, so all of filteredFindings already has it.
+    const targets = filteredFindings.filter((f) => visibleSelectedIds.has(f.id));
     let created = 0;
     for (const finding of targets) {
       try {
@@ -206,13 +226,13 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                 >
                   Select all Critical
                 </button>
-                {selectedIds.size > 0 && (
+                {visibleSelectedIds.size > 0 && (
                   <button
                     onClick={handleBulkCreate}
                     disabled={createMutation.isPending}
                     className="px-3 py-1 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                   >
-                    Create issues for selected ({selectedIds.size})
+                    Create issues for selected ({visibleSelectedIds.size})
                   </button>
                 )}
               </div>
@@ -367,7 +387,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                           <input
                             type="checkbox"
                             aria-label={`Select ${finding.title}`}
-                            checked={selectedIds.has(finding.id)}
+                            checked={visibleSelectedIds.has(finding.id)}
                             onChange={() => toggleSelected(finding.id)}
                           />
                         </td>

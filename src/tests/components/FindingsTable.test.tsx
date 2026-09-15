@@ -256,6 +256,25 @@ test('a failed create for one selected finding does not stop the rest of the bat
   expect(mockMutateAsync).toHaveBeenCalledTimes(2);
 });
 
+test('changing a filter that hides a selected finding prunes it from the selection', () => {
+  const mixedFindings = [
+    { id: '1', severity: 'Critical', title: 'A', tool: 'sonar' },
+    { id: '2', severity: 'High', title: 'B', tool: 'sonar' },
+  ];
+  renderTable(<FindingsTable findings={mixedFindings} projectId="p1" scanId="s1" selectedTool="sonar" />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Select all Critical' }));
+  expect(screen.getByRole('button', { name: 'Create issues for selected (1)' })).toBeInTheDocument();
+
+  // Narrow the severity filter to High — the previously-selected Critical finding
+  // (id "1") drops out of filteredFindings, so its selection must be pruned too:
+  // the bulk-action button's count (and handleBulkCreate's target list) must stay
+  // in sync with what's actually visible, not silently undercount.
+  fireEvent.click(screen.getByRole('button', { name: /^High/ }));
+
+  expect(screen.queryByRole('button', { name: /Create issues for selected/ })).not.toBeInTheDocument();
+});
+
 test('bulk-action bar and row checkboxes are hidden without canAssignIssues', () => {
   vi.mocked(useAuthMock).mockReturnValue({
     isAuthenticated: true,
