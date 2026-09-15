@@ -9,8 +9,20 @@ interface ScanComparisonViewProps {
   current: Finding[];
 }
 
-const Section = ({ title, icon, items, tone }: { title: string; icon: ReactNode; items: Finding[]; tone: string }) => (
-  <div className="bg-white rounded-2xl border border-slate-200 p-6">
+const Section = ({
+  title,
+  icon,
+  items,
+  tone,
+  testId,
+}: {
+  title: string;
+  icon: ReactNode;
+  items: Finding[];
+  tone: string;
+  testId: string;
+}) => (
+  <div className="bg-white rounded-2xl border border-slate-200 p-6" data-testid={testId}>
     <h3 className={`text-sm font-semibold mb-4 flex items-center gap-2 ${tone}`}>
       {icon} {title} <span className="tabular-nums">({items.length})</span>
     </h3>
@@ -48,9 +60,9 @@ export const ScanComparisonView = ({ previous, current }: ScanComparisonViewProp
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Section title="Resolved since last scan" icon={<CheckCircle2 className="w-4 h-4" />} items={resolved} tone="text-emerald-700" />
-        <Section title="Still open" icon={<AlertTriangle className="w-4 h-4" />} items={persisting} tone="text-amber-700" />
-        <Section title="New this scan" icon={<Plus className="w-4 h-4" />} items={introduced} tone="text-red-700" />
+        <Section title="Resolved since last scan" icon={<CheckCircle2 className="w-4 h-4" />} items={resolved} tone="text-emerald-700" testId="scan-comparison-resolved" />
+        <Section title="Still open" icon={<AlertTriangle className="w-4 h-4" />} items={persisting} tone="text-amber-700" testId="scan-comparison-persisting" />
+        <Section title="New this scan" icon={<Plus className="w-4 h-4" />} items={introduced} tone="text-red-700" testId="scan-comparison-introduced" />
       </div>
     </div>
   );
