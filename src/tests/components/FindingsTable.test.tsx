@@ -29,3 +29,11 @@ test('in-table tool dropdown filters findings when no sidebar tool is active', (
   expect(screen.getByText('A')).toBeInTheDocument();
   expect(screen.queryByText('B')).not.toBeInTheDocument();
 });
+
+test('severity badge counts are scoped to the active tool filter', () => {
+  render(<FindingsTable findings={findings} selectedTool="sonar" />);
+  // findings fixture: 1 Critical/sonar, 1 High/trivy — with sonar selected, only the
+  // Critical count (1) should reflect sonar's findings, not both tools combined
+  expect(screen.getByRole('button', { name: 'Critical 1' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'High 1' })).not.toBeInTheDocument();
+});

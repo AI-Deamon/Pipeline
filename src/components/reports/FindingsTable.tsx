@@ -33,23 +33,27 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
     return Array.from(tools);
   }, [findings]);
 
+  // Findings scoped to the active sidebar tool selection (if any), shared by the
+  // severity badge counts and the main filtered list so both stay in sync.
+  const toolScopedFindings = useMemo(
+    () => (selectedTool ? findings.filter((f) => f.tool === selectedTool) : findings),
+    [findings, selectedTool],
+  );
+
   const severityCounts = useMemo(() => {
-    const counts: Record<string, number> = { All: findings.length };
-    findings.forEach((f) => {
+    const counts: Record<string, number> = { All: toolScopedFindings.length };
+    toolScopedFindings.forEach((f) => {
       counts[f.severity] = (counts[f.severity] || 0) + 1;
     });
     return counts;
-  }, [findings]);
+  }, [toolScopedFindings]);
 
   // Filter findings FIRST
   const filteredFindings = useMemo(() => {
     const severityOrder: Record<string, number> = { Critical: 4, High: 3, Medium: 2, Low: 1, Info: 0 };
 
-    let filtered = findings;
-    
-    // Apply selectedTool filter (from tool click in side panel)
-    if (selectedTool) filtered = filtered.filter((f) => f.tool === selectedTool);
-    
+    let filtered = toolScopedFindings;
+
     // Apply severity filter
     if (severityFilter !== 'All') filtered = filtered.filter((f) => f.severity === severityFilter);
     
@@ -75,7 +79,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
       const bScore = severityOrder[b.severity] ?? 0;
       return bScore - aScore;
     });
-  }, [findings, selectedTool, severityFilter, toolFilter, searchText]);
+  }, [toolScopedFindings, severityFilter, toolFilter, searchText]);
 
   // Group FILTERED findings by type then by rule
   const groupedFindings = useMemo(() => {
