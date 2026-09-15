@@ -470,15 +470,17 @@ const UnifiedReportPage = () => {
       )}
 
       {/* Filter Bar */}
-      <FilterBar
-        search={search}
-        onSearchChange={setSearch}
-        selectedSeverities={selectedSeverities}
-        onSeverityChange={setSelectedSeverities}
-        selectedTools={selectedTools}
-        onToolChange={setSelectedTools}
-        availableTools={availableTools}
-      />
+      <div className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm pt-2 pb-2 -mx-8 px-8">
+        <FilterBar
+          search={search}
+          onSearchChange={setSearch}
+          selectedSeverities={selectedSeverities}
+          onSeverityChange={setSelectedSeverities}
+          selectedTools={selectedTools}
+          onToolChange={setSelectedTools}
+          availableTools={availableTools}
+        />
+      </div>
 
       {/* Findings Table */}
       <div id="Findings" className="bg-white rounded-2xl border border-slate-200 p-6">
