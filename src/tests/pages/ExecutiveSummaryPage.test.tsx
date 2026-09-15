@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { vi, beforeEach, afterEach, test, expect, describe } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ExecutiveSummaryPage from '../../pages/ExecutiveSummaryPage';
 import { api } from '../../services/api';
 
@@ -28,7 +29,12 @@ describe('ExecutiveSummaryPage', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={queryClient}>
-        <ExecutiveSummaryPage />
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<ExecutiveSummaryPage />} />
+            <Route path="/projects/:projectId/reports" element={<div>Reports page</div>} />
+          </Routes>
+        </MemoryRouter>
       </QueryClientProvider>
     );
   }
@@ -78,5 +84,12 @@ describe('ExecutiveSummaryPage', () => {
     });
     renderPage();
     expect(await screen.findByText('worsening')).toBeInTheDocument();
+  });
+
+  test('project row navigates to its reports page on click', async () => {
+    renderPage();
+    const row = await screen.findByRole('button', { name: /Project Alpha/ });
+    fireEvent.click(row);
+    expect(await screen.findByText('Reports page')).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../services/api";
 import type { ReportSummary } from "../types";
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 
 const ExecutiveSummaryPage = () => {
+  const navigate = useNavigate();
   const { data: projects = [], isLoading: loadingProjects, isError: projectsError, refetch: refetchProjects } = useQuery({
     queryKey: ["projects"],
     queryFn: api.projects.list,
@@ -269,7 +271,19 @@ const ExecutiveSummaryPage = () => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {projectsWithRisk.map((project) => (
-              <tr key={project.project_id} className="transition-colors hover:bg-slate-50/70">
+              <tr
+                key={project.project_id}
+                className="transition-colors hover:bg-slate-50/70 cursor-pointer"
+                tabIndex={0}
+                role="button"
+                onClick={() => navigate(`/projects/${project.project_id}/reports`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/projects/${project.project_id}/reports`);
+                  }
+                }}
+              >
                 <td className="px-6 py-4">
                   <div className="font-medium text-slate-900">{project.name}</div>
                   <div className="text-sm text-slate-500">{project.project_id}</div>
