@@ -118,15 +118,28 @@ describe('ProjectReportsPage', () => {
   });
 
   test('an All tools entry renders findings across every tool without requiring a tool click', async () => {
+    // Distinct `rule` values so FindingsTable's grouped view puts each finding
+    // in its own rule group (same fallback rule key would otherwise merge
+    // both into one group and only show the first finding's title).
     api.reports.getAll = vi.fn().mockResolvedValue([
-      { tool: 'sonar', findings: [{ id: 'f1', severity: 'High', title: 'Finding one' }] },
-      { tool: 'trivy_fs', findings: [{ id: 'f2', severity: 'Critical', title: 'Finding two' }] },
+      { tool: 'sonar', findings: [{ id: 'f1', severity: 'High', title: 'Finding one', rule: 'rule-one' }] },
+      { tool: 'trivy_fs', findings: [{ id: 'f2', severity: 'Critical', title: 'Finding two', rule: 'rule-two' }] },
     ]);
 
     renderPage();
 
+    // Both tools' findings must actually be present together in the rendered
+    // table (not just the header text) to prove selectedTool==='all' passes
+    // no tool filter through to FindingsTable, rather than accidentally
+    // scoping to a single tool.
     await vi.waitFor(() => {
-      expect(screen.getByText(/Findings —/)).toBeInTheDocument();
+      expect(screen.getByText('Finding one')).toBeInTheDocument();
+      expect(screen.getByText('Finding two')).toBeInTheDocument();
     });
+
+    // The header's count badge (`Findings — <span>{filteredFindings.length}</span>`)
+    // must reflect the combined total across both tools, not just one.
+    const heading = screen.getByText(/Findings —/);
+    expect(heading.querySelector('span.tabular-nums')).toHaveTextContent('2');
   });
 });
