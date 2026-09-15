@@ -151,6 +151,7 @@ const DeveloperReportPage = () => {
         }}
         tools={[]}
         projectId={projectId || ''}
+        scanId={scanId}
         onExport={handleExport}
         exportLoading={exportLoading}
       >
