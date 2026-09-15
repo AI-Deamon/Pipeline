@@ -134,3 +134,37 @@ test('New badge: omitted previousScanFindingKeys prop shows no badges', () => {
 
   expect(screen.queryByText('New')).not.toBeInTheDocument();
 });
+
+test('New badge: grouped view (the default) badges findings absent from the previous scan set', () => {
+  const previousKeys = new Set<string>(); // nothing was present before — everything is new
+  // No click on "List" — this exercises the grouped view, which is the component's default.
+  render(<FindingsTable findings={findings} selectedTool="sonar" previousScanFindingKeys={previousKeys} />);
+
+  const row = screen.getByText('Unknown').closest('div');
+  expect(row).not.toBeNull();
+  expect(within(row!).getByText('New')).toBeInTheDocument();
+});
+
+test('New badge: grouped view (the default) does not badge findings present in the previous scan', () => {
+  const previousKeys = new Set(['sonar:1']); // finding id "1"/sonar was present before
+  render(<FindingsTable findings={findings} selectedTool="sonar" previousScanFindingKeys={previousKeys} />);
+
+  const row = screen.getByText('Unknown').closest('div');
+  expect(row).not.toBeNull();
+  expect(within(row!).queryByText('New')).not.toBeInTheDocument();
+});
+
+test('New badge: no previous-scan data (undefined previousScanFindingKeys, e.g. first scan or still loading) shows no badges anywhere', () => {
+  // Mirrors ProjectReportsPage's corrected behavior: previousScanFindingKeys stays
+  // undefined (not an empty Set) when there's no previous scan or its reports are
+  // still loading, so FindingsTable's `previousScanFindingKeys &&` guard suppresses
+  // badges entirely instead of treating "no data yet" as "everything is new".
+  render(<FindingsTable findings={findings} selectedTool="sonar" previousScanFindingKeys={undefined} />);
+
+  // Grouped (default) view.
+  expect(screen.queryByText('New')).not.toBeInTheDocument();
+
+  // List view.
+  fireEvent.click(screen.getByText('List'));
+  expect(screen.queryByText('New')).not.toBeInTheDocument();
+});

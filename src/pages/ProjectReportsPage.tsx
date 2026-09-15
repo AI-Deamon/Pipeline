@@ -165,18 +165,24 @@ const ProjectReportsPage = () => {
   // Fetch the previous completed scan's reports so we can badge findings that are
   // new since that scan (completedScans is sorted newest-first).
   const previousCompletedScan = completedScans[currentScanIndex + 1];
-  const { data: previousReports = [] } = useQuery({
+  const { data: previousReports = [], isSuccess: previousReportsLoaded } = useQuery({
     queryKey: ['reports', projectId, previousCompletedScan?.scan_id],
     queryFn: () => api.reports.getAll(projectId!, previousCompletedScan!.scan_id),
     enabled: !!projectId && !!previousCompletedScan,
   });
+  // undefined (not an empty Set) whenever there's no previous scan to diff against, or
+  // its reports haven't finished loading yet — FindingsTable's `previousScanFindingKeys &&`
+  // guard treats an empty-but-truthy Set as "everything is new", which would badge every
+  // finding on a project's first scan and flicker "New" on every finding while this query
+  // is still in flight on later scans.
   const previousScanFindingKeys = useMemo(() => {
+    if (!previousCompletedScan || !previousReportsLoaded) return undefined;
     const keys = new Set<string>();
     (previousReports as ReportDetail[]).forEach((report) => {
       report.findings?.forEach((finding) => keys.add(findingKey({ ...finding, tool: report.tool })));
     });
     return keys;
-  }, [previousReports]);
+  }, [previousCompletedScan, previousReportsLoaded, previousReports]);
 
   if (isLoading) {
     return (
