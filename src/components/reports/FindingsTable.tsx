@@ -27,6 +27,19 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('grouped');
   const [severityFilter, setSeverityFilter] = useState<string>('All');
   const [toolFilter, setToolFilter] = useState<string>(selectedTool || 'All');
+  // Reset the in-table tool filter whenever the sidebar's selectedTool changes
+  // (e.g. clicking a different tool in the sidebar). Without this, a stale
+  // toolFilter left over from a previous unlocked-dropdown selection would
+  // keep filtering the newly-scoped findings down to (often) zero rows, with
+  // no visible explanation since the dropdown is locked/disabled once
+  // selectedTool is set. Adjusting state during render (rather than a
+  // useEffect) keeps this in sync in the same commit — same pattern as
+  // hasSearched in FindingDetailModal and visibleSelectedIds below.
+  const [prevSelectedTool, setPrevSelectedTool] = useState(selectedTool);
+  if (selectedTool !== prevSelectedTool) {
+    setPrevSelectedTool(selectedTool);
+    setToolFilter('All');
+  }
   const [searchText, setSearchText] = useState('');
   const [selectedFinding, setSelectedFinding] = useState<(Finding & { tool: string }) | null>(null);
   const [expandedTypes, setExpandedTypes] = useState<Record<string, boolean>>({});
@@ -331,6 +344,15 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                                     }`}
                                     onClick={() => setSelectedFinding(finding)}
                                   >
+                                    {canAssignIssues && (
+                                      <input
+                                        type="checkbox"
+                                        aria-label={`Select ${finding.title}`}
+                                        checked={visibleSelectedIds.has(finding.id)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={() => toggleSelected(finding.id)}
+                                      />
+                                    )}
                                     <span className={`w-1.5 h-1.5 rounded-full ${getSeverityDotColor(finding.severity)}`} />
                                     <span className="truncate">{finding.host || finding.package || finding.uri || 'Unknown'}</span>
                                     {previousScanFindingKeys && !previousScanFindingKeys.has(findingKey(finding)) && (

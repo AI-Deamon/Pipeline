@@ -45,6 +45,23 @@ const renderTable = (ui: ReactElement) => {
   );
 };
 
+// Uses RTL's `wrapper` option (rather than hand-wrapping providers around the
+// element) so `rerender` re-renders just the FindingsTable element with new
+// props through the same provider tree — needed to simulate a parent
+// re-rendering FindingsTable with a new `selectedTool` prop without a remount
+// (ProjectReportsPage renders <FindingsTable> with no `key`).
+const renderTableWithRerender = (ui: ReactElement) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const Wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ToastProvider>{children}</ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  return render(ui, { wrapper: Wrapper });
+};
+
 test('in-table tool dropdown is disabled while a sidebar tool is active', () => {
   renderTable(<FindingsTable findings={findings} selectedTool="sonar" />);
   const select = screen.getByRole('combobox');
@@ -302,5 +319,47 @@ test('checking a row checkbox does not also open the finding detail panel', () =
   fireEvent.click(checkbox);
 
   expect(checkbox).toBeChecked();
+  expect(screen.queryByText('Finding details')).not.toBeInTheDocument();
+});
+
+test('stale in-table tool filter resets when the sidebar tool selection changes', () => {
+  // Mount with the dropdown unlocked (selectedTool null), pick a tool through
+  // it, then simulate ProjectReportsPage re-rendering FindingsTable with a
+  // DIFFERENT selectedTool (a sidebar click) — without a remount, since the
+  // production usage passes no `key`.
+  const { rerender } = renderTableWithRerender(<FindingsTable findings={findings} selectedTool={null} />);
+  fireEvent.click(screen.getByText('List'));
+
+  const select = screen.getByRole('combobox');
+  expect(select).not.toBeDisabled();
+  fireEvent.change(select, { target: { value: 'sonar' } });
+
+  expect(screen.getByText('A')).toBeInTheDocument();
+  expect(screen.queryByText('B')).not.toBeInTheDocument();
+
+  rerender(<FindingsTable findings={findings} selectedTool="trivy" />);
+
+  // The stale toolFilter ('sonar') must not silently filter the newly-scoped
+  // (trivy) findings down to zero rows — trivy's finding (B) must show.
+  expect(screen.getByText('B')).toBeInTheDocument();
+  expect(screen.queryByText('No findings match the current filters.')).not.toBeInTheDocument();
+});
+
+test('grouped view (the default) exposes selection checkboxes so bulk selection is visible and usable there', () => {
+  renderTable(<FindingsTable findings={findings} projectId="p1" scanId="s1" selectedTool="sonar" />);
+  // No click on "List" — exercises the default grouped view.
+
+  fireEvent.click(screen.getByRole('button', { name: 'Select all Critical' }));
+  expect(screen.getByRole('button', { name: 'Create issues for selected (1)' })).toBeInTheDocument();
+
+  // The user must be able to SEE which finding is selected and deselect it
+  // individually, not just trust a blind count.
+  const checkbox = screen.getByRole('checkbox', { name: 'Select A' });
+  expect(checkbox).toBeChecked();
+
+  fireEvent.click(checkbox);
+  expect(checkbox).not.toBeChecked();
+  expect(screen.queryByRole('button', { name: /Create issues for selected/ })).not.toBeInTheDocument();
+  // Clicking the checkbox must not also open the finding detail panel.
   expect(screen.queryByText('Finding details')).not.toBeInTheDocument();
 });
