@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -270,7 +270,9 @@ const ProjectReportsPage = () => {
         </button>
         <div>
           <h1 className="font-display text-xl font-semibold text-slate-900 tracking-tight">Scan report</h1>
-          <p className="text-sm text-slate-500">Dashboard / {project.name} / Reports / Scan #{scanNumber}</p>
+          <p className="text-sm text-slate-500">
+            Dashboard / <Link to={`/projects/${projectId}`} className="hover:text-slate-900 hover:underline">{project.name}</Link> / Reports / Scan #{scanNumber}
+          </p>
         </div>
       </div>
 

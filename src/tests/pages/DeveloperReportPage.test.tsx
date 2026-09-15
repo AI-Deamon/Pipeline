@@ -42,4 +42,19 @@ describe('DeveloperReportPage', () => {
     exportBtn.click();
     await vi.waitFor(() => expect(api.reports.exportUnified).toHaveBeenCalledWith('p1', 'pdf', 's1', 'technical'));
   });
+
+  test('breadcrumb project-name segment links to the project overview', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/projects/p1/reports/s1/developer"]}>
+          <Routes>
+            <Route path="/projects/:projectId/reports/:scanId/developer" element={<DeveloperReportPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const link = await screen.findByRole('link', { name: 'Test Project' });
+    expect(link).toHaveAttribute('href', '/projects/p1');
+  });
 });

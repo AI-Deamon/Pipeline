@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { DeveloperReport, DeveloperIssue } from '../types';
@@ -122,7 +122,10 @@ const DeveloperReportPage = () => {
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Developer View</h1>
           <p className="text-sm text-slate-500">
-            {project.name} / Reports / Developer Dashboard
+            <Link to={`/projects/${projectId}`} className="hover:text-slate-900 hover:underline">{project.name}</Link>
+            {' / '}
+            <Link to={`/projects/${projectId}/reports`} className="hover:text-slate-900 hover:underline">Reports</Link>
+            {' / Developer Dashboard'}
           </p>
         </div>
       </div>
