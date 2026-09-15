@@ -210,12 +210,14 @@ const UnifiedReportPage = () => {
         <select
           value={reportType}
           onChange={(e) => setReportType(e.target.value as typeof reportType)}
+          aria-label="Export format"
+          title="Controls the export format, not the on-screen report"
           className="px-3 py-2 border border-slate-300 rounded-lg text-sm transition-colors hover:border-slate-400 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
         >
-          <option value="technical">Technical report</option>
-          <option value="executive">Executive summary</option>
-          <option value="compliance">Compliance report</option>
-          <option value="comparison">Comparison report</option>
+          <option value="technical">Technical export</option>
+          <option value="executive">Executive summary export</option>
+          <option value="compliance">Compliance export</option>
+          <option value="comparison">Comparison export</option>
         </select>
 
         <div className="flex items-center gap-2.5">

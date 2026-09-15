@@ -79,4 +79,20 @@ describe('UnifiedReportPage', () => {
     );
     expect(await screen.findByText('Security report')).toBeInTheDocument();
   });
+
+  test('report type select is labeled as export format, not a view switcher', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByLabelText('Export format')).toBeInTheDocument();
+  });
 });
