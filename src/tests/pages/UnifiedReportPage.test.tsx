@@ -77,6 +77,6 @@ describe('UnifiedReportPage', () => {
         </ToastProvider>
       </QueryClientProvider>
     );
-    expect(await screen.findByText('Security Report')).toBeInTheDocument();
+    expect(await screen.findByText('Security report')).toBeInTheDocument();
   });
 });

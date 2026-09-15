@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { getSeverityDotColor } from '../../utils/risk';
 import {
   Download,
   ExternalLink,
@@ -54,12 +55,12 @@ const statusConfig = {
   skipped: { icon: '–', color: 'text-slate-400 bg-slate-50', label: 'Skipped' },
 };
 
-const severityColors = {
-  critical: { text: 'text-red-600', bg: 'bg-red-50' },
-  high: { text: 'text-orange-600', bg: 'bg-orange-50' },
-  medium: { text: 'text-yellow-600', bg: 'bg-yellow-50' },
-  low: { text: 'text-green-600', bg: 'bg-green-50' },
-  info: { text: 'text-slate-500', bg: 'bg-slate-50' },
+const severityText = {
+  critical: 'text-red-600',
+  high: 'text-orange-600',
+  medium: 'text-amber-600',
+  low: 'text-emerald-600',
+  info: 'text-slate-500',
 };
 
 export const ProjectReportLayout = ({
@@ -82,12 +83,12 @@ export const ProjectReportLayout = ({
       <div className="w-80 flex-shrink-0 space-y-4 overflow-y-auto">
         {/* Scan Info Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Scan Info</h3>
+          <h3 className="text-sm font-semibold text-slate-900 mb-3">Scan info</h3>
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm">
               <Zap className="w-4 h-4 text-slate-400" />
               <span className="text-slate-500">ID:</span>
-              <span className="font-mono text-slate-900 truncate">{scanInfo.scanId.slice(0, 12)}...</span>
+              <span className="tabular-nums text-slate-900 truncate">{scanInfo.scanId.slice(0, 12)}…</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
               <Calendar className="w-4 h-4 text-slate-400" />
@@ -108,7 +109,7 @@ export const ProjectReportLayout = ({
               <div className="flex items-center gap-2 text-sm">
                 <Target className="w-4 h-4 text-slate-400" />
                 <span className="text-slate-500">Target:</span>
-                <span className="font-mono text-slate-900 truncate">{scanInfo.target}</span>
+                <span className="tabular-nums text-slate-900 truncate">{scanInfo.target}</span>
               </div>
             )}
           </div>
@@ -117,17 +118,17 @@ export const ProjectReportLayout = ({
         {/* Severity Summary Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <h3 className="text-sm font-semibold text-slate-900 mb-3">
-            Severity Summary
+            Severity summary
             <span className="ml-2 text-xs font-normal text-slate-500">({totalFindings} total)</span>
           </h3>
           <div className="space-y-2">
             {(['critical', 'high', 'medium', 'low', 'info'] as const).map((sev) => (
               <div key={sev} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${severityColors[sev].bg}`} />
+                  <div className={`w-2 h-2 rounded-full ${getSeverityDotColor(sev)}`} />
                   <span className="text-sm text-slate-600 capitalize">{sev}</span>
                 </div>
-                <span className={`text-sm font-semibold ${severityColors[sev].text}`}>
+                <span className={`tabular-nums text-sm font-semibold ${severityText[sev]}`}>
                   {severity[sev]}
                 </span>
               </div>
@@ -147,8 +148,8 @@ export const ProjectReportLayout = ({
                   key={tool.key}
                   onClick={() => onToolSelect?.(isSelected ? null : tool.key)}
                   className={`w-full flex items-center justify-between p-2 rounded-lg transition-colors ${
-                    isSelected 
-                      ? 'bg-indigo-50 border border-indigo-200' 
+                    isSelected
+                      ? 'bg-teal-50 border border-teal-200'
                       : 'hover:bg-slate-50 border border-transparent'
                   }`}
                 >
@@ -156,12 +157,12 @@ export const ProjectReportLayout = ({
                     <span className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold ${config.color}`}>
                       {config.icon}
                     </span>
-                    <span className={`text-sm font-medium ${isSelected ? 'text-indigo-900' : 'text-slate-900'}`}>
+                    <span className={`text-sm font-medium ${isSelected ? 'text-teal-900' : 'text-slate-900'}`}>
                       {tool.name}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm ${isSelected ? 'text-indigo-600' : 'text-slate-600'}`}>
+                    <span className={`tabular-nums text-sm ${isSelected ? 'text-teal-700' : 'text-slate-600'}`}>
                       {tool.findings}
                     </span>
                     {tool.link && (
@@ -169,7 +170,7 @@ export const ProjectReportLayout = ({
                         href={tool.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-800"
+                        className="text-teal-700 hover:text-teal-900"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <ExternalLink className="w-3 h-3" />
@@ -189,16 +190,16 @@ export const ProjectReportLayout = ({
             {scanId && (
               <a
                 href={`/projects/${projectId}/reports/${scanId}/developer`}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-teal-700 text-white rounded-lg transition-all hover:bg-teal-800 active:scale-[0.98] text-sm font-medium"
               >
                 <Code className="w-4 h-4" />
-                Developer View
+                Developer view
               </a>
             )}
             <button
               onClick={onExport}
               disabled={exportLoading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 text-sm font-medium disabled:opacity-50 transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg transition-all hover:bg-slate-800 active:scale-[0.98] text-sm font-medium disabled:opacity-50 disabled:active:scale-100"
             >
               {exportLoading ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -209,17 +210,17 @@ export const ProjectReportLayout = ({
             </button>
             <a
               href={`/projects/${projectId}/reports/unified`}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
             >
               <ExternalLink className="w-4 h-4" />
-              View Unified Report
+              View unified report
             </a>
             <a
               href={`/projects/${projectId}/issues`}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
             >
               <ListChecks className="w-4 h-4" />
-              View Issues
+              View issues
             </a>
           </div>
         </div>

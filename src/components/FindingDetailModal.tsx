@@ -6,7 +6,7 @@ import { useRbac } from '../hooks/useRbac';
 import { useCreateIssue } from '../hooks/useIssues';
 import { api } from '../services/api';
 import { useToast } from './Toast';
-import { Modal } from './ui/Modal';
+import { SidePanel } from './ui/SidePanel';
 import { Badge } from './ui/Badge';
 import { isSafeHttpUrl } from '../utils/url';
 import type { Finding } from '../types';
@@ -16,6 +16,11 @@ interface FindingDetailModalProps {
   projectId?: string;
   scanId?: string;
   onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
+  position?: string;
 }
 
 const severityVariant: Record<string, 'danger' | 'warning' | 'info' | 'default'> = {
@@ -31,6 +36,11 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
   projectId,
   scanId,
   onClose,
+  onPrev,
+  onNext,
+  hasPrev = false,
+  hasNext = false,
+  position,
 }) => {
   const navigate = useNavigate();
   const [hasSearched, setHasSearched] = useState(false);
@@ -89,9 +99,47 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
     }
   };
 
+  const footerContent =
+    canAssignIssues && projectId && finding.tool ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleOpenInIssueTracker}
+          disabled={isSearching}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+        >
+          {isSearching ? <Loader2 size={12} className="animate-spin" /> : <Bug size={14} />}
+          Open in Issue Tracker
+        </button>
+        {hasSearched && !matchedIssue && (
+          <button
+            type="button"
+            onClick={handleCreateIssue}
+            disabled={createMutation.isPending || !scanId}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+          >
+            {createMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={14} />}
+            Create issue
+          </button>
+        )}
+        {hasSearched && matchedIssue && (
+          <span className="text-xs text-emerald-600">Matched existing issue #{matchedIssue.id}</span>
+        )}
+      </div>
+    ) : undefined;
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Finding Details" size="lg">
-      <div className="max-h-[60vh] overflow-y-auto">
+    <SidePanel
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Finding details"
+      onPrev={onPrev}
+      onNext={onNext}
+      hasPrev={hasPrev}
+      hasNext={hasNext}
+      position={position}
+      footerContent={footerContent}
+    >
         <div className="mb-4">
           <Badge variant={severityVariant[finding.severity] || 'default'} size="md">
             {finding.severity}
@@ -259,35 +307,7 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
         </div>
       )}
 
-      {canAssignIssues && projectId && finding.tool && (
-        <div className="mt-6 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={handleOpenInIssueTracker}
-            disabled={isSearching}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-40"
-          >
-            {isSearching ? <Loader2 size={12} className="animate-spin" /> : <Bug size={14} />}
-            Open in Issue Tracker
-          </button>
-          {hasSearched && !matchedIssue && (
-            <button
-              type="button"
-              onClick={handleCreateIssue}
-              disabled={createMutation.isPending || !scanId}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
-            >
-              {createMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <Plus size={14} />}
-              Create issue
-            </button>
-          )}
-          {hasSearched && matchedIssue && (
-            <span className="text-xs text-emerald-600">Matched existing issue #{matchedIssue.id}</span>
-          )}
-        </div>
-      )}
-      </div>
-    </Modal>
+    </SidePanel>
   );
 };
 export default FindingDetailModal;

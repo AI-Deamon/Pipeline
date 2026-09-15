@@ -2,14 +2,7 @@ import { useState, useMemo } from 'react';
 import { ChevronDown, Search, Shield, Bug, AlertTriangle, Code, Layers } from 'lucide-react';
 import type { Finding } from '../../types';
 import FindingDetailModal from '../FindingDetailModal';
-
-const severityColors: Record<string, { text: string; bg: string; border: string }> = {
-  Critical: { text: 'text-[#A32D2D]', bg: 'bg-[#FCEBEB]', border: 'border-[#E24B4A]' },
-  High: { text: 'text-[#854F0B]', bg: 'bg-[#FAEEDA]', border: 'border-[#EF9F27]' },
-  Medium: { text: 'text-[#185FA5]', bg: 'bg-[#E6F1FB]', border: 'border-[#378ADD]' },
-  Low: { text: 'text-[#3B6D11]', bg: 'bg-[#EAF3DE]', border: 'border-[#639922]' },
-  Info: { text: 'text-[#5F5E5A]', bg: 'bg-[#F1EFE8]', border: 'border-slate-400' },
-};
+import { getSeverityColor, getSeverityDotColor } from '../../utils/risk';
 
 const SEVERITIES = ['All', 'Critical', 'High', 'Medium', 'Low'] as const;
 
@@ -120,12 +113,18 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
     setExpandedTypes((prev) => ({ ...prev, [type]: !prev[type] }));
   };
 
+  const selectedIndex = selectedFinding ? filteredFindings.indexOf(selectedFinding) : -1;
+  const hasPrev = selectedIndex > 0;
+  const hasNext = selectedIndex >= 0 && selectedIndex < filteredFindings.length - 1;
+  const goToPrev = () => hasPrev && setSelectedFinding(filteredFindings[selectedIndex - 1]);
+  const goToNext = () => hasNext && setSelectedFinding(filteredFindings[selectedIndex + 1]);
+
   // Zero findings state
   if (findings.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-slate-200 p-10 flex flex-col items-center gap-3">
-        <Shield className="w-12 h-12 text-green-400" />
-        <p className="text-lg font-semibold text-slate-800">✓ No vulnerabilities found in this scan.</p>
+      <div className="bg-white rounded-2xl border border-slate-200 p-10 flex flex-col items-center gap-3">
+        <Shield className="w-10 h-10 text-emerald-500" />
+        <p className="text-lg font-semibold text-slate-800">No vulnerabilities found in this scan.</p>
         <p className="text-sm text-slate-500">This scan completed with zero security findings.</p>
       </div>
     );
@@ -133,13 +132,13 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
 
   return (
     <>
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         {/* Header */}
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
           <h3 className="font-semibold text-slate-900">
-            Findings — {filteredFindings.length}
+            Findings — <span className="tabular-nums">{filteredFindings.length}</span>
             {filteredFindings.length !== findings.length && (
-              <span className="text-sm font-normal text-slate-500"> of {findings.length}</span>
+              <span className="text-sm font-normal text-slate-500 tabular-nums"> of {findings.length}</span>
             )}
           </h3>
           <div className="flex items-center gap-1 bg-slate-200 rounded-lg p-0.5">
@@ -188,7 +187,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
             <select
               value={toolFilter}
               onChange={(e) => setToolFilter(e.target.value)}
-              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="text-sm border border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
             >
               <option value="All">All tools</option>
               {uniqueTools.map((tool) => (
@@ -203,7 +202,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                 placeholder="Search by title, rule, type, package, or host…"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
               />
             </div>
           </div>
@@ -253,7 +252,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                                   {Object.entries(group.severity).map(([sev, count]) => (
                                     <span
                                       key={sev}
-                                      className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${severityColors[sev]?.bg || ''} ${severityColors[sev]?.text || ''}`}
+                                      className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${getSeverityColor(sev)}`}
                                     >
                                       {count} {sev.charAt(0)}
                                     </span>
@@ -267,7 +266,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                                     className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 rounded px-2 py-1"
                                     onClick={() => setSelectedFinding(finding)}
                                   >
-                                    <span className={`w-1.5 h-1.5 rounded-full ${severityColors[finding.severity]?.bg || ''}`} />
+                                    <span className={`w-1.5 h-1.5 rounded-full ${getSeverityDotColor(finding.severity)}`} />
                                     <span className="truncate">{finding.host || finding.package || finding.uri || 'Unknown'}</span>
                                     <span className="text-xs text-slate-400 ml-auto">{finding.tool}</span>
                                   </div>
@@ -315,7 +314,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                       onClick={() => setSelectedFinding(finding)}
                     >
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-1 text-xs font-semibold rounded ${severityColors[finding.severity]?.bg || ''} ${severityColors[finding.severity]?.text || ''}`}>
+                        <span className={`px-2 py-1 text-xs font-semibold rounded ${getSeverityColor(finding.severity)}`}>
                           {finding.severity}
                         </span>
                       </td>
@@ -333,13 +332,18 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
         )}
       </div>
 
-      {/* Finding Detail Modal */}
+      {/* Finding Detail Panel */}
       {selectedFinding && (
         <FindingDetailModal
           finding={selectedFinding}
           onClose={() => setSelectedFinding(null)}
           projectId={projectId}
           scanId={scanId}
+          onPrev={goToPrev}
+          onNext={goToNext}
+          hasPrev={hasPrev}
+          hasNext={hasNext}
+          position={selectedIndex >= 0 ? `${selectedIndex + 1} of ${filteredFindings.length}` : undefined}
         />
       )}
     </>

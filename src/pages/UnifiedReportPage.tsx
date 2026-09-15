@@ -8,10 +8,12 @@ import TrendLineChart from '../components/TrendLineChart';
 import TableOfContents from '../components/TableOfContents';
 import FilterBar from '../components/FilterBar';
 import FindingDetailModal from '../components/FindingDetailModal';
+import { RiskGauge } from '../components/RiskGauge';
 import { useToast } from '../components/Toast';
 import { useRbac } from '../hooks/useRbac';
 import { useScanHistory } from '../hooks/useScanHistory';
-import { ArrowLeft, ChevronLeft, Download, History, Shield, ListChecks } from 'lucide-react';
+import { getSeverityColor } from '../utils/risk';
+import { ArrowLeft, ChevronLeft, Download, History, ShieldOff, ListChecks } from 'lucide-react';
 
 const UnifiedReportPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -108,21 +110,21 @@ const UnifiedReportPage = () => {
       <div className="max-w-6xl mx-auto p-8">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
+            <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 rounded-lg transition-colors hover:bg-slate-100 active:scale-[0.96]">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-2xl font-semibold text-slate-900">Security Report</h1>
+            <h1 className="font-display text-2xl font-semibold text-slate-900 tracking-tight">Security report</h1>
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-slate-200">
-          <Shield className="w-16 h-16 text-slate-300 mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No scans yet</h3>
-          <p className="text-slate-500 mb-6">Trigger your first scan to see security results</p>
+        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-slate-200">
+          <ShieldOff className="w-12 h-12 text-slate-300 mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-1.5">No scans yet</h3>
+          <p className="text-slate-500 mb-6">Trigger your first scan to see security results.</p>
           <button
             onClick={() => navigate(`/projects/${projectId}`)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+            className="px-4 py-2.5 bg-teal-700 text-white rounded-lg transition-all hover:bg-teal-800 active:scale-[0.98] text-sm font-medium"
           >
-            Go to Project
+            Go to project
           </button>
         </div>
       </div>
@@ -177,18 +179,18 @@ const UnifiedReportPage = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-8">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-4">
-          <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
+          <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 rounded-lg transition-colors hover:bg-slate-100 active:scale-[0.96]">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h1 className="text-2xl font-semibold text-slate-900">Security Report</h1>
+          <h1 className="font-display text-2xl font-semibold text-slate-900 tracking-tight">Security report</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           {(canAssignIssues || isAdmin) && (
             <Link
               to={`/projects/${projectId}/issues`}
-              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
             >
               <ListChecks className="w-4 h-4" />
               Issues
@@ -196,41 +198,42 @@ const UnifiedReportPage = () => {
           )}
           <button
             onClick={() => navigate(`/projects/${projectId}/reports`)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
           >
             <ChevronLeft className="w-4 h-4" />
-            Back to Detailed View
+            Back to detailed view
           </button>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Report Type Selector */}
-          <select
-            value={reportType}
-            onChange={(e) => setReportType(e.target.value as typeof reportType)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-          >
-            <option value="technical">Technical Report</option>
-            <option value="executive">Executive Summary</option>
-            <option value="compliance">Compliance Report</option>
-            <option value="comparison">Comparison Report</option>
-          </select>
-          
-          {/* Export Buttons */}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <select
+          value={reportType}
+          onChange={(e) => setReportType(e.target.value as typeof reportType)}
+          className="px-3 py-2 border border-slate-300 rounded-lg text-sm transition-colors hover:border-slate-400 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
+        >
+          <option value="technical">Technical report</option>
+          <option value="executive">Executive summary</option>
+          <option value="compliance">Compliance report</option>
+          <option value="comparison">Comparison report</option>
+        </select>
+
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => handleExport('html')}
             disabled={exporting}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 text-sm font-medium"
           >
             <Download className="w-4 h-4" />
-            {exporting ? 'Exporting...' : 'Export HTML'}
+            {exporting ? 'Exporting…' : 'Export HTML'}
           </button>
           <button
             onClick={() => handleExport('pdf')}
             disabled={exporting}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 bg-teal-700 text-white rounded-lg transition-all hover:bg-teal-800 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 text-sm font-medium"
           >
             <Download className="w-4 h-4" />
-            {exporting ? 'Exporting...' : 'Export PDF'}
+            {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
         </div>
       </div>
@@ -238,15 +241,15 @@ const UnifiedReportPage = () => {
       {/* Scan Selector */}
       {scans.length > 1 && (
         <div className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 p-3 mb-6">
-          <History className="w-5 h-5 text-slate-400" />
+          <History className="w-5 h-5 text-slate-400 shrink-0" />
           <select
             value={selectedScanId}
             onChange={(e) => setSelectedScanId(e.target.value)}
-            className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 transition-colors focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
           >
             {scans.map((s) => (
               <option key={s.scan_id} value={s.scan_id}>
-                Scan {s.scan_id.slice(0, 8)}... ({new Date(s.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
+                Scan {s.scan_id.slice(0, 8)}… ({new Date(s.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
               </option>
             ))}
           </select>
@@ -261,43 +264,34 @@ const UnifiedReportPage = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-3xl font-bold text-red-600">{report.severity.critical}</div>
-          <div className="text-sm text-slate-500">Critical</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-3xl font-bold text-orange-600">{report.severity.high}</div>
-          <div className="text-sm text-slate-500">High</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-3xl font-bold text-yellow-600">{report.severity.medium}</div>
-          <div className="text-sm text-slate-500">Medium</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-3xl font-bold text-green-600">{report.severity.low}</div>
-          <div className="text-sm text-slate-500">Low</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <div className="text-3xl font-bold text-slate-500">{report.severity.info}</div>
-          <div className="text-sm text-slate-500">Info</div>
-        </div>
+        {[
+          { label: 'Critical', value: report.severity.critical, bar: 'bg-red-500', text: 'text-red-600' },
+          { label: 'High', value: report.severity.high, bar: 'bg-orange-500', text: 'text-orange-600' },
+          { label: 'Medium', value: report.severity.medium, bar: 'bg-amber-500', text: 'text-amber-600' },
+          { label: 'Low', value: report.severity.low, bar: 'bg-emerald-500', text: 'text-emerald-600' },
+          { label: 'Info', value: report.severity.info, bar: 'bg-slate-400', text: 'text-slate-500' },
+        ].map((s) => (
+          <div key={s.label} className="relative overflow-hidden bg-white rounded-xl border border-slate-200 p-4 transition-shadow hover:shadow-sm">
+            <span className={`absolute inset-y-0 left-0 w-1 ${s.bar}`} aria-hidden="true" />
+            <div className={`tabular-nums text-3xl font-semibold ${s.text}`}>{s.value}</div>
+            <div className="text-sm text-slate-500">{s.label}</div>
+          </div>
+        ))}
       </div>
 
        {/* Risk Score Card */}
        {report.risk_score && (
-         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
-           <h3 className="text-lg font-semibold text-slate-900 mb-4">Risk Assessment</h3>
+         <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-8">
+           <h3 className="text-sm font-semibold text-slate-900 mb-5">Risk assessment</h3>
            <div className="flex items-center gap-8">
+             <RiskGauge score={report.risk_score.score} size={80} />
              <div>
-               <div className="text-4xl font-bold text-slate-900">{report.risk_score.score}/100</div>
-               <div className="text-sm text-slate-500">{report.risk_score.level}</div>
-             </div>
-             <div>
+               <div className="text-sm text-slate-500 mb-0.5">{report.risk_score.level} risk</div>
                <div className="text-sm">
                  Trend: <span className="font-medium capitalize">{report.risk_score.trend}</span>
                </div>
                <div className="text-sm text-slate-500">
-                 Previous Score: {report.risk_score.previous_score ?? 'N/A'}
+                 Previous score: <span className="tabular-nums">{report.risk_score.previous_score ?? 'N/A'}</span>
                </div>
              </div>
            </div>
@@ -306,7 +300,7 @@ const UnifiedReportPage = () => {
 
        {/* Charts */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-        <div id="Severity Distribution" className="bg-white rounded-xl border border-slate-200 p-6">
+        <div id="Severity Distribution" className="bg-white rounded-2xl border border-slate-200 p-6">
           <SeverityPieChart
             critical={report.severity.critical}
             high={report.severity.high}
@@ -314,39 +308,39 @@ const UnifiedReportPage = () => {
             low={report.severity.low}
           />
         </div>
-        <div id="Tool Comparison" className="bg-white rounded-xl border border-slate-200 p-6">
+        <div id="Tool Comparison" className="bg-white rounded-2xl border border-slate-200 p-6">
           <ToolBarChart tools={toolSummariesArray} />
         </div>
       </div>
 
       {/* Trend Chart */}
-      <div id="Historical Trend" className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">Historical Trend (Last 30 Days)</h3>
+      <div id="Historical Trend" className="bg-white rounded-2xl border border-slate-200 p-6 mb-8">
+        <h3 className="text-sm font-semibold text-slate-900 mb-4">Historical trend — last 30 days</h3>
         {trends.length > 0 ? (
           <TrendLineChart data={trends} />
         ) : (
-          <p className="text-slate-500">No trend data available</p>
+          <p className="text-slate-500 text-sm">No trend data available yet.</p>
         )}
       </div>
 
       {/* Compliance Section */}
       {compliance && compliance.compliance && (
-        <div id="Compliance" className="bg-white rounded-xl border border-slate-200 p-6 mb-8">
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">Compliance Mapping</h3>
-          
+        <div id="Compliance" className="bg-white rounded-2xl border border-slate-200 p-6 mb-8">
+          <h3 className="text-sm font-semibold text-slate-900 mb-5">Compliance mapping</h3>
+
           {/* OWASP Top 10 */}
           {compliance.compliance.owasp_top_10 && compliance.compliance.owasp_top_10.length > 0 && (
             <div className="mb-6">
-              <h4 className="text-md font-medium text-slate-700 mb-3">OWASP Top 10 2021</h4>
+              <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-3">OWASP Top 10, 2021</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {compliance.compliance.owasp_top_10.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                    <div>
+                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100">
+                    <div className="min-w-0">
                       <span className="font-medium text-slate-900">{item.id}</span>
                       <span className="ml-2 text-slate-600">{item.name}</span>
                     </div>
-                    <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-sm font-medium">
-                      {item.count} findings
+                    <span className="tabular-nums shrink-0 ml-3 px-2 py-1 bg-red-100 text-red-700 rounded text-sm font-medium">
+                      {item.count}
                     </span>
                   </div>
                 ))}
@@ -357,13 +351,13 @@ const UnifiedReportPage = () => {
           {/* CWE Top 25 */}
           {compliance.compliance.cwe_top_25 && compliance.compliance.cwe_top_25.length > 0 && (
             <div>
-              <h4 className="text-md font-medium text-slate-700 mb-3">CWE Top 25 2023</h4>
+              <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500 mb-3">CWE Top 25, 2023</h4>
               <div className="space-y-2">
                 {compliance.compliance.cwe_top_25.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                  <div key={item.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg transition-colors hover:bg-slate-100">
                     <span className="font-medium text-slate-900">{item.id}</span>
-                    <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
-                      {item.count} findings
+                    <span className="tabular-nums px-2 py-1 bg-orange-100 text-orange-700 rounded text-sm font-medium">
+                      {item.count}
                     </span>
                   </div>
                 ))}
@@ -373,7 +367,7 @@ const UnifiedReportPage = () => {
 
           {(!compliance.compliance.owasp_top_10 || compliance.compliance.owasp_top_10.length === 0) &&
            (!compliance.compliance.cwe_top_25 || compliance.compliance.cwe_top_25.length === 0) && (
-            <p className="text-slate-500">No compliance mappings found for this scan.</p>
+            <p className="text-slate-500 text-sm">No compliance mappings found for this scan.</p>
           )}
         </div>
       )}
@@ -390,59 +384,81 @@ const UnifiedReportPage = () => {
       />
 
       {/* Findings Table */}
-      <div id="Findings" className="bg-white rounded-xl border border-slate-200 p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">
-          Findings ({filteredFindings.length} total)
+      <div id="Findings" className="bg-white rounded-2xl border border-slate-200 p-6">
+        <h3 className="text-sm font-semibold text-slate-900 mb-4">
+          Findings <span className="tabular-nums text-slate-500 font-normal">({filteredFindings.length} total)</span>
         </h3>
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
-            <tr className="border-b">
-              <th className="text-left p-2">Severity</th>
-              <th className="text-left p-2">Title</th>
-              <th className="text-left p-2">Tool</th>
-              <th className="text-left p-2">Host/Package</th>
+            <tr className="border-b border-slate-200">
+              <th className="text-left p-2 text-xs font-medium uppercase tracking-wide text-slate-500">Severity</th>
+              <th className="text-left p-2 text-xs font-medium uppercase tracking-wide text-slate-500">Title</th>
+              <th className="text-left p-2 text-xs font-medium uppercase tracking-wide text-slate-500">Tool</th>
+              <th className="text-left p-2 text-xs font-medium uppercase tracking-wide text-slate-500">Host/Package</th>
             </tr>
           </thead>
           <tbody>
-            {filteredFindings.map((finding, idx) => (
-              <tr
-                key={idx}
-                className="border-b cursor-pointer hover:bg-slate-50"
-                tabIndex={0}
-                role="button"
-                onClick={() => setSelectedFinding(finding)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setSelectedFinding(finding);
-                  }
-                }}
-              >
-                <td className="p-2">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${
-                    finding.severity === 'Critical' ? 'bg-red-100 text-red-700' :
-                    finding.severity === 'High' ? 'bg-orange-100 text-orange-700' :
-                    finding.severity === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-blue-100 text-blue-700'
-                  }`}>
-                    {finding.severity}
-                  </span>
+            {filteredFindings.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="p-6 text-center text-sm text-slate-500">
+                  No findings match the current filters.
                 </td>
-                <td className="p-2">{finding.title}</td>
-                <td className="p-2">{finding.tool}</td>
-                <td className="p-2">{finding.host || finding.package || '-'}</td>
               </tr>
-            ))}
+            ) : (
+              filteredFindings.map((finding, idx) => (
+                <tr
+                  key={idx}
+                  className="border-b border-slate-100 cursor-pointer transition-colors hover:bg-slate-50"
+                  tabIndex={0}
+                  role="button"
+                  onClick={() => setSelectedFinding(finding)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedFinding(finding);
+                    }
+                  }}
+                >
+                  <td className="p-2">
+                    <span className={`px-2 py-1 rounded-md text-xs font-medium ${getSeverityColor(finding.severity)}`}>
+                      {finding.severity}
+                    </span>
+                  </td>
+                  <td className="p-2">{finding.title}</td>
+                  <td className="p-2 text-slate-600">{finding.tool}</td>
+                  <td className="p-2 text-slate-600">{finding.host || finding.package || '-'}</td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
+        </div>
       </div>
 
-      {/* Finding Detail Modal */}
+      {/* Finding Detail Panel */}
       <FindingDetailModal
         finding={selectedFinding}
         projectId={projectId}
         scanId={selectedScanId ?? undefined}
         onClose={() => setSelectedFinding(null)}
+        onPrev={() => {
+          if (!selectedFinding) return;
+          const idx = filteredFindings.indexOf(selectedFinding);
+          if (idx > 0) setSelectedFinding(filteredFindings[idx - 1]);
+        }}
+        onNext={() => {
+          if (!selectedFinding) return;
+          const idx = filteredFindings.indexOf(selectedFinding);
+          if (idx >= 0 && idx < filteredFindings.length - 1) setSelectedFinding(filteredFindings[idx + 1]);
+        }}
+        hasPrev={!!selectedFinding && filteredFindings.indexOf(selectedFinding) > 0}
+        hasNext={!!selectedFinding && filteredFindings.indexOf(selectedFinding) < filteredFindings.length - 1}
+        position={
+          selectedFinding && filteredFindings.indexOf(selectedFinding) >= 0
+            ? `${filteredFindings.indexOf(selectedFinding) + 1} of ${filteredFindings.length}`
+            : undefined
+        }
       />
     </div>
   );

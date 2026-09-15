@@ -6,6 +6,11 @@
     --warning: #f59e0b;
     --error: #ef4444;
     --info: #3b82f6;
+    --font-display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+    --font-body: "IBM Plex Sans", system-ui, sans-serif;
+    --font-data: "IBM Plex Mono", ui-monospace, monospace;
+    --accent: #0f766e;
+    --accent-soft: #0f766e14;
   }
 
   html {
@@ -15,6 +20,7 @@
 
   body {
     @apply text-slate-900 bg-slate-50 antialiased;
+    font-family: var(--font-body);
   }
 
   /* Focus ring consistency */
@@ -39,12 +45,31 @@
   .card-container {
     @apply bg-white border border-slate-200 rounded-[2.5rem] shadow-xl shadow-slate-200/50 overflow-hidden;
   }
+
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  .tabular-nums {
+    font-family: var(--font-data);
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* Animations */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
+}
+
+@keyframes side-panel-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes side-panel-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes shake {

@@ -181,21 +181,21 @@ const ProjectReportsPage = () => {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
+            <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 rounded-lg transition-colors hover:bg-slate-100 active:scale-[0.96]">
               <ChevronLeft className="w-5 h-5 text-slate-600" />
             </button>
             <div>
-              <h1 className="text-xl font-semibold text-slate-900">Scan Report</h1>
+              <h1 className="font-display text-xl font-semibold text-slate-900 tracking-tight">Scan report</h1>
               <p className="text-sm text-slate-500">{project.name}</p>
             </div>
           </div>
         </div>
-        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-slate-200">
-          <Shield className="w-16 h-16 text-slate-300 mb-4" />
-          <h3 className="text-lg font-semibold text-slate-900 mb-2">No scans found</h3>
+        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-2xl border border-slate-200">
+          <Shield className="w-12 h-12 text-slate-300 mb-4" />
+          <h3 className="text-lg font-semibold text-slate-900 mb-1.5">No scans found</h3>
           <p className="text-slate-500 mb-6">Trigger your first scan to see results.</p>
-          <button onClick={() => navigate(`/projects/${projectId}`)} className="px-4 py-2 bg-blue-600 text-white rounded-lg">
-            Go to Project
+          <button onClick={() => navigate(`/projects/${projectId}`)} className="px-4 py-2.5 bg-teal-700 text-white rounded-lg transition-all hover:bg-teal-800 active:scale-[0.98] text-sm font-medium">
+            Go to project
           </button>
         </div>
       </div>
@@ -265,11 +265,11 @@ const ProjectReportsPage = () => {
     <div className="space-y-4">
       {/* Header with back button */}
       <div className="flex items-center gap-4">
-        <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 hover:bg-slate-100 rounded-lg">
+        <button onClick={() => navigate(`/projects/${projectId}`)} className="p-2 rounded-lg transition-colors hover:bg-slate-100 active:scale-[0.96]">
           <ChevronLeft className="w-5 h-5 text-slate-600" />
         </button>
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Scan Report</h1>
+          <h1 className="font-display text-xl font-semibold text-slate-900 tracking-tight">Scan report</h1>
           <p className="text-sm text-slate-500">Dashboard / {project.name} / Reports / Scan #{scanNumber}</p>
         </div>
       </div>
@@ -277,15 +277,15 @@ const ProjectReportsPage = () => {
       {/* Scan Selector */}
       {completedScans.length > 1 && (
         <div className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 p-3">
-          <History className="w-5 h-5 text-slate-400" />
+          <History className="w-5 h-5 text-slate-400 shrink-0" />
           <select
             value={selectedScanId}
             onChange={(e) => setSelectedScanId(e.target.value)}
-            className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 transition-colors focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
           >
             {completedScans.map((s: Scan, idx: number) => (
               <option key={s.scan_id} value={s.scan_id}>
-                Scan #{completedScans.length - idx} — {s.scan_id.slice(0, 8)}... ({new Date(s.created_at || '').toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
+                Scan #{completedScans.length - idx} — {s.scan_id.slice(0, 8)}… ({new Date(s.created_at || '').toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
               </option>
             ))}
           </select>
@@ -324,15 +324,15 @@ const ProjectReportsPage = () => {
             selectedTool={selectedTool}
           />
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">
             <div className="text-center">
-              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-14 h-14 bg-teal-50 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-7 h-7 text-teal-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">Select a Tool</h3>
-              <p className="text-sm text-slate-500">Click on a tool in the sidebar to view its findings</p>
+              <h3 className="text-lg font-semibold text-slate-900 mb-1.5">Select a tool</h3>
+              <p className="text-sm text-slate-500">Click a tool in the sidebar to view its findings.</p>
             </div>
           </div>
         )}

@@ -44,10 +44,10 @@ describe('ExecutiveSummaryPage', () => {
   test('renders page with valid data', async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Executive Summary')).toBeInTheDocument();
+      expect(screen.getByText('Executive summary')).toBeInTheDocument();
     });
     expect(screen.getAllByText('75').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Medium Risk')).toBeInTheDocument();
+    expect(screen.getByText('Medium risk')).toBeInTheDocument();
     expect(screen.getAllByText('Project Alpha').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -55,7 +55,7 @@ describe('ExecutiveSummaryPage', () => {
     api.projects.list = vi.fn().mockResolvedValue([]);
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Executive Summary')).toBeInTheDocument();
+      expect(screen.getByText('Executive summary')).toBeInTheDocument();
     });
     expect(screen.queryByText('NaN')).not.toBeInTheDocument();
   });
