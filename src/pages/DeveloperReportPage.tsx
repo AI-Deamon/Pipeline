@@ -7,6 +7,7 @@ import { FileHealthCard } from '../components/reports/FileHealthCard';
 import { IssueDetailPanel } from '../components/reports/IssueDetailPanel';
 import { QualityGateCard } from '../components/reports/QualityGateCard';
 import { ProjectReportLayout } from '../components/reports/ProjectReportLayout';
+import { ReportVariantNav } from '../components/reports/ReportVariantNav';
 import {
   ChevronLeft,
   FileText,
@@ -129,6 +130,8 @@ const DeveloperReportPage = () => {
           </p>
         </div>
       </div>
+
+      <ReportVariantNav projectId={projectId || ''} active="developer" scanId={scanId} />
 
       {/* Side Panel Layout */}
       <ProjectReportLayout

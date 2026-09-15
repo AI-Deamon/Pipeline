@@ -10,6 +10,7 @@ interface LocationState {
 }
 import { FindingsTable } from '../components/reports/FindingsTable';
 import { ProjectReportLayout } from '../components/reports/ProjectReportLayout';
+import { ReportVariantNav } from '../components/reports/ReportVariantNav';
 import {
   ChevronLeft,
   AlertCircle,
@@ -295,6 +296,8 @@ const ProjectReportsPage = () => {
           </p>
         </div>
       </div>
+
+      <ReportVariantNav projectId={projectId || ''} active="scan" scanId={selectedScanId} />
 
       {/* Scan Selector */}
       {completedScans.length > 1 && (

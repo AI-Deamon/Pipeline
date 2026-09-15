@@ -93,7 +93,7 @@ describe('ProjectReportsPage', () => {
   test('renders without crashing', async () => {
     renderPage();
     await vi.waitFor(() => {
-      expect(screen.getByText('Scan report')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Scan report' })).toBeInTheDocument();
     });
   });
 

@@ -10,6 +10,7 @@ import TableOfContents from '../components/TableOfContents';
 import FilterBar from '../components/FilterBar';
 import FindingDetailModal from '../components/FindingDetailModal';
 import { RiskGauge } from '../components/RiskGauge';
+import { ReportVariantNav } from '../components/reports/ReportVariantNav';
 import { useToast } from '../components/Toast';
 import { useRbac } from '../hooks/useRbac';
 import { useScanHistory } from '../hooks/useScanHistory';
@@ -257,6 +258,8 @@ const UnifiedReportPage = () => {
           </button>
         </div>
       </div>
+
+      <ReportVariantNav projectId={projectId} active="unified" scanId={selectedScanId} />
 
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <select
