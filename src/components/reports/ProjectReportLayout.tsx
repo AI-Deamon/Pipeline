@@ -209,7 +209,7 @@ export const ProjectReportLayout = ({
               Export PDF
             </button>
             <a
-              href={`/projects/${projectId}/reports/unified`}
+              href={`/projects/${projectId}/reports/unified${scanId ? `?scanId=${scanId}` : ''}`}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
             >
               <ExternalLink className="w-4 h-4" />

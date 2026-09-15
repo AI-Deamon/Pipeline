@@ -165,4 +165,25 @@ describe('UnifiedReportPage', () => {
     row.click();
     expect(await screen.findByText('Broken Access')).toBeInTheDocument();
   });
+
+  test('back to detailed view preserves the selected scan id', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    api.scans.getHistory = vi.fn().mockResolvedValue([
+      { scan_id: 'scan-1', state: 'COMPLETED', created_at: new Date().toISOString() },
+      { scan_id: 'scan-2', state: 'COMPLETED', created_at: new Date().toISOString() },
+    ]);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified?scanId=scan-2"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const select = await screen.findByLabelText('Select scan');
+    expect(select).toHaveValue('scan-2');
+  });
 });

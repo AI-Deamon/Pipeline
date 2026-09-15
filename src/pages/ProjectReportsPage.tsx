@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
+import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
@@ -24,7 +24,17 @@ const ProjectReportsPage = () => {
   const initialScanId = (location.state as LocationState)?.scanId;
   
   const [exportLoading, setExportLoading] = useState(false);
-  const [selectedScanId, setSelectedScanId] = useState<string>(initialScanId || '');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlScanId = searchParams.get('scanId');
+  const [selectedScanId, setSelectedScanIdState] = useState<string>(urlScanId || initialScanId || '');
+  const setSelectedScanId = (scanId: string) => {
+    setSelectedScanIdState(scanId);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('scanId', scanId);
+      return next;
+    }, { replace: true });
+  };
   const [selectedTool, setSelectedTool] = useState<string | null>(null);
 
   // Fetch project
@@ -84,6 +94,7 @@ const ProjectReportsPage = () => {
         : completedScans[0]?.scan_id;
       setSelectedScanId(target);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedScans, initialScanId, selectedScanId]);
 
   const isLoading = projectLoading || scansLoading || summaryLoading || reportsLoading;

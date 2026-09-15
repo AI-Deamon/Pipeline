@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { api } from '../services/api';
 import type { UnifiedReport, TrendData, Finding, ComplianceReport } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
@@ -21,7 +21,15 @@ const UnifiedReportPage = () => {
   const { addToast } = useToast();
   const { canAssignIssues, isAdmin } = useRbac();
   const { scans, isLoading: scansLoading } = useScanHistory(projectId);
-  const [selectedScanId, setSelectedScanId] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedScanId = searchParams.get('scanId') || '';
+  const setSelectedScanId = (scanId: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('scanId', scanId);
+      return next;
+    }, { replace: true });
+  };
   const [report, setReport] = useState<UnifiedReport | null>(null);
   const [trends, setTrends] = useState<TrendData[]>([]);
   const [compliance, setCompliance] = useState<ComplianceReport | null>(null);
@@ -39,6 +47,7 @@ const UnifiedReportPage = () => {
     if (scans.length > 0 && !selectedScanId) {
       setSelectedScanId(scans[0].scan_id);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scans, selectedScanId]);
 
   useEffect(() => {
@@ -218,7 +227,7 @@ const UnifiedReportPage = () => {
             </Link>
           )}
           <button
-            onClick={() => navigate(`/projects/${projectId}/reports`)}
+            onClick={() => navigate(`/projects/${projectId}/reports`, { state: { scanId: selectedScanId } })}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg transition-all hover:bg-slate-50 active:scale-[0.98] text-sm font-medium"
           >
             <ChevronLeft className="w-4 h-4" />
