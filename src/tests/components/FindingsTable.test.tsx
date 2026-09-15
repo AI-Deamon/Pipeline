@@ -69,6 +69,18 @@ test('shows a Filtered chip when severity filter is active', () => {
   expect(screen.getByText('Filtered')).toBeInTheDocument();
 });
 
+test('sidebar tool selection alone does not trigger the Filtered chip, but applying a real filter on top does', () => {
+  render(<FindingsTable findings={findings} selectedTool="sonar" />);
+  // Matches production usage: FindingsTable is only ever mounted with selectedTool set.
+  // toolFilter is seeded from selectedTool, so the chip must stay absent until the user
+  // actually applies a filter — otherwise it's noise from the moment of mount.
+  expect(screen.queryByText('Filtered')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /^Critical/ }));
+
+  expect(screen.getByText('Filtered')).toBeInTheDocument();
+});
+
 test('the currently open finding row is visually marked', () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(

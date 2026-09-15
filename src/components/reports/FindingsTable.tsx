@@ -145,7 +145,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
             {filteredFindings.length !== findings.length && (
               <span className="text-sm font-normal text-slate-500 tabular-nums"> of {findings.length}</span>
             )}
-            {(severityFilter !== 'All' || toolFilter !== 'All' || searchText) && (
+            {(severityFilter !== 'All' || toolFilter !== (selectedTool || 'All') || searchText) && (
               <span className="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-full">Filtered</span>
             )}
           </h3>
