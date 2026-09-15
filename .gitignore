@@ -97,6 +97,7 @@ storage/
 # Agent worktrees & isolated checkouts
 Agent/.agent/
 Agent/.worktrees/
+.worktrees/
 
 # Nmap scanner cache & generated targets
 backend/nmap_system/__pycache__/
