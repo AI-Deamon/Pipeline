@@ -115,4 +115,24 @@ describe('UnifiedReportPage', () => {
     link.click();
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
   });
+
+  test('export passes the currently selected scan id, not undefined', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const exportSpy = vi.fn().mockResolvedValue(new Blob());
+    api.reports.exportUnified = exportSpy;
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const exportBtn = await screen.findByRole('button', { name: /Export HTML/ });
+    exportBtn.click();
+    await vi.waitFor(() => expect(exportSpy).toHaveBeenCalledWith('test-project', 'html', 'test-scan', 'technical'));
+  });
 });

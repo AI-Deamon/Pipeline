@@ -77,7 +77,7 @@ const UnifiedReportPage = () => {
   const handleExport = async (format: 'pdf' | 'html') => {
     setExporting(true);
     try {
-      const blob = await api.reports.exportUnified(projectId!, format, undefined, reportType);
+      const blob = await api.reports.exportUnified(projectId!, format, selectedScanId, reportType);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
