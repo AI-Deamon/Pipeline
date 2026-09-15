@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UnifiedReport, TrendData, Finding, ComplianceReport } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
@@ -11,6 +11,7 @@ import { FindingsFilterBar } from '../components/reports/FindingsFilterBar';
 import FindingDetailModal from '../components/FindingDetailModal';
 import { RiskGauge } from '../components/RiskGauge';
 import { ReportVariantNav } from '../components/reports/ReportVariantNav';
+import { ScanComparisonView } from '../components/reports/ScanComparisonView';
 import { useToast } from '../components/Toast';
 import { useRbac } from '../hooks/useRbac';
 import { useScanHistory } from '../hooks/useScanHistory';
@@ -51,6 +52,15 @@ const UnifiedReportPage = () => {
       queryFn: () => api.reports.getSummary(projectId!, s.scan_id),
       enabled: !!projectId,
     })),
+  });
+
+  // scans is sorted newest-first (useScanHistory), so the entry right after the
+  // selected scan is the previous one.
+  const previousScanId = scans[scans.findIndex((s) => s.scan_id === selectedScanId) + 1]?.scan_id;
+  const { data: previousReport } = useQuery({
+    queryKey: ['unified-report', projectId, previousScanId],
+    queryFn: () => api.reports.getUnified(projectId!, previousScanId),
+    enabled: reportType === 'comparison' && !!projectId && !!previousScanId,
   });
 
   useEffect(() => {
@@ -278,7 +288,7 @@ const UnifiedReportPage = () => {
           <option value="technical">Technical export</option>
           <option value="executive">Executive summary export</option>
           <option value="compliance">Compliance export</option>
-          <option value="comparison">Comparison export</option>
+          <option value="comparison">Comparison (on-screen + export)</option>
         </select>
 
         <div className="flex items-center gap-2.5">
@@ -471,6 +481,22 @@ const UnifiedReportPage = () => {
           {(!compliance.compliance.owasp_top_10 || compliance.compliance.owasp_top_10.length === 0) &&
            (!compliance.compliance.cwe_top_25 || compliance.compliance.cwe_top_25.length === 0) && (
             <p className="text-slate-500 text-sm">No compliance mappings found for this scan.</p>
+          )}
+        </div>
+      )}
+
+      {/* Scan Comparison */}
+      {reportType === 'comparison' && (
+        <div className="mb-8">
+          <h3 className="text-sm font-semibold text-slate-900 mb-4">
+            Comparison with previous scan
+          </h3>
+          {!previousScanId ? (
+            <p className="text-sm text-slate-500">This is the first scan — nothing to compare against yet.</p>
+          ) : previousReport ? (
+            <ScanComparisonView previous={previousReport.findings} current={report.findings} />
+          ) : (
+            <p className="text-sm text-slate-500">Loading comparison…</p>
           )}
         </div>
       )}
