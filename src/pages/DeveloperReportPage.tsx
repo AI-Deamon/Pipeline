@@ -18,6 +18,7 @@ const DeveloperReportPage = () => {
   const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<DeveloperIssue | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   // Fetch project
   const { data: project } = useQuery({
@@ -58,6 +59,24 @@ const DeveloperReportPage = () => {
       minute: '2-digit',
       timeZone: 'Asia/Kolkata',
     });
+  };
+
+  const handleExport = async () => {
+    if (!projectId || !scanId) return;
+    setExportLoading(true);
+    try {
+      const blob = await api.reports.exportUnified(projectId, 'pdf', scanId, 'technical');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `developer-report-${project?.name || 'project'}-${scanId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   const selectedFileData = report?.files.find((f) => f.file_path === selectedFile);
@@ -126,8 +145,8 @@ const DeveloperReportPage = () => {
         }}
         tools={[]}
         projectId={projectId || ''}
-        onExport={() => {}}
-        exportLoading={false}
+        onExport={handleExport}
+        exportLoading={exportLoading}
       >
         <div className="space-y-4">
           {/* Quality Gate */}
