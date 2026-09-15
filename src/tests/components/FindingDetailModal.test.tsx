@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi } from 'vitest';
 import FindingDetailModal from '../../components/FindingDetailModal';
 import { ToastProvider } from '../../components/Toast';
+import { api } from '../../services/api';
 import type { Finding } from '../../types';
 
 vi.mock('../../hooks/useAuth', () => ({
@@ -62,5 +63,52 @@ describe('FindingDetailModal', () => {
 
     const safeLink = screen.getByRole('link', { name: /cwe.mitre.org/i });
     expect(safeLink).toHaveAttribute('href', 'https://cwe.mitre.org/data/definitions/79.html');
+  });
+
+  test('hasSearched resets when navigating to a different finding via Next', async () => {
+    api.issues.findByFindingKey = vi.fn().mockResolvedValue(null);
+
+    const findingA: Finding = { id: 'a', severity: 'Critical', title: 'Finding A', tool: 'sonar' };
+    const findingB: Finding = { id: 'b', severity: 'High', title: 'Finding B', tool: 'sonar' };
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ToastProvider>
+            <FindingDetailModal
+              finding={findingA}
+              projectId="p1"
+              scanId="s1"
+              onClose={() => {}}
+              hasNext
+              onNext={() => {}}
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open in Issue Tracker/ }));
+    await screen.findByRole('button', { name: /Create issue/ });
+
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ToastProvider>
+            <FindingDetailModal
+              finding={findingB}
+              projectId="p1"
+              scanId="s1"
+              onClose={() => {}}
+              hasNext
+              onNext={() => {}}
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(screen.queryByRole('button', { name: /Create issue/ })).not.toBeInTheDocument();
   });
 });

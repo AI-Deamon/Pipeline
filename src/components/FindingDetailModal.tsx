@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Bug, Plus, Loader2, ExternalLink, Package, Shield, Zap } from 'lucide-react';
@@ -44,6 +44,10 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
 }) => {
   const navigate = useNavigate();
   const [hasSearched, setHasSearched] = useState(false);
+
+  useEffect(() => {
+    setHasSearched(false);
+  }, [finding?.id, finding?.tool]);
 
   const isOpen = !!finding;
   const { canAssignIssues } = useRbac();
