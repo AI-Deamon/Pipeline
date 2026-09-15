@@ -1,6 +1,23 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { test, expect } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { test, expect, vi } from 'vitest';
 import { FindingsTable } from '../../components/reports/FindingsTable';
+import { ToastProvider } from '../../components/Toast';
+
+vi.mock('../../hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAuthenticated: true,
+    role: 'admin',
+    permissions: {},
+    currentUser: { id: 'u-1', username: 'admin', role: 'admin' },
+    login: vi.fn(),
+    logout: vi.fn(),
+    isLoading: false,
+    refreshUser: vi.fn(),
+  }),
+  AuthProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
 
 const findings = [
   { id: '1', severity: 'Critical', title: 'A', tool: 'sonar' },
@@ -41,4 +58,27 @@ test('severity badge counts are scoped to the active tool filter', () => {
 test('search input has an accessible label', () => {
   render(<FindingsTable findings={findings} selectedTool="sonar" />);
   expect(screen.getByLabelText('Search findings')).toBeInTheDocument();
+});
+
+test('the currently open finding row is visually marked', () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ToastProvider>
+          <FindingsTable findings={findings} selectedTool="sonar" />
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+
+  // Switch to list view so each finding's title renders as its own row.
+  fireEvent.click(screen.getByText('List'));
+
+  const row = screen.getByText('A').closest('tr');
+  expect(row).not.toHaveClass('bg-teal-50');
+
+  fireEvent.click(row!);
+
+  expect(row).toHaveClass('bg-teal-50');
 });

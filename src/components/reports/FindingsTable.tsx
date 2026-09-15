@@ -272,7 +272,9 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                                 {group.findings.slice(0, 3).map((finding) => (
                                   <div
                                     key={finding.id || finding.title}
-                                    className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 rounded px-2 py-1"
+                                    className={`flex items-center gap-2 text-sm text-slate-600 cursor-pointer rounded px-2 py-1 ${
+                                      selectedFinding?.id === finding.id ? 'bg-teal-50' : 'hover:bg-slate-50'
+                                    }`}
                                     onClick={() => setSelectedFinding(finding)}
                                   >
                                     <span className={`w-1.5 h-1.5 rounded-full ${getSeverityDotColor(finding.severity)}`} />
@@ -319,7 +321,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                   filteredFindings.map((finding, idx) => (
                     <tr
                       key={finding.id || idx}
-                      className="hover:bg-slate-50 cursor-pointer"
+                      className={`cursor-pointer ${selectedFinding?.id === finding.id ? 'bg-teal-50' : 'hover:bg-slate-50'}`}
                       onClick={() => setSelectedFinding(finding)}
                     >
                       <td className="px-4 py-3">

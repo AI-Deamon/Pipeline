@@ -477,7 +477,9 @@ const UnifiedReportPage = () => {
               filteredFindings.map((finding, idx) => (
                 <tr
                   key={idx}
-                  className="border-b border-slate-100 cursor-pointer transition-colors hover:bg-slate-50"
+                  className={`border-b border-slate-100 cursor-pointer transition-colors ${
+                    selectedFinding === finding ? 'bg-teal-50' : 'hover:bg-slate-50'
+                  }`}
                   tabIndex={0}
                   role="button"
                   onClick={() => setSelectedFinding(finding)}
