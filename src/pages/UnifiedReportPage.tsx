@@ -7,7 +7,7 @@ import SeverityPieChart from '../components/SeverityPieChart';
 import ToolBarChart from '../components/ToolBarChart';
 import TrendLineChart from '../components/TrendLineChart';
 import TableOfContents from '../components/TableOfContents';
-import FilterBar from '../components/FilterBar';
+import { FindingsFilterBar } from '../components/reports/FindingsFilterBar';
 import FindingDetailModal from '../components/FindingDetailModal';
 import { RiskGauge } from '../components/RiskGauge';
 import { ReportVariantNav } from '../components/reports/ReportVariantNav';
@@ -39,8 +39,8 @@ const UnifiedReportPage = () => {
   const [exporting, setExporting] = useState(false);
   const [currentSection, setCurrentSection] = useState<string>('Summary');
   const [search, setSearch] = useState('');
-  const [selectedSeverities, setSelectedSeverities] = useState<string[]>([]);
-  const [selectedTools, setSelectedTools] = useState<string[]>([]);
+  const [selectedSeverity, setSelectedSeverity] = useState<string>('All');
+  const [selectedToolFilter, setSelectedToolFilter] = useState<string>('All');
   const [reportType, setReportType] = useState<'technical' | 'executive' | 'compliance' | 'comparison'>('technical');
   const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
 
@@ -195,6 +195,12 @@ const UnifiedReportPage = () => {
   }, {});
   const toolSummariesArray = Object.values(toolSummaries);
 
+  const severityCounts = report.findings.reduce<Record<string, number>>((counts, f) => {
+    counts.All = (counts.All || 0) + 1;
+    counts[f.severity] = (counts[f.severity] || 0) + 1;
+    return counts;
+  }, {});
+
   const filteredFindings = report.findings.filter(f => {
     // Search filter
     if (search) {
@@ -207,11 +213,11 @@ const UnifiedReportPage = () => {
       if (!matches) return false;
     }
     // Severity filter
-    if (selectedSeverities.length > 0 && !selectedSeverities.includes(f.severity)) {
+    if (selectedSeverity !== 'All' && f.severity !== selectedSeverity) {
       return false;
     }
     // Tool filter
-    if (selectedTools.length > 0 && f.tool && !selectedTools.includes(f.tool)) {
+    if (selectedToolFilter !== 'All' && f.tool !== selectedToolFilter) {
       return false;
     }
     return true;
@@ -471,14 +477,15 @@ const UnifiedReportPage = () => {
 
       {/* Filter Bar */}
       <div className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm pt-2 pb-2 -mx-8 px-8">
-        <FilterBar
+        <FindingsFilterBar
           search={search}
           onSearchChange={setSearch}
-          selectedSeverities={selectedSeverities}
-          onSeverityChange={setSelectedSeverities}
-          selectedTools={selectedTools}
-          onToolChange={setSelectedTools}
+          severityFilter={selectedSeverity}
+          onSeverityChange={setSelectedSeverity}
+          toolFilter={selectedToolFilter}
+          onToolChange={setSelectedToolFilter}
           availableTools={availableTools}
+          severityCounts={severityCounts}
         />
       </div>
 
