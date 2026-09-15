@@ -18,6 +18,12 @@ import { useScanHistory } from '../hooks/useScanHistory';
 import { getSeverityColor } from '../utils/risk';
 import { ArrowLeft, ChevronLeft, Download, History, ShieldOff, ListChecks } from 'lucide-react';
 
+// Hoisted to module scope so it's a stable reference across renders — as a
+// fresh array literal inside the component it would be a new identity every
+// render/keystroke, tearing down and rebuilding the IntersectionObserver
+// effect below unnecessarily.
+const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
+
 const UnifiedReportPage = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
@@ -43,7 +49,6 @@ const UnifiedReportPage = () => {
   const [selectedSeverity, setSelectedSeverity] = useState<string>('All');
   const [selectedToolFilter, setSelectedToolFilter] = useState<string>('All');
   const [reportType, setReportType] = useState<'technical' | 'executive' | 'compliance' | 'comparison'>('technical');
-  const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
 
   // Fetch a severity summary per scan (for the scan selector options)
   const scanSummaryQueries = useQueries({
@@ -55,8 +60,10 @@ const UnifiedReportPage = () => {
   });
 
   // scans is sorted newest-first (useScanHistory), so the entry right after the
-  // selected scan is the previous one.
-  const previousScanId = scans[scans.findIndex((s) => s.scan_id === selectedScanId) + 1]?.scan_id;
+  // selected scan is the previous one. A findIndex miss (-1) must NOT resolve
+  // to scans[0] — that would make the newest scan its own "previous scan."
+  const selectedScanIndex = scans.findIndex((s) => s.scan_id === selectedScanId);
+  const previousScanId = selectedScanIndex === -1 ? undefined : scans[selectedScanIndex + 1]?.scan_id;
   const { data: previousReport } = useQuery({
     queryKey: ['unified-report', projectId, previousScanId],
     queryFn: () => api.reports.getUnified(projectId!, previousScanId),
@@ -101,7 +108,9 @@ const UnifiedReportPage = () => {
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
-  }, [report, sections]);
+    // `sections` is a module-level constant now (stable identity), so it's
+    // intentionally not a dependency here.
+  }, [report]);
 
   const handleExport = async (format: 'pdf' | 'html') => {
     setExporting(true);
@@ -238,12 +247,23 @@ const UnifiedReportPage = () => {
     ? filteredFindings.find((f) => f.id === openFindingId) ?? null
     : null;
   const setSelectedFinding = (finding: Finding | null) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (finding) next.set('finding', finding.id);
-      else next.delete('finding');
-      return next;
-    });
+    // Only push a new history entry on a null -> finding (opening) or
+    // finding -> null (closing) transition, so Back closes the panel.
+    // Swapping one already-open finding for another (Prev/Next triage)
+    // must use `replace` — otherwise arrow-keying through N findings pushes
+    // N history entries and Back no longer closes the panel, it walks
+    // backward through the triage session one finding at a time.
+    const isCurrentlyOpen = !!searchParams.get('finding');
+    const isOpenCloseTransition = isCurrentlyOpen !== !!finding;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (finding) next.set('finding', finding.id);
+        else next.delete('finding');
+        return next;
+      },
+      { replace: !isOpenCloseTransition },
+    );
   };
 
   return (
@@ -281,8 +301,8 @@ const UnifiedReportPage = () => {
         <select
           value={reportType}
           onChange={(e) => setReportType(e.target.value as typeof reportType)}
-          aria-label="Export format"
-          title="Controls the export format, not the on-screen report"
+          aria-label="Export format / view"
+          title="Controls the export format; the Comparison option also switches the on-screen report to a comparison view"
           className="px-3 py-2 border border-slate-300 rounded-lg text-sm transition-colors hover:border-slate-400 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
         >
           <option value="technical">Technical export</option>
@@ -574,7 +594,7 @@ const UnifiedReportPage = () => {
       <FindingDetailModal
         finding={selectedFinding}
         projectId={projectId}
-        scanId={selectedScanId ?? undefined}
+        scanId={selectedScanId || undefined}
         onClose={() => setSelectedFinding(null)}
         onPrev={() => {
           if (!selectedFinding) return;

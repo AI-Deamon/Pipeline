@@ -1,6 +1,6 @@
 /** @jsxImportSource react */
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { vi, beforeEach, afterEach, test, expect, describe } from 'vitest';
 import UnifiedReportPage from '../../pages/UnifiedReportPage';
 import { api } from '../../services/api';
@@ -13,6 +13,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const LocationProbe = () => {
   const location = useLocation();
   return <div data-testid="location-probe">{location.pathname + location.search}</div>;
+};
+
+// Lets a test trigger an in-memory "browser back" without going through real
+// window.history, mirroring how a user's Back button would behave.
+const BackButtonProbe = () => {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Simulate back
+    </button>
+  );
 };
 
 vi.mock('../../hooks/useAuth', () => ({
@@ -101,7 +112,7 @@ describe('UnifiedReportPage', () => {
         </ToastProvider>
       </QueryClientProvider>
     );
-    expect(await screen.findByLabelText('Export format')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Export format / view')).toBeInTheDocument();
   });
 
   test('clicking a TOC entry scrolls its section into view', async () => {
@@ -254,5 +265,52 @@ describe('UnifiedReportPage', () => {
     (await screen.findByText('Finding One')).click();
     expect(await screen.findByText('Finding details')).toBeInTheDocument();
     expect(screen.getByTestId('location-probe').textContent).toContain('finding=f1');
+  });
+
+  test('Next/Prev triage navigation replaces history instead of pushing, so Back closes the panel in one step', async () => {
+    api.reports.getUnified = vi.fn().mockResolvedValue({
+      project_id: 'test-project', scan_id: 'test-scan', total_findings: 2,
+      severity: { critical: 2, high: 0, medium: 0, low: 0, info: 0 },
+      findings: [
+        { id: 'f1', severity: 'Critical', title: 'Finding One', tool: 'zap' },
+        { id: 'f2', severity: 'Critical', title: 'Finding Two', tool: 'zap' },
+      ],
+      generated_at: new Date().toISOString(),
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <LocationProbe />
+            <BackButtonProbe />
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+
+    // Open the first finding (a null -> finding transition: this pushes).
+    (await screen.findByText('Finding One')).click();
+    expect(await screen.findByText('Finding details')).toBeInTheDocument();
+    expect(screen.getByTestId('location-probe').textContent).toContain('finding=f1');
+
+    // Navigate to the next finding (a finding -> finding transition: this
+    // must replace, not push, or Back below would land on f1 instead of
+    // closing the panel).
+    screen.getByRole('button', { name: 'Next finding' }).click();
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('location-probe').textContent).toContain('finding=f2');
+    });
+
+    // One Back from here must close the panel entirely (land on the
+    // pre-open entry), not step back to finding=f1.
+    screen.getByRole('button', { name: 'Simulate back' }).click();
+    await vi.waitFor(() => {
+      expect(screen.getByTestId('location-probe').textContent).not.toContain('finding=');
+    });
+    expect(screen.queryByText('Finding details')).not.toBeInTheDocument();
   });
 });
