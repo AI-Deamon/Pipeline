@@ -14,6 +14,8 @@ interface SidePanelProps {
   hasPrev?: boolean;
   hasNext?: boolean;
   position?: string;
+  onAction?: () => void;
+  actionKey?: string;
 }
 
 export function SidePanel({
@@ -28,20 +30,23 @@ export function SidePanel({
   hasPrev = false,
   hasNext = false,
   position,
+  onAction,
+  actionKey,
 }: SidePanelProps) {
   const { ref: focusTrapRef } = useFocusTrap({ onClose });
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleArrows = (e: KeyboardEvent) => {
+    const handleKeys = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       if (e.key === 'ArrowLeft' && hasPrev) onPrev?.();
       if (e.key === 'ArrowRight' && hasNext) onNext?.();
+      if (actionKey && e.key.toLowerCase() === actionKey.toLowerCase()) onAction?.();
     };
-    document.addEventListener('keydown', handleArrows);
-    return () => document.removeEventListener('keydown', handleArrows);
-  }, [isOpen, hasPrev, hasNext, onPrev, onNext]);
+    document.addEventListener('keydown', handleKeys);
+    return () => document.removeEventListener('keydown', handleKeys);
+  }, [isOpen, hasPrev, hasNext, onPrev, onNext, onAction, actionKey]);
 
   if (!isOpen) return null;
 

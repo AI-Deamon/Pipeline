@@ -143,6 +143,8 @@ const FindingDetailModal: React.FC<FindingDetailModalProps> = ({
       hasNext={hasNext}
       position={position}
       footerContent={footerContent}
+      actionKey="c"
+      onAction={hasSearched && !matchedIssue ? handleCreateIssue : undefined}
     >
         <div className="mb-4">
           <Badge variant={severityVariant[finding.severity] || 'default'} size="md">

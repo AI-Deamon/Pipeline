@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi } from 'vitest';
@@ -110,5 +110,67 @@ describe('FindingDetailModal', () => {
     );
 
     expect(screen.queryByRole('button', { name: /Create issue/ })).not.toBeInTheDocument();
+  });
+
+  test('pressing C triggers Create issue when a match search has already run and found nothing', async () => {
+    api.issues.findByFindingKey = vi.fn().mockResolvedValue(null);
+    api.issues.create = vi.fn().mockResolvedValue({ id: 42 });
+
+    const finding: Finding = { id: 'a', severity: 'Critical', title: 'Finding A', tool: 'sonar' };
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ToastProvider>
+            <FindingDetailModal
+              finding={finding}
+              projectId="p1"
+              scanId="s1"
+              onClose={() => {}}
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open in Issue Tracker/ }));
+    await screen.findByRole('button', { name: /Create issue/ });
+
+    fireEvent.keyDown(document, { key: 'c' });
+
+    await act(async () => {
+      await vi.waitFor(() => expect(api.issues.create).toHaveBeenCalled());
+    });
+  });
+
+  test('pressing C does nothing before a search has run (gate not met)', async () => {
+    api.issues.findByFindingKey = vi.fn().mockResolvedValue(null);
+    api.issues.create = vi.fn().mockResolvedValue({ id: 42 });
+
+    const finding: Finding = { id: 'a', severity: 'Critical', title: 'Finding A', tool: 'sonar' };
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ToastProvider>
+            <FindingDetailModal
+              finding={finding}
+              projectId="p1"
+              scanId="s1"
+              onClose={() => {}}
+            />
+          </ToastProvider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    await screen.findByRole('button', { name: /Open in Issue Tracker/ });
+
+    fireEvent.keyDown(document, { key: 'c' });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(api.issues.create).not.toHaveBeenCalled();
   });
 });
