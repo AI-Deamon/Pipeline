@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { ReportSummary, Scan, Finding } from '../types';
 
@@ -57,6 +57,15 @@ const ProjectReportsPage = () => {
       .filter((s: Scan) => s.state === 'COMPLETED')
       .sort((a: Scan, b: Scan) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
   }, [scans]);
+
+  // Fetch a severity summary per completed scan (for the scan selector options)
+  const scanSummaryQueries = useQueries({
+    queries: completedScans.map((s: Scan) => ({
+      queryKey: ['reportSummary', projectId, s.scan_id],
+      queryFn: () => api.reports.getSummary(projectId!, s.scan_id),
+      enabled: !!projectId,
+    })),
+  });
 
   // Get current and previous scan for delta calculation
   const currentScanIndex = useMemo(() => {
@@ -297,11 +306,15 @@ const ProjectReportsPage = () => {
             aria-label="Select scan"
             className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 transition-colors focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
           >
-            {completedScans.map((s: Scan, idx: number) => (
-              <option key={s.scan_id} value={s.scan_id}>
-                Scan #{completedScans.length - idx} — {s.scan_id.slice(0, 8)}… ({new Date(s.created_at || '').toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
-              </option>
-            ))}
+            {completedScans.map((s: Scan, idx: number) => {
+              const sev = scanSummaryQueries[idx]?.data?.severity;
+              const countsLabel = sev ? ` — ${sev.critical}C ${sev.high}H ${sev.medium}M` : '';
+              return (
+                <option key={s.scan_id} value={s.scan_id}>
+                  Scan #{completedScans.length - idx} — {s.scan_id.slice(0, 8)}…{countsLabel} ({new Date(s.created_at || '').toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
+                </option>
+              );
+            })}
           </select>
         </div>
       )}

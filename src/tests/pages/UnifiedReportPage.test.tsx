@@ -195,6 +195,42 @@ describe('UnifiedReportPage', () => {
     expect(select).toHaveValue('scan-2');
   });
 
+  test('scan selector options show severity counts', async () => {
+    // Note: uses vi.waitFor (rather than testing-library's own findBy*/waitFor)
+    // to poll for async render completion. In this React 19 + RTL 16 + Vitest 4
+    // combination, testing-library's own waitFor can resolve/reject on its
+    // first check instead of polling on pages with several chained async
+    // effects/queries; vi.waitFor polls reliably against the same real
+    // (mocked) render output.
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    api.scans.getHistory = vi.fn().mockResolvedValue([
+      { scan_id: 'scan-1', state: 'COMPLETED', created_at: new Date().toISOString() },
+      { scan_id: 'scan-2', state: 'COMPLETED', created_at: new Date().toISOString() },
+    ]);
+    api.reports.getSummary = vi.fn().mockImplementation((_pid: string, scanId: string) =>
+      Promise.resolve({
+        project_id: 'test-project',
+        total_findings: 0,
+        severity: { critical: scanId === 'scan-1' ? 3 : 0, high: 1, medium: 0, low: 0, info: 0 },
+        tools: [],
+      })
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={["/projects/test-project/reports/unified"]}>
+            <Routes>
+              <Route path="/projects/:projectId/reports/unified" element={<UnifiedReportPage />} />
+            </Routes>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    await vi.waitFor(() => {
+      expect(screen.getByRole('option', { name: /3C 1H/ })).toBeInTheDocument();
+    });
+  });
+
   test('browser back closes the open finding panel before leaving the page', async () => {
     api.reports.getUnified = vi.fn().mockResolvedValue({
       project_id: 'test-project', scan_id: 'test-scan', total_findings: 1,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useQueries } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { UnifiedReport, TrendData, Finding, ComplianceReport } from '../types';
 import SeverityPieChart from '../components/SeverityPieChart';
@@ -41,6 +42,15 @@ const UnifiedReportPage = () => {
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
   const [reportType, setReportType] = useState<'technical' | 'executive' | 'compliance' | 'comparison'>('technical');
   const sections = ['Summary', 'Severity Distribution', 'Tool Comparison', 'Historical Trend', 'Compliance', 'Findings'];
+
+  // Fetch a severity summary per scan (for the scan selector options)
+  const scanSummaryQueries = useQueries({
+    queries: scans.map((s) => ({
+      queryKey: ['reportSummary', projectId, s.scan_id],
+      queryFn: () => api.reports.getSummary(projectId!, s.scan_id),
+      enabled: !!projectId,
+    })),
+  });
 
   useEffect(() => {
     if (scans.length > 0 && !selectedScanId) {
@@ -292,11 +302,15 @@ const UnifiedReportPage = () => {
             aria-label="Select scan"
             className="flex-1 text-sm border-slate-200 rounded-lg px-3 py-2 transition-colors focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
           >
-            {scans.map((s) => (
-              <option key={s.scan_id} value={s.scan_id}>
-                Scan {s.scan_id.slice(0, 8)}… ({new Date(s.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
-              </option>
-            ))}
+            {scans.map((s, idx) => {
+              const sev = scanSummaryQueries[idx]?.data?.severity;
+              const countsLabel = sev ? ` — ${sev.critical}C ${sev.high}H ${sev.medium}M` : '';
+              return (
+                <option key={s.scan_id} value={s.scan_id}>
+                  Scan {s.scan_id.slice(0, 8)}…{countsLabel} ({new Date(s.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})
+                </option>
+              );
+            })}
           </select>
         </div>
       )}
