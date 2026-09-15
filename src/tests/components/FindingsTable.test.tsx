@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { test, expect, vi } from 'vitest';
@@ -102,4 +102,35 @@ test('the currently open finding row is visually marked', () => {
   fireEvent.click(row!);
 
   expect(row).toHaveClass('bg-teal-50');
+});
+
+test('New badge: findings present in the previous scan are not badged', () => {
+  const previousKeys = new Set(['sonar:1']); // finding id "1"/sonar was present before
+  render(<FindingsTable findings={findings} selectedTool="sonar" previousScanFindingKeys={previousKeys} />);
+
+  // Switch to list view so each finding's title renders as its own row.
+  fireEvent.click(screen.getByText('List'));
+
+  const row = screen.getByText('A').closest('tr');
+  expect(row).not.toBeNull();
+  expect(within(row!).queryByText('New')).not.toBeInTheDocument();
+});
+
+test('New badge: findings absent from the previous scan set are badged', () => {
+  const previousKeys = new Set<string>(); // nothing was present before — everything is new
+  render(<FindingsTable findings={findings} selectedTool="sonar" previousScanFindingKeys={previousKeys} />);
+
+  fireEvent.click(screen.getByText('List'));
+
+  const row = screen.getByText('A').closest('tr');
+  expect(row).not.toBeNull();
+  expect(within(row!).getByText('New')).toBeInTheDocument();
+});
+
+test('New badge: omitted previousScanFindingKeys prop shows no badges', () => {
+  render(<FindingsTable findings={findings} selectedTool="sonar" />);
+
+  fireEvent.click(screen.getByText('List'));
+
+  expect(screen.queryByText('New')).not.toBeInTheDocument();
 });

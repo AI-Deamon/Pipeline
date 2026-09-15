@@ -4,6 +4,7 @@ import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'reac
 import { useQuery, useQueries } from '@tanstack/react-query';
 import { api } from '../services/api';
 import type { ReportSummary, Scan, Finding } from '../types';
+import { findingKey } from '../utils/scanDiff';
 
 interface LocationState {
   scanId?: string;
@@ -160,6 +161,22 @@ const ProjectReportsPage = () => {
     });
     return findings;
   }, [reports]);
+
+  // Fetch the previous completed scan's reports so we can badge findings that are
+  // new since that scan (completedScans is sorted newest-first).
+  const previousCompletedScan = completedScans[currentScanIndex + 1];
+  const { data: previousReports = [] } = useQuery({
+    queryKey: ['reports', projectId, previousCompletedScan?.scan_id],
+    queryFn: () => api.reports.getAll(projectId!, previousCompletedScan!.scan_id),
+    enabled: !!projectId && !!previousCompletedScan,
+  });
+  const previousScanFindingKeys = useMemo(() => {
+    const keys = new Set<string>();
+    (previousReports as ReportDetail[]).forEach((report) => {
+      report.findings?.forEach((finding) => keys.add(findingKey({ ...finding, tool: report.tool })));
+    });
+    return keys;
+  }, [previousReports]);
 
   if (isLoading) {
     return (
@@ -347,11 +364,12 @@ const ProjectReportsPage = () => {
         exportLoading={exportLoading}
       >
         {selectedTool ? (
-          <FindingsTable 
-            findings={allFindings} 
-            projectId={projectId} 
+          <FindingsTable
+            findings={allFindings}
+            projectId={projectId}
             scanId={selectedScanId}
             selectedTool={selectedTool}
+            previousScanFindingKeys={previousScanFindingKeys}
           />
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200 p-10 flex flex-col items-center justify-center h-full">

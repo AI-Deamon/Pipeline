@@ -4,6 +4,7 @@ import type { Finding } from '../../types';
 import FindingDetailModal from '../FindingDetailModal';
 import { FindingsFilterBar } from './FindingsFilterBar';
 import { getSeverityColor, getSeverityDotColor } from '../../utils/risk';
+import { findingKey } from '../../utils/scanDiff';
 
 const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bug; color: string; bg: string }> = {
   VULNERABILITY: { label: 'Security Vulnerabilities', icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50' },
@@ -16,9 +17,10 @@ interface FindingsTableProps {
   projectId?: string;
   scanId?: string;
   selectedTool?: string | null;
+  previousScanFindingKeys?: Set<string>; // from findingKey() over the previous scan's findings
 }
 
-export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: FindingsTableProps) => {
+export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previousScanFindingKeys }: FindingsTableProps) => {
   const [viewMode, setViewMode] = useState<'list' | 'grouped'>('grouped');
   const [severityFilter, setSeverityFilter] = useState<string>('All');
   const [toolFilter, setToolFilter] = useState<string>(selectedTool || 'All');
@@ -243,6 +245,9 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                                   >
                                     <span className={`w-1.5 h-1.5 rounded-full ${getSeverityDotColor(finding.severity)}`} />
                                     <span className="truncate">{finding.host || finding.package || finding.uri || 'Unknown'}</span>
+                                    {previousScanFindingKeys && !previousScanFindingKeys.has(findingKey(finding)) && (
+                                      <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-blue-100 text-blue-700 rounded">New</span>
+                                    )}
                                     <span className="text-xs text-slate-400 ml-auto">{finding.tool}</span>
                                   </div>
                                 ))}
@@ -293,7 +298,12 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
                           {finding.severity}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-900 max-w-xs truncate">{finding.title}</td>
+                      <td className="px-4 py-3 text-sm text-slate-900 max-w-xs truncate">
+                        {finding.title}
+                        {previousScanFindingKeys && !previousScanFindingKeys.has(findingKey(finding)) && (
+                          <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold bg-blue-100 text-blue-700 rounded">New</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm text-slate-600 font-mono">
                         {finding.host || finding.package || finding.uri || '-'}
                       </td>
