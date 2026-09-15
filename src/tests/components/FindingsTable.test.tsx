@@ -37,3 +37,8 @@ test('severity badge counts are scoped to the active tool filter', () => {
   expect(screen.getByRole('button', { name: 'Critical 1' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'High 1' })).not.toBeInTheDocument();
 });
+
+test('search input has an accessible label', () => {
+  render(<FindingsTable findings={findings} selectedTool="sonar" />);
+  expect(screen.getByLabelText('Search findings')).toBeInTheDocument();
+});

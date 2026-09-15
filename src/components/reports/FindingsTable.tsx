@@ -208,6 +208,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool }: Fin
               <input
                 type="text"
                 placeholder="Search by title, rule, type, package, or host…"
+                aria-label="Search findings"
                 value={searchText}
                 onChange={(e) => setSearchText(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600"
