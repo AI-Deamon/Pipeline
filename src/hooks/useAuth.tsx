@@ -46,11 +46,35 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; role: Role } | null>(null);
 
-  // Check token expiry on mount
+  // Bootstrap the session on mount. A hard page reload has no legacy
+  // sessionStorage token, but the backend's httpOnly access/refresh cookies
+  // may still be valid — without this, a refreshed tab always looks logged
+  // out even with a live session, since `isAuthenticated` is derived from
+  // `token` alone. Skip the network round-trip when a legacy token already
+  // resolved isAuthenticated=true above (grace-period path).
   useEffect(() => {
-    // For cookie-based auth, we rely on the backend to reject expired tokens.
-    // No client-side expiry check needed — the httpOnly cookie handles it.
-    setIsLoading(false);
+    if (token) {
+      setIsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
+        if (!cancelled && response.ok) {
+          const data = await response.json();
+          setToken(data.access_token);
+        }
+      } catch {
+        // No valid session cookie (or offline) — stay logged out, same as before.
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const login = useCallback((newToken: string) => {
