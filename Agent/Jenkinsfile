@@ -342,19 +342,36 @@ def dependencyCheckStage() {
         withEnv(javaEnv) {
             catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                 def firstArgs = argsWithKey.join(' ')
+                // Exit-code capture avoids `cmd | tee log; \${PIPESTATUS[0]}` — Jenkins'
+                // `sh` step runs /bin/sh, which is dash on this host, and dash has no
+                // PIPESTATUS array at all: that substitution is a fatal "Bad substitution"
+                // that aborts the whole script (confirmed directly against this host's
+                // /bin/sh). Running the command in a `( cmd; echo $? > file )` subshell
+                // ahead of the `| tee` keeps live console streaming for this (potentially
+                // 20+ minute) step while writing the real exit code to a file the pipe
+                // itself can't clobber — no bash-only array needed. The external `timeout`
+                // utility (coreutils, not a shell builtin) bounds the NVD full-update
+                // attempt on its own — a cold/stale local cache can need a multi-hundred-
+                // thousand-record sync that easily outlasts a short stage-level timeout —
+                // and treating that as equivalent to dependency-check's own "NVD update
+                // failed" exit code (2) lets it fall through to the existing
+                // --disableRetrieval retry instead of losing the whole stage to a hard
+                // Jenkins-level kill that never gives the tool a chance to fail gracefully.
                 sh """
                     mkdir -p "${odcData}"
-                    # First attempt: full NVD update
-                    ${odcCli} ${firstArgs} --data "${odcData}" 2>&1 | tee reports/dependency-check-cli.log
-                    ODC_EXIT=\${PIPESTATUS[0]}
-                    # If NVD update failed (exit code 2), retry with cached data
-                    if [ \$ODC_EXIT -eq 2 ]; then
+                    # First attempt: full NVD update, bounded so a slow/cold sync still
+                    # leaves time for the cached-data retry below within the stage timeout.
+                    ( timeout 1200 ${odcCli} ${firstArgs} --data "${odcData}"; echo \$? > /tmp/odc_exit_\$\$ ) 2>&1 | tee reports/dependency-check-cli.log
+                    ODC_EXIT=\$(cat /tmp/odc_exit_\$\$); rm -f /tmp/odc_exit_\$\$
+                    # If the NVD update failed (exit code 2) or was killed by the inner
+                    # timeout (124), retry with cached/incremental data only.
+                    if [ "\$ODC_EXIT" -eq 2 ] || [ "\$ODC_EXIT" -eq 124 ]; then
                         echo "" | tee -a reports/dependency-check-cli.log
-                        echo "=== NVD update failed — retrying with cached data (--disableRetrieval) ===" | tee -a reports/dependency-check-cli.log
-                        ${odcCli} ${firstArgs} --disableRetrieval --data "${odcData}" 2>&1 | tee -a reports/dependency-check-cli.log
-                        exit \${PIPESTATUS[0]}
+                        echo "=== NVD update failed or timed out (exit \$ODC_EXIT) — retrying with cached data (--disableRetrieval) ===" | tee -a reports/dependency-check-cli.log
+                        ( ${odcCli} ${firstArgs} --disableRetrieval --data "${odcData}"; echo \$? > /tmp/odc_exit_\$\$ ) 2>&1 | tee -a reports/dependency-check-cli.log
+                        ODC_EXIT=\$(cat /tmp/odc_exit_\$\$); rm -f /tmp/odc_exit_\$\$
                     fi
-                    exit \$ODC_EXIT
+                    exit "\$ODC_EXIT"
                 """
             }
         }
@@ -1202,7 +1219,13 @@ pipeline {
 
         stage('Dependency Check') {
             when { expression { shouldRun('dependency_check') } }
-            options { timeout(time: 15, unit: 'MINUTES') }  // finding #52
+            // 35 min: the inner NVD full-update attempt is itself bounded to 20 min
+            // (see dependencyCheckStage's `timeout 1200`), leaving room for the
+            // --disableRetrieval fallback pass and report generation afterward. A
+            // cold/stale local NVD cache needs a multi-hundred-thousand-record sync
+            // that a short stage timeout previously killed before the tool's own
+            // graceful fallback ever got a chance to run.
+            options { timeout(time: 35, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     dependencyCheckStage()
