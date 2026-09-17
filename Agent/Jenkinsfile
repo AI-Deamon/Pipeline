@@ -848,7 +848,16 @@ def zapScanStage() {
                 ZAP_API_BASE="http://127.0.0.1:$ZAP_PORT"
                 ZAP_READY=0
 
-                for i in {1..60}; do
+                # POSIX-portable retry loop (was `for i in {1..60}`, a bash-only
+                # brace expansion — Jenkins' `sh` step runs /bin/sh, which is
+                # dash on this system, and dash treats "{1..60}" as one literal
+                # word instead of a range. That silently turned this into a
+                # single-iteration loop: one ~15s check right after the 45s
+                # pre-wait, then immediate failure, even though ZAP (loading
+                # dozens of addons) was still mid-initialisation and just
+                # needed the rest of its intended ~10 minutes of retry budget.
+                i=1
+                while [ "$i" -le 60 ]; do
                     # Check process is alive
                     if ! kill -0 "$ZAP_PID" 2>/dev/null; then
                         echo "ZAP process died during wait loop"
@@ -879,6 +888,7 @@ def zapScanStage() {
 
                     echo "Check $i: $READY — retrying in 10s..."
                     sleep 10
+                    i=$((i + 1))
                 done
 
                 # Final verification
