@@ -29,13 +29,18 @@ def sample_findings():
         )
     ]
 
-def test_executive_html_excludes_findings(sample_findings):
+def test_executive_html_shows_top_findings_not_full_table(sample_findings):
     gen = UnifiedReportGenerator("p","s", sample_findings, report_type="executive")
     # Patch risk summary to avoid DB
-    with patch.object(gen, 'generate_risk_summary', return_value={"score": 80, "level": "Low Risk", "trend": "stable", "previous_score": 70}):
+    with patch.object(gen, 'generate_risk_summary', return_value={"score": 80, "level": "Low Risk", "trend": "stable", "previous_score": 70, "has_previous_scan": True}):
         html = gen.generate_html()
-    assert "Findings" not in html or "detailed findings" not in html.lower()
     assert "Executive Summary" in html
+    # The executive report renders a "Top Findings" table with the actual findings...
+    assert "Top Findings" in html
+    assert "SQL Injection" in html
+    assert "XSS" in html
+    # ...but not the full technical findings table (which titles itself "Findings (N total)").
+    assert f"Findings ({len(sample_findings)} total)" not in html
 
 def test_technical_html_includes_findings(sample_findings):
     gen = UnifiedReportGenerator("p","s", sample_findings, report_type="technical")

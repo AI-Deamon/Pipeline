@@ -4,6 +4,7 @@ Refactored from backend/nmap_system/reporter.py (2205 lines)
 """
 import html as html_module
 import json
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Literal
 from pathlib import Path
@@ -27,6 +28,36 @@ def _esc(s: str) -> str:
 
 _AMP_ENTITY = "&amp;"
 _CLOSING_TABLE_DIV = "</table></div>"
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_to_text(raw: str) -> str:
+    """Plain-text a tool-supplied string that may already contain HTML.
+
+    ZAP's own description/recommendation fields arrive with embedded HTML
+    ("<p>...</p>"). They — and raw_evidence, transitively — can also carry
+    content ZAP captured from the SCANNED site itself, i.e. attacker-
+    controlled text. Stripping tags here, before _esc() runs, means neither
+    case can render as live markup in the report: ZAP's own formatting reads
+    as clean text, and anything reflected from a scanned target can't
+    execute as HTML/script inside a security tool's own output.
+    """
+    if not raw:
+        return ""
+    text = _TAG_RE.sub(" ", raw)
+    return " ".join(text.split())
+
+
+def _finding_cve_display(f: SecurityFinding) -> str:
+    """"CVE-2024-1234 (CVSS 9.8)" / "CVE-2024-1234" / "-" — thin formatting
+    of fields already on the object, no fallback logic, so this stays a
+    rendering-local helper rather than moving onto SecurityFinding."""
+    if not f.cve:
+        return "-"
+    if f.cvss_score is not None:
+        return f"{f.cve} (CVSS {f.cvss_score})"
+    return f.cve
 
 # Color constants
 DARK_BLUE = colors.HexColor("#1F3864")
@@ -55,6 +86,7 @@ class UnifiedReportGenerator:
         self.project_name = project_name
         self.report_type = report_type
         self.severity_summary = calculate_severity_summary(findings)
+        self._risk_summary_cache: Optional[dict] = None
 
     def _html_header(self) -> str:
         return f"""<!DOCTYPE html>
@@ -68,6 +100,7 @@ class UnifiedReportGenerator:
         .medium {{ color: #ca8a04; font-weight: bold; }}
         .low {{ color: #16a34a; }}
         table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        .detail td {{ background-color: #fafafa; font-size: 13px; padding: 8px 16px 16px 16px; }}
         th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
         th {{ background-color: #f2f2f2; }}
         .section {{ margin-bottom: 40px; }}
@@ -115,6 +148,19 @@ class UnifiedReportGenerator:
 </div>
 """
 
+    def _finding_detail_block(self, finding: SecurityFinding) -> str:
+        desc = _strip_html_to_text(finding.description)
+        reco = _strip_html_to_text(finding.recommendation)
+        if not desc and not reco:
+            return ""
+        parts = ['<tr class="detail"><td colspan="5">']
+        if desc:
+            parts.append(f'<div><strong>What:</strong> {_esc(desc)}</div>')
+        if reco:
+            parts.append(f'<div><strong>Fix:</strong> {_esc(reco)}</div>')
+        parts.append('</td></tr>')
+        return "".join(parts)
+
     def _html_technical_section(self) -> str:
         parts = [f"""<div class="section">
 <h2>Findings ({len(self.findings)} total)</h2>
@@ -123,29 +169,66 @@ class UnifiedReportGenerator:
         <th>Severity</th>
         <th>Title</th>
         <th>Tool</th>
-        <th>Host/Package</th>
+        <th>Location</th>
+        <th>CVE</th>
     </tr>
 """]
         for finding in self.findings:
             severity_class = finding.severity.lower()
-            safe_title = finding.title.replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-            safe_tool = finding.tool.replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;")
-            safe_host = (finding.host or finding.package or "-").replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;")
             parts.append(f"""
     <tr>
-        <td class="{severity_class}">{finding.severity}</td>
-        <td>{safe_title}</td>
-        <td>{safe_tool}</td>
-        <td>{safe_host}</td>
+        <td class="{severity_class}">{_esc(finding.severity)}</td>
+        <td>{_esc(finding.title)}</td>
+        <td>{_esc(finding.tool)}</td>
+        <td>{_esc(finding.location())}</td>
+        <td>{_esc(_finding_cve_display(finding))}</td>
     </tr>
 """)
+            parts.append(self._finding_detail_block(finding))
         parts.append(_CLOSING_TABLE_DIV)
         return "".join(parts)
 
+    def _posture_line(self) -> str:
+        risk = self.generate_risk_summary()
+        trend_word = {"improving": "down", "worsening": "up", "stable": "flat"}.get(risk["trend"], risk["trend"])
+        prev = risk.get("previous_score")
+        if risk.get("has_previous_scan") and prev is not None and prev != risk["score"]:
+            delta = risk["score"] - prev
+            trend_line = f"{trend_word} {abs(delta)} points since the last scan"
+        elif risk.get("has_previous_scan"):
+            trend_line = "unchanged since the last scan"
+        else:
+            trend_line = "no previous scan to compare"
+        return f"Risk score: {risk['score']}/100 ({risk['level']}) — {trend_line}."
+
+    def _top_findings(self, limit: int = 5) -> list:
+        order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        return sorted(
+            self.findings,
+            key=lambda f: order.get(f.severity.lower(), len(order)),
+        )[:limit]
+
     def _html_executive_section(self) -> str:
-        return """<div class="section">
+        posture = self._posture_line()
+        top = self._top_findings()
+        if top:
+            rows = "".join(
+                f"<tr><td>{_esc(f.severity)}</td><td>{_esc(f.title)}</td>"
+                f"<td>{_esc(f.tool)}</td><td>{_esc(f.location())}</td></tr>"
+                for f in top
+            )
+            top_table = f"""<table>
+    <tr><th>Severity</th><th>Title</th><th>Tool</th><th>Location</th></tr>
+    {rows}
+</table>"""
+        else:
+            top_table = "<p>No findings to report.</p>"
+
+        return f"""<div class="section">
 <h2>Executive Summary</h2>
-<p>This executive summary presents the high-level security posture. For detailed findings, please refer to a technical report.</p>
+<p>{_esc(posture)}</p>
+<h3>Top Findings</h3>
+{top_table}
 </div>
 """
 
@@ -250,16 +333,18 @@ class UnifiedReportGenerator:
             Paragraph("Severity", styles["BodyText"]),
             Paragraph("Title", styles["BodyText"]),
             Paragraph("Tool", styles["BodyText"]),
-            Paragraph("Host/Package", styles["BodyText"])
+            Paragraph("Location", styles["BodyText"]),
+            Paragraph("CVE", styles["BodyText"]),
         ]]
         for f in self.findings:
             findings_data.append([
                 Paragraph(str(f.severity), styles["BodyText"]),
                 Paragraph(str(f.title), styles["BodyText"]),
                 Paragraph(str(f.tool), styles["BodyText"]),
-                Paragraph(str(f.host or f.package or "-"), styles["BodyText"])
+                Paragraph(_esc(f.location()), styles["BodyText"]),
+                Paragraph(_esc(_finding_cve_display(f)), styles["BodyText"]),
             ])
-        findings_table = Table(findings_data, colWidths=[0.8*inch, 4.5*inch, 1.0*inch, 1.8*inch])
+        findings_table = Table(findings_data, colWidths=[0.7*inch, 3.0*inch, 0.8*inch, 2.3*inch, 1.3*inch])
         findings_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -269,17 +354,47 @@ class UnifiedReportGenerator:
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
         elements.append(findings_table)
+        elements.append(Spacer(1, 0.2 * inch))
+
+        for f in self.findings:
+            desc = _strip_html_to_text(f.description)
+            reco = _strip_html_to_text(f.recommendation)
+            if not desc and not reco:
+                continue
+            elements.append(Paragraph(f"<b>{_esc(f.title)}</b>", styles["BodyText"]))
+            if desc:
+                elements.append(Paragraph(f"<b>What:</b> {_esc(desc)}", styles["BodyText"]))
+            if reco:
+                elements.append(Paragraph(f"<b>Fix:</b> {_esc(reco)}", styles["BodyText"]))
+            elements.append(Spacer(1, 0.12 * inch))
+
         return elements
 
     def _pdf_executive_elements(self, styles) -> list:
-        return [
+        elements = [
             Paragraph("Executive Summary", styles['Heading2']),
-            Paragraph(
-                "This executive summary presents the high-level security posture. "
-                "For detailed findings, please refer to a technical report.",
-                styles['Normal']
-            ),
+            Paragraph(_esc(self._posture_line()), styles['Normal']),
+            Spacer(1, 0.2 * inch),
+            Paragraph("Top Findings", styles['Heading3']),
         ]
+
+        top = self._top_findings()
+        if top:
+            data = [["Severity", "Title", "Tool", "Location"]]
+            for f in top:
+                data.append([f.severity, f.title, f.tool, f.location()])
+            table = Table(data, colWidths=[0.9*inch, 3.5*inch, 1*inch, 2.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), DARK_BLUE),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ]))
+            elements.append(table)
+        else:
+            elements.append(Paragraph("No findings to report.", styles['Normal']))
+
+        return elements
 
     def _pdf_compliance_elements(self, styles) -> list:
         from app.services.reporting.compliance_mapper import ComplianceMapper
@@ -403,16 +518,38 @@ class UnifiedReportGenerator:
         finally:
             db.close()
 
+    def _has_previous_scan(self) -> bool:
+        from app.core.db import SessionLocal
+        from app.models.db_models import ScanDB
+
+        db = SessionLocal()
+        try:
+            previous_scan = (
+                db.query(ScanDB)
+                .filter(ScanDB.project_id == self.project_id)
+                .filter(ScanDB.scan_id != self.scan_id)
+                .filter(ScanDB.state == "COMPLETED")
+                .first()
+            )
+            return previous_scan is not None
+        finally:
+            db.close()
+
     def generate_risk_summary(self) -> dict:
+        if self._risk_summary_cache is not None:
+            return self._risk_summary_cache
+
         calculator = RiskCalculator()
         score = calculator.calculate(self.severity_summary)
 
         previous_severity = self._get_previous_scan_severity()
         previous_score = calculator.calculate(previous_severity)
 
-        return {
+        self._risk_summary_cache = {
             "score": score,
             "trend": calculator.get_trend(score, previous_score),
             "level": calculator.get_risk_level(score),
             "previous_score": previous_score,
+            "has_previous_scan": self._has_previous_scan(),
         }
+        return self._risk_summary_cache
