@@ -4,20 +4,44 @@ set -euxo pipefail
 # Install system packages
 apt-get update
 
-# Retry loop for apt in case of transient repo issues
+# curl/wget are load-bearing for every step below (ZAP/Trivy download over
+# wget). Installed on their own, separately from nmap: apt-get install is
+# atomic, so when nmap-common 403'd on the mirror in one build, it silently
+# took wget down with it too, and the *next* step then failed on "wget:
+# command not found" - masking the real error.
 for i in 1 2 3; do
     apt-get install -y --no-install-recommends \
         curl \
         wget \
         unzip \
         xz-utils \
-        nmap \
         ca-certificates && break || {
-        echo "apt-get install failed (attempt $i), retrying..."
+        echo "core apt-get install failed (attempt $i), retrying..."
         apt-get update
         sleep 2
     }
 done
+
+# nmap gets its own retry with backoff, and does not abort the build if the
+# mirror keeps 403'ing (seen repeatedly on nmap-common specifically, across
+# multiple Fastly edge IPs - looks like a mirror-side issue with that exact
+# package version, not one flaky node). Everything above it still succeeds
+# and the image still builds; missing nmap is loud in the build log instead
+# of taking down curl/wget/ZAP/Trivy with it.
+NMAP_OK=0
+for i in 1 2 3 4 5; do
+    if apt-get install -y --no-install-recommends nmap; then
+        NMAP_OK=1
+        break
+    fi
+    echo "nmap apt-get install failed (attempt $i), retrying in $((i * 5))s..."
+    apt-get update
+    sleep $((i * 5))
+done
+if [ "$NMAP_OK" -ne 1 ]; then
+    echo "WARNING: nmap install failed after 5 attempts - mirror issue, not a build blocker." >&2
+    echo "WARNING: image will ship without nmap; re-run the build later to pick it up." >&2
+fi
 
 # Finding #85: verify each downloaded release tarball's sha256 before
 # extracting. Both hashes below were pulled from GitHub's own Release API

@@ -25,3 +25,11 @@ services:
 
 volumes:
   jenkins_home:
+    # Explicit name, not just the compose-project-prefixed default. Without
+    # this, Compose silently resolves the mount below to "docker_jenkins_home"
+    # (project name "docker" + this key) - a *different*, older, incomplete
+    # volume that happened to already exist on this host - while every backup
+    # restore in migrate.sh populates the plain "jenkins_home" volume by name.
+    # The two never matched, so the container kept booting into stale/empty
+    # state no matter how many times the restore ran correctly.
+    name: jenkins_home
