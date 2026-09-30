@@ -191,7 +191,7 @@ class UnifiedReportGenerator:
         risk = self.generate_risk_summary()
         trend_word = {"improving": "down", "worsening": "up", "stable": "flat"}.get(risk["trend"], risk["trend"])
         prev = risk.get("previous_score")
-        if prev is not None and prev != risk["score"]:
+        if risk["has_previous_scan"]:
             delta = risk["score"] - prev
             trend_line = f"{trend_word} {abs(delta)} points since the last scan"
         else:
@@ -515,6 +515,23 @@ class UnifiedReportGenerator:
         finally:
             db.close()
 
+    def _has_previous_scan(self) -> bool:
+        from app.core.db import SessionLocal
+        from app.models.db_models import ScanDB
+
+        db = SessionLocal()
+        try:
+            previous_scan = (
+                db.query(ScanDB)
+                .filter(ScanDB.project_id == self.project_id)
+                .filter(ScanDB.scan_id != self.scan_id)
+                .filter(ScanDB.state == "COMPLETED")
+                .first()
+            )
+            return previous_scan is not None
+        finally:
+            db.close()
+
     def generate_risk_summary(self) -> dict:
         calculator = RiskCalculator()
         score = calculator.calculate(self.severity_summary)
@@ -527,4 +544,5 @@ class UnifiedReportGenerator:
             "trend": calculator.get_trend(score, previous_score),
             "level": calculator.get_risk_level(score),
             "previous_score": previous_score,
+            "has_previous_scan": self._has_previous_scan(),
         }

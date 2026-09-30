@@ -222,3 +222,28 @@ def test_executive_pdf_generates_without_error():
     )
     pdf_bytes = generator.generate_pdf()
     assert pdf_bytes[:4] == b"%PDF"
+
+
+def test_posture_line_does_not_fabricate_trend_on_first_scan():
+    """Regression test: a genuinely-first scan (no previous scan for this
+    project in the DB at all) must not claim a fabricated trend delta.
+    _get_previous_scan_severity() returns an all-zero dict (not None) when
+    there is no previous scan, which used to be misread as a real previous
+    score of 100 and produce sentences like "up 87 points since the last
+    scan" for a brand new project."""
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    findings = [
+        SecurityFinding(id="1", tool="zap", severity="Critical", title="SQLi", host="a"),
+        SecurityFinding(id="2", tool="zap", severity="High", title="XSS", host="b"),
+    ]
+    generator = UnifiedReportGenerator(
+        project_id="p-exec-first-scan", scan_id="s-exec-first-scan", findings=findings,
+        report_type="executive",
+    )
+
+    posture = generator._posture_line()
+
+    assert "since the last scan" not in posture
+    assert "no previous scan to compare" in posture
