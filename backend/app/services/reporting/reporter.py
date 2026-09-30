@@ -99,6 +99,7 @@ class UnifiedReportGenerator:
         .medium {{ color: #ca8a04; font-weight: bold; }}
         .low {{ color: #16a34a; }}
         table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        .detail td {{ background-color: #fafafa; font-size: 13px; padding: 8px 16px 16px 16px; }}
         th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
         th {{ background-color: #f2f2f2; }}
         .section {{ margin-bottom: 40px; }}
@@ -146,6 +147,19 @@ class UnifiedReportGenerator:
 </div>
 """
 
+    def _finding_detail_block(self, finding: SecurityFinding) -> str:
+        desc = _strip_html_to_text(finding.description)
+        reco = _strip_html_to_text(finding.recommendation)
+        if not desc and not reco:
+            return ""
+        parts = ['<tr class="detail"><td colspan="5">']
+        if desc:
+            parts.append(f'<div><strong>What:</strong> {_esc(desc)}</div>')
+        if reco:
+            parts.append(f'<div><strong>Fix:</strong> {_esc(reco)}</div>')
+        parts.append('</td></tr>')
+        return "".join(parts)
+
     def _html_technical_section(self) -> str:
         parts = [f"""<div class="section">
 <h2>Findings ({len(self.findings)} total)</h2>
@@ -154,22 +168,22 @@ class UnifiedReportGenerator:
         <th>Severity</th>
         <th>Title</th>
         <th>Tool</th>
-        <th>Host/Package</th>
+        <th>Location</th>
+        <th>CVE</th>
     </tr>
 """]
         for finding in self.findings:
             severity_class = finding.severity.lower()
-            safe_title = finding.title.replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-            safe_tool = finding.tool.replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;")
-            safe_host = (finding.host or finding.package or "-").replace("&", _AMP_ENTITY).replace("<", "&lt;").replace(">", "&gt;")
             parts.append(f"""
     <tr>
-        <td class="{severity_class}">{finding.severity}</td>
-        <td>{safe_title}</td>
-        <td>{safe_tool}</td>
-        <td>{safe_host}</td>
+        <td class="{severity_class}">{_esc(finding.severity)}</td>
+        <td>{_esc(finding.title)}</td>
+        <td>{_esc(finding.tool)}</td>
+        <td>{_esc(finding.location())}</td>
+        <td>{_esc(_finding_cve_display(finding))}</td>
     </tr>
 """)
+            parts.append(self._finding_detail_block(finding))
         parts.append(_CLOSING_TABLE_DIV)
         return "".join(parts)
 

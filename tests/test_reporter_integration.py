@@ -78,3 +78,71 @@ def test_finding_cve_display_no_cve():
 
     f = SecurityFinding(id="F1", tool="t", severity="High", title="T")
     assert _finding_cve_display(f) == "-"
+
+
+def test_technical_report_shows_full_finding_detail():
+    """Regression test for the real finding found during investigation:
+    High | Vulnerable JS Library | zap | - with no fix, no location."""
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    finding = SecurityFinding(
+        id="ZAP-1",
+        tool="zap",
+        severity="High",
+        title="Vulnerable JS Library",
+        description="<p>The identified library appears to be vulnerable.</p>",
+        uri="https://it-tools.tech/assets/index-61effc08.js",
+        recommendation="<p>Upgrade to the latest version of the affected library.</p>",
+        cwe_ids=["CWE-1395"],
+    )
+    generator = UnifiedReportGenerator(
+        project_id="p1", scan_id="s1", findings=[finding], report_type="technical"
+    )
+    html = generator.generate_html()
+
+    assert "https://it-tools.tech/assets/index-61effc08.js" in html
+    assert "The identified library appears to be vulnerable." in html
+    assert "Upgrade to the latest version of the affected library." in html
+    # the tool's own HTML must not survive as live markup
+    assert "<p>The identified library" not in html
+
+
+def test_technical_report_neutralizes_embedded_script_in_description():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    finding = SecurityFinding(
+        id="F1", tool="zap", severity="High", title="Reflected content",
+        description="<script>alert(document.cookie)</script>",
+    )
+    generator = UnifiedReportGenerator(project_id="p1", scan_id="s1", findings=[finding])
+    html = generator.generate_html()
+    assert "<script>" not in html
+
+
+def test_technical_report_location_prefers_file_path_over_host():
+    """Regression test for the real bug found: a SonarQube finding showed the
+    project key ("IT_tools_soner") instead of src/composable/validation.ts:6."""
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    finding = SecurityFinding(
+        id="S1", tool="sonar", severity="Medium", title="Code smell",
+        host="IT_tools_soner", file_path="src/composable/validation.ts", line_number=6,
+    )
+    generator = UnifiedReportGenerator(project_id="p1", scan_id="s1", findings=[finding])
+    html = generator.generate_html()
+    assert "src/composable/validation.ts:6" in html
+    assert "<td>IT_tools_soner</td>" not in html
+
+
+def test_technical_report_omits_detail_block_when_no_description_or_recommendation():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    finding = SecurityFinding(id="F1", tool="nmap", severity="Low", title="Open port", host="10.0.0.1", port=22)
+    generator = UnifiedReportGenerator(project_id="p1", scan_id="s1", findings=[finding])
+    html = generator.generate_html()
+    assert "<strong>What:</strong>" not in html
+    assert "<strong>Fix:</strong>" not in html
