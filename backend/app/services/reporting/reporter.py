@@ -4,6 +4,7 @@ Refactored from backend/nmap_system/reporter.py (2205 lines)
 """
 import html as html_module
 import json
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Literal
 from pathlib import Path
@@ -27,6 +28,36 @@ def _esc(s: str) -> str:
 
 _AMP_ENTITY = "&amp;"
 _CLOSING_TABLE_DIV = "</table></div>"
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html_to_text(raw: str) -> str:
+    """Plain-text a tool-supplied string that may already contain HTML.
+
+    ZAP's own description/recommendation fields arrive with embedded HTML
+    ("<p>...</p>"). They — and raw_evidence, transitively — can also carry
+    content ZAP captured from the SCANNED site itself, i.e. attacker-
+    controlled text. Stripping tags here, before _esc() runs, means neither
+    case can render as live markup in the report: ZAP's own formatting reads
+    as clean text, and anything reflected from a scanned target can't
+    execute as HTML/script inside a security tool's own output.
+    """
+    if not raw:
+        return ""
+    text = _TAG_RE.sub(" ", raw)
+    return " ".join(text.split())
+
+
+def _finding_cve_display(f: SecurityFinding) -> str:
+    """"CVE-2024-1234 (CVSS 9.8)" / "CVE-2024-1234" / "-" — thin formatting
+    of fields already on the object, no fallback logic, so this stays a
+    rendering-local helper rather than moving onto SecurityFinding."""
+    if not f.cve:
+        return "-"
+    if f.cvss_score is not None:
+        return f"{f.cve} (CVSS {f.cvss_score})"
+    return f.cve
 
 # Color constants
 DARK_BLUE = colors.HexColor("#1F3864")
