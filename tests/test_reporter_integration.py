@@ -146,3 +146,23 @@ def test_technical_report_omits_detail_block_when_no_description_or_recommendati
     html = generator.generate_html()
     assert "<strong>What:</strong>" not in html
     assert "<strong>Fix:</strong>" not in html
+
+
+def test_generate_pdf_grows_when_finding_has_description_and_recommendation():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    sparse = SecurityFinding(id="F1", tool="zap", severity="High", title="Vulnerable JS Library")
+    rich = SecurityFinding(
+        id="F1", tool="zap", severity="High", title="Vulnerable JS Library",
+        description="The identified library appears to be vulnerable.",
+        recommendation="Upgrade to the latest version of the affected library.",
+        uri="https://it-tools.tech/assets/index-61effc08.js",
+    )
+
+    sparse_pdf = UnifiedReportGenerator(project_id="p1", scan_id="s1", findings=[sparse]).generate_pdf()
+    rich_pdf = UnifiedReportGenerator(project_id="p1", scan_id="s1", findings=[rich]).generate_pdf()
+
+    assert sparse_pdf[:4] == b"%PDF"
+    assert rich_pdf[:4] == b"%PDF"
+    assert len(rich_pdf) > len(sparse_pdf)

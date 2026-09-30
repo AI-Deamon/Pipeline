@@ -295,16 +295,18 @@ class UnifiedReportGenerator:
             Paragraph("Severity", styles["BodyText"]),
             Paragraph("Title", styles["BodyText"]),
             Paragraph("Tool", styles["BodyText"]),
-            Paragraph("Host/Package", styles["BodyText"])
+            Paragraph("Location", styles["BodyText"]),
+            Paragraph("CVE", styles["BodyText"]),
         ]]
         for f in self.findings:
             findings_data.append([
                 Paragraph(str(f.severity), styles["BodyText"]),
                 Paragraph(str(f.title), styles["BodyText"]),
                 Paragraph(str(f.tool), styles["BodyText"]),
-                Paragraph(str(f.host or f.package or "-"), styles["BodyText"])
+                Paragraph(_esc(f.location()), styles["BodyText"]),
+                Paragraph(_esc(_finding_cve_display(f)), styles["BodyText"]),
             ])
-        findings_table = Table(findings_data, colWidths=[0.8*inch, 4.5*inch, 1.0*inch, 1.8*inch])
+        findings_table = Table(findings_data, colWidths=[0.7*inch, 3.0*inch, 0.8*inch, 2.3*inch, 1.3*inch])
         findings_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -314,6 +316,20 @@ class UnifiedReportGenerator:
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
         elements.append(findings_table)
+        elements.append(Spacer(1, 0.2 * inch))
+
+        for f in self.findings:
+            desc = _strip_html_to_text(f.description)
+            reco = _strip_html_to_text(f.recommendation)
+            if not desc and not reco:
+                continue
+            elements.append(Paragraph(f"<b>{_esc(f.title)}</b>", styles["BodyText"]))
+            if desc:
+                elements.append(Paragraph(f"<b>What:</b> {_esc(desc)}", styles["BodyText"]))
+            if reco:
+                elements.append(Paragraph(f"<b>Fix:</b> {_esc(reco)}", styles["BodyText"]))
+            elements.append(Spacer(1, 0.12 * inch))
+
         return elements
 
     def _pdf_executive_elements(self, styles) -> list:
