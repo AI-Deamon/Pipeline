@@ -86,6 +86,7 @@ class UnifiedReportGenerator:
         self.project_name = project_name
         self.report_type = report_type
         self.severity_summary = calculate_severity_summary(findings)
+        self._risk_summary_cache: Optional[dict] = None
 
     def _html_header(self) -> str:
         return f"""<!DOCTYPE html>
@@ -191,9 +192,11 @@ class UnifiedReportGenerator:
         risk = self.generate_risk_summary()
         trend_word = {"improving": "down", "worsening": "up", "stable": "flat"}.get(risk["trend"], risk["trend"])
         prev = risk.get("previous_score")
-        if risk["has_previous_scan"]:
+        if risk.get("has_previous_scan") and prev is not None and prev != risk["score"]:
             delta = risk["score"] - prev
             trend_line = f"{trend_word} {abs(delta)} points since the last scan"
+        elif risk.get("has_previous_scan"):
+            trend_line = "unchanged since the last scan"
         else:
             trend_line = "no previous scan to compare"
         return f"Risk score: {risk['score']}/100 ({risk['level']}) — {trend_line}."
@@ -533,16 +536,20 @@ class UnifiedReportGenerator:
             db.close()
 
     def generate_risk_summary(self) -> dict:
+        if self._risk_summary_cache is not None:
+            return self._risk_summary_cache
+
         calculator = RiskCalculator()
         score = calculator.calculate(self.severity_summary)
 
         previous_severity = self._get_previous_scan_severity()
         previous_score = calculator.calculate(previous_severity)
 
-        return {
+        self._risk_summary_cache = {
             "score": score,
             "trend": calculator.get_trend(score, previous_score),
             "level": calculator.get_risk_level(score),
             "previous_score": previous_score,
             "has_previous_scan": self._has_previous_scan(),
         }
+        return self._risk_summary_cache

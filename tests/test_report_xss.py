@@ -88,7 +88,7 @@ class TestXssPreventionInHtmlReports:
         assert "<script>" not in html
         assert "&lt;script&gt;bad&lt;/script&gt;" in html
 
-    def test_executive_report_does_not_render_findings(self):
+    def test_executive_report_renders_top_findings_escaped(self):
         findings = [_make_finding('<script>alert(1)</script>')]
         report = UnifiedReportGenerator(
             project_id="proj-001",
@@ -99,3 +99,7 @@ class TestXssPreventionInHtmlReports:
         )
         html = report.generate_html()
         assert "Executive Summary" in html
+        # The executive report now renders a "Top Findings" table containing the
+        # finding's title, so this must be HTML-escaped rather than absent.
+        assert "<script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
