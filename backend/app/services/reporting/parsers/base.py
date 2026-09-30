@@ -84,6 +84,31 @@ class SecurityFinding:
             "cwe_ids": list(self.cwe_ids),
         }
 
+    def location(self) -> str:
+        """Best-available human-readable location for this finding.
+
+        Priority: exact code location, then exact network/URL location, then
+        host, then package identity. This is a fact about the finding, not a
+        rendering concern — every consumer (report generator, a future API
+        field) gets the same answer instead of re-deriving this fallback
+        chain independently.
+        """
+        if self.file_path:
+            if self.line_number is not None:
+                return f"{self.file_path}:{self.line_number}"
+            return self.file_path
+        if self.uri:
+            return self.uri
+        if self.host:
+            if self.port:
+                return f"{self.host}:{self.port}"
+            return self.host
+        if self.package:
+            if self.package_version:
+                return f"{self.package}@{self.package_version}"
+            return self.package
+        return "-"
+
 
 def normalize_severity(severity: str) -> str:
     """Normalize severity to standard levels.
