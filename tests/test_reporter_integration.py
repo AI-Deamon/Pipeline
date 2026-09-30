@@ -166,3 +166,59 @@ def test_generate_pdf_grows_when_finding_has_description_and_recommendation():
     assert sparse_pdf[:4] == b"%PDF"
     assert rich_pdf[:4] == b"%PDF"
     assert len(rich_pdf) > len(sparse_pdf)
+
+
+def test_executive_report_replaces_static_boilerplate():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    findings = [
+        SecurityFinding(id="1", tool="zap", severity="Critical", title="SQLi", host="a"),
+        SecurityFinding(id="2", tool="zap", severity="High", title="XSS", host="b"),
+    ]
+    generator = UnifiedReportGenerator(
+        project_id="p-exec-1", scan_id="s-exec-1", findings=findings, report_type="executive"
+    )
+    html = generator.generate_html()
+
+    assert "This executive summary presents the high-level security posture" not in html
+    assert "Risk score:" in html
+    assert "SQLi" in html
+    assert "XSS" in html
+
+
+def test_executive_report_top_findings_ranked_by_severity():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    findings = [
+        SecurityFinding(id="1", tool="t", severity="Low", title="Low one"),
+        SecurityFinding(id="2", tool="t", severity="Critical", title="Critical one"),
+        SecurityFinding(id="3", tool="t", severity="Medium", title="Medium one"),
+    ]
+    generator = UnifiedReportGenerator(project_id="p-exec-2", scan_id="s-exec-2", findings=findings)
+    top = generator._top_findings(limit=2)
+
+    assert [f.title for f in top] == ["Critical one", "Medium one"]
+
+
+def test_executive_report_handles_zero_findings():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+
+    generator = UnifiedReportGenerator(
+        project_id="p-exec-3", scan_id="s-exec-3", findings=[], report_type="executive"
+    )
+    html = generator.generate_html()
+    assert "No findings to report." in html
+
+
+def test_executive_pdf_generates_without_error():
+    from app.services.reporting.reporter import UnifiedReportGenerator
+    from app.services.reporting.parsers.base import SecurityFinding
+
+    findings = [SecurityFinding(id="1", tool="zap", severity="Critical", title="SQLi", host="a")]
+    generator = UnifiedReportGenerator(
+        project_id="p-exec-4", scan_id="s-exec-4", findings=findings, report_type="executive"
+    )
+    pdf_bytes = generator.generate_pdf()
+    assert pdf_bytes[:4] == b"%PDF"

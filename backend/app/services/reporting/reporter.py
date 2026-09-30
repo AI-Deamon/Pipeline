@@ -187,10 +187,45 @@ class UnifiedReportGenerator:
         parts.append(_CLOSING_TABLE_DIV)
         return "".join(parts)
 
+    def _posture_line(self) -> str:
+        risk = self.generate_risk_summary()
+        trend_word = {"improving": "down", "worsening": "up", "stable": "flat"}.get(risk["trend"], risk["trend"])
+        prev = risk.get("previous_score")
+        if prev is not None and prev != risk["score"]:
+            delta = risk["score"] - prev
+            trend_line = f"{trend_word} {abs(delta)} points since the last scan"
+        else:
+            trend_line = "no previous scan to compare"
+        return f"Risk score: {risk['score']}/100 ({risk['level']}) — {trend_line}."
+
+    def _top_findings(self, limit: int = 5) -> list:
+        order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        return sorted(
+            self.findings,
+            key=lambda f: order.get(f.severity.lower(), len(order)),
+        )[:limit]
+
     def _html_executive_section(self) -> str:
-        return """<div class="section">
+        posture = self._posture_line()
+        top = self._top_findings()
+        if top:
+            rows = "".join(
+                f"<tr><td>{_esc(f.severity)}</td><td>{_esc(f.title)}</td>"
+                f"<td>{_esc(f.tool)}</td><td>{_esc(f.location())}</td></tr>"
+                for f in top
+            )
+            top_table = f"""<table>
+    <tr><th>Severity</th><th>Title</th><th>Tool</th><th>Location</th></tr>
+    {rows}
+</table>"""
+        else:
+            top_table = "<p>No findings to report.</p>"
+
+        return f"""<div class="section">
 <h2>Executive Summary</h2>
-<p>This executive summary presents the high-level security posture. For detailed findings, please refer to a technical report.</p>
+<p>{_esc(posture)}</p>
+<h3>Top Findings</h3>
+{top_table}
 </div>
 """
 
@@ -333,14 +368,30 @@ class UnifiedReportGenerator:
         return elements
 
     def _pdf_executive_elements(self, styles) -> list:
-        return [
+        elements = [
             Paragraph("Executive Summary", styles['Heading2']),
-            Paragraph(
-                "This executive summary presents the high-level security posture. "
-                "For detailed findings, please refer to a technical report.",
-                styles['Normal']
-            ),
+            Paragraph(_esc(self._posture_line()), styles['Normal']),
+            Spacer(1, 0.2 * inch),
+            Paragraph("Top Findings", styles['Heading3']),
         ]
+
+        top = self._top_findings()
+        if top:
+            data = [["Severity", "Title", "Tool", "Location"]]
+            for f in top:
+                data.append([f.severity, f.title, f.tool, f.location()])
+            table = Table(data, colWidths=[0.9*inch, 3.5*inch, 1*inch, 2.5*inch])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), DARK_BLUE),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ]))
+            elements.append(table)
+        else:
+            elements.append(Paragraph("No findings to report.", styles['Normal']))
+
+        return elements
 
     def _pdf_compliance_elements(self, styles) -> list:
         from app.services.reporting.compliance_mapper import ComplianceMapper
