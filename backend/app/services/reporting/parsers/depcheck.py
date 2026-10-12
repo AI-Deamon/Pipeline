@@ -1,9 +1,87 @@
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import httpx
 from .base import SecurityFinding, normalize_severity, ParseError
 
 logger = logging.getLogger(__name__)
+
+_OSV_API_TIMEOUT = 5.0
+# Bounds worst-case added latency on a report with many unique CVEs — this
+# runs synchronously inside report parsing (see #128/#129/#131 in the
+# partner review tracker for why external calls here need to stay bounded
+# and failure-safe), so a report with hundreds of distinct CVEs can't turn
+# into minutes of sequential HTTP round trips.
+_MAX_OSV_LOOKUPS_PER_REPORT = 30
+
+
+def _extract_fixed_version(data: Dict[str, Any]) -> Optional[str]:
+    """Pull the first human-readable fixed version out of an OSV record.
+
+    Only SEMVER/ECOSYSTEM ranges carry an actual version string in `fixed` —
+    a GIT range's `fixed` event is a commit hash, which is worse than useless
+    to show a developer as "the version that fixes this" (confirmed live:
+    querying a bare CVE ID directly often resolves to a CVE-wide record whose
+    only range is GIT-typed, even though its GHSA alias has a clean
+    npm/PyPI/etc SEMVER range — see the GHSA fallback in _fetch_fixed_version).
+    """
+    for affected in data.get("affected", []):
+        for rng in affected.get("ranges", []):
+            if rng.get("type") not in ("SEMVER", "ECOSYSTEM"):
+                continue
+            for event in rng.get("events", []):
+                fixed = event.get("fixed")
+                if fixed:
+                    return fixed
+    return None
+
+
+def _fetch_fixed_version(cve: str) -> Optional[str]:
+    """Look up a CVE's fixed version via OSV.dev.
+
+    OWASP Dependency-Check's own report has no fix-version field at all — a
+    developer gets a CVE ID and a description, nothing telling them what
+    version actually fixes it (unlike Trivy, whose scanner output includes
+    `FixedVersion` directly). This is best-effort: any failure (network,
+    non-200, no usable fix data anywhere in the response or its GHSA
+    aliases) returns None rather than raising — a slow or broken external
+    lookup must never block report parsing or fail a scan.
+    """
+    try:
+        resp = httpx.get(f"https://api.osv.dev/v1/vulns/{cve}", timeout=_OSV_API_TIMEOUT)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+    except Exception as e:
+        logger.warning("OSV.dev lookup failed for %s: %s", cve, e)
+        return None
+
+    fixed = _extract_fixed_version(data)
+    if fixed:
+        return fixed
+
+    # Fall back to the first GHSA alias — CVE records are sometimes only
+    # GIT-ranged, but their GHSA alias is ecosystem-specific and almost
+    # always carries a proper SEMVER/ECOSYSTEM range instead.
+    for alias in data.get("aliases", []):
+        if not alias.startswith("GHSA-"):
+            continue
+        try:
+            alias_resp = httpx.get(f"https://api.osv.dev/v1/vulns/{alias}", timeout=_OSV_API_TIMEOUT)
+            if alias_resp.status_code == 200:
+                return _extract_fixed_version(alias_resp.json())
+        except Exception as e:
+            logger.warning("OSV.dev alias lookup failed for %s (via %s): %s", alias, cve, e)
+        break
+
+    return None
+
+
+def _build_fix_command(package: str, fixed_version: Optional[str]) -> Optional[str]:
+    if not fixed_version:
+        return None
+    label = package or "the affected dependency"
+    return f"Upgrade {label} to version {fixed_version} or later"
 
 
 def _build_no_findings_fallback(dependencies: List[Dict[str, Any]]) -> List[SecurityFinding]:
@@ -105,18 +183,21 @@ def _extract_cwe_ids(vuln: Dict[str, Any]) -> List[str]:
     return cwe_ids
 
 
-def _build_recommendation(vuln: Dict[str, Any], file_name: str) -> str:
+def _build_recommendation(vuln: Dict[str, Any], file_name: str, fixed_version: Optional[str] = None) -> str:
     """Build detailed recommendation for developer."""
     parts = []
     vuln_id = vuln.get("name", "")
     severity = vuln.get("severity", "MEDIUM")
 
-    # Fix guidance
-    version = vuln.get("version", "")
-    if version:
-        parts.append(f"Update {file_name} to a version without {vuln_id}")
+    # Fix guidance — a specific version beats a vague "update" when OSV.dev has one.
+    if fixed_version:
+        parts.append(f"Upgrade {file_name} to version {fixed_version} or later to fix {vuln_id}")
     else:
-        parts.append(f"Update {file_name} to fix {vuln_id}")
+        version = vuln.get("version", "")
+        if version:
+            parts.append(f"Update {file_name} to a version without {vuln_id}")
+        else:
+            parts.append(f"Update {file_name} to fix {vuln_id}")
 
     # CVSS info
     cvss_score, cvss_severity = _extract_cvss_score(vuln)
@@ -141,11 +222,21 @@ def parse_depcheck_report(raw_json: str) -> List[SecurityFinding]:
         raise ParseError(f"Dependency-Check report is not valid JSON: {e}") from e
 
     dependencies = data.get("dependencies", [])
-    for dep in dependencies:
-        file_name = dep.get("fileName", "")
-        vulnerabilities = dep.get("vulnerabilities", [])
-        for vuln in vulnerabilities:
-            findings.append(_parse_vulnerability(vuln, file_name))
+    all_vulns = [
+        (dep.get("fileName", ""), vuln)
+        for dep in dependencies
+        for vuln in dep.get("vulnerabilities", [])
+    ]
+
+    # Dedupe: the same CVE often shows up against several dependency files in one
+    # report, and OSV.dev only needs to be asked once per distinct CVE.
+    unique_cves = list(dict.fromkeys(
+        vuln.get("name", "") for _, vuln in all_vulns if "CVE-" in vuln.get("name", "")
+    ))[:_MAX_OSV_LOOKUPS_PER_REPORT]
+    fixed_versions = {cve: _fetch_fixed_version(cve) for cve in unique_cves}
+
+    for file_name, vuln in all_vulns:
+        findings.append(_parse_vulnerability(vuln, file_name, fixed_versions))
 
     if not findings:
         return _build_no_findings_fallback(dependencies)
@@ -153,7 +244,9 @@ def parse_depcheck_report(raw_json: str) -> List[SecurityFinding]:
     return findings
 
 
-def _parse_vulnerability(vuln: Dict[str, Any], file_name: str) -> SecurityFinding:
+def _parse_vulnerability(
+    vuln: Dict[str, Any], file_name: str, fixed_versions: Optional[Dict[str, Optional[str]]] = None
+) -> SecurityFinding:
     """Parse a single vulnerability into a SecurityFinding."""
     vuln_id = vuln.get("name", "")
     severity = normalize_severity(vuln.get("severity", "MEDIUM"))
@@ -170,8 +263,13 @@ def _parse_vulnerability(vuln: Dict[str, Any], file_name: str) -> SecurityFindin
     # Extract references
     references = _extract_references(vuln)
 
+    # OWASP Dependency-Check's own report never includes a fix version — look it
+    # up from the OSV.dev batch already fetched for this report (see
+    # parse_depcheck_report), keyed by CVE ID.
+    fixed_version = (fixed_versions or {}).get(vuln_id)
+
     # Build recommendation
-    recommendation = _build_recommendation(vuln, file_name)
+    recommendation = _build_recommendation(vuln, file_name, fixed_version)
 
     # Build tags
     tags = list(cwe_ids)
@@ -179,6 +277,8 @@ def _parse_vulnerability(vuln: Dict[str, Any], file_name: str) -> SecurityFindin
         tags.append("critical-cvss")
     elif cvss_score >= 7.0:
         tags.append("high-cvss")
+
+    package_name = file_name.split("/")[-1] if file_name else None
 
     return SecurityFinding(
         # Includes the file so two distinct vulnerable locations (finding #41, same
@@ -192,7 +292,7 @@ def _parse_vulnerability(vuln: Dict[str, Any], file_name: str) -> SecurityFindin
         description=description,
         cve=cve,
         host=file_name,
-        package=file_name.split("/")[-1] if file_name else None,
+        package=package_name,
         recommendation=recommendation,
         raw_evidence=json.dumps(vuln),
         rule=vuln_id,
@@ -202,6 +302,8 @@ def _parse_vulnerability(vuln: Dict[str, Any], file_name: str) -> SecurityFindin
         cvss_score=cvss_score,
         cvss_severity=cvss_severity,
         package_version=version,
+        fixed_version=fixed_version,
+        fix_command=_build_fix_command(package_name, fixed_version),
         references=references,
         cwe_ids=cwe_ids,
     )

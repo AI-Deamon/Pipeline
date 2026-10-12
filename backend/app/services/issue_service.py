@@ -164,41 +164,13 @@ class IssueService:
             "page": page,
             "page_size": page_size,
             "projects": projects,
-            "issues": [self._to_dict(i) for i in issues],
-        }
-
-    def _to_dict(self, issue: IssueDB) -> dict[str, Any]:
-        return {
-            "id": issue.id,
-            "issue_id": issue.issue_id,
-            "project_id": issue.project_id,
-            "tool_name": issue.tool_name,
-            "scan_id": issue.scan_id,
-            "first_seen_scan_id": issue.first_seen_scan_id,
-            "first_seen_at": issue.first_seen_at.isoformat() if issue.first_seen_at else None,
-            "last_seen_at": issue.last_seen_at.isoformat() if issue.last_seen_at else None,
-            "resolved_at": issue.resolved_at.isoformat() if issue.resolved_at else None,
-            "severity": issue.severity,
-            "issue_type": issue.issue_type,
-            "title": issue.title,
-            "description": issue.description,
-            "location": issue.location,
-            "severity_v2": issue.severity_v2,
-            "effort": issue.effort,
-            "rule": issue.rule,
-            "recommendation": issue.recommendation,
-            "finding_type": issue.finding_type,
-            "sonar_status": issue.sonar_status,
-            "sonar_resolution": issue.sonar_resolution,
-            "raw_evidence": issue.raw_evidence,
-            "is_new": issue.is_new,
-            "status": issue.status,
-            "assignee_id": issue.assignee_id,
-            "assigned_by": issue.assigned_by,
-            "priority": issue.priority,
-            "extra_metadata": issue.extra_metadata,
-            "created_at": issue.created_at.isoformat() if issue.created_at else None,
-            "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
+            # Raw ORM objects, same as get_tool_issues — FastAPI's response_model
+            # (MyIssuesResponse -> IssueResponse, from_attributes=True) serializes
+            # these consistently, including the file_path/line_number/etc.
+            # @computed_field properties. The previous hand-rolled _to_dict() never
+            # included those derived fields at all, so MyIssuesPage's findings
+            # never had a file/line either, same bug as the tool-issues list.
+            "issues": issues,
         }
 
     def _record_history(

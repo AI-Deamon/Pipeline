@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2, Bug } from 'lucide-react';
+import { Send, UserCheck, Loader2, Clock, Tag, FileCode, ExternalLink, RefreshCw, Code2, Bug, Package, Zap } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { ApiError } from '../utils/apiError';
 import { useIssue, useIssueHistory, useAssignIssue, useTransitionIssue, useAddComment } from '../hooks/useIssues';
 import { useRbac } from '../hooks/useRbac';
 import { api } from '../services/api';
@@ -181,6 +182,27 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
     },
     enabled: !!issue?.project_id && canAssignIssues,
     staleTime: 60_000,
+  });
+
+  // The finding's own `code_snippet` field is populated by ~none of the tool
+  // parsers today — fetch the real surrounding source from the project's repo
+  // instead. Previously this was never wired up at all: the modal always fell
+  // through to CodeSnippet's "No code snippet available" placeholder even
+  // though this backend endpoint has existed and worked the whole time.
+  const {
+    data: fetchedSnippet,
+    isLoading: isSnippetLoading,
+    error: snippetError,
+  } = useQuery({
+    queryKey: ['issue', issueId, 'code-snippet', issue?.project_id, issue?.file_path, issue?.line_number],
+    queryFn: () =>
+      api.issues.getCodeSnippet(issue!.project_id, {
+        file: issue!.file_path!,
+        line: issue!.line_number!,
+      }),
+    enabled: !!issue?.project_id && !!issue?.file_path && !!issue?.line_number && !issue?.code_snippet,
+    staleTime: 5 * 60_000,
+    retry: false,
   });
 
   const history = historyData?.history ?? [];
@@ -377,6 +399,33 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
           )}
         </div>
 
+          {issue.package && (
+            <div className="flex items-center gap-2">
+              <Package size={14} className="text-slate-400" />
+              <span className="text-sm text-slate-700">
+                {issue.package}
+                {issue.package_version && (
+                  <span className="ml-1 text-slate-500">v{issue.package_version}</span>
+                )}
+                {issue.fixed_version && (
+                  <span className="ml-2 text-green-600 font-medium">→ {issue.fixed_version}</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {issue.fix_command && (
+            <div className="flex items-start gap-2">
+              <Zap size={14} className="text-green-600 mt-0.5" />
+              <div>
+                <span className="text-slate-400 block text-xs mb-1">Fix Command</span>
+                <p className="text-sm font-mono bg-slate-900 text-green-400 p-2 rounded">
+                  {issue.fix_command}
+                </p>
+              </div>
+            </div>
+          )}
+
           {issue.description && (
             <div>
               <span className="text-slate-400 block text-xs mb-1">Description</span>
@@ -407,12 +456,18 @@ export default function IssueDetailModal({ issueId, onClose }: IssueDetailModalP
 
         {issue.file_path && issue.line_number && (
           <CodeSnippet
-            snippet={issue.code_snippet ?? null}
-            language={issue.code_snippet_language}
+            snippet={issue.code_snippet ?? fetchedSnippet?.content ?? null}
+            language={issue.code_snippet_language ?? fetchedSnippet?.language}
             highlightLine={issue.line_number}
-            startLine={Math.max(1, issue.line_number - 10)}
+            startLine={fetchedSnippet?.start_line ?? Math.max(1, issue.line_number - 10)}
             file={issue.file_path}
-            gitUrl={issue.git_url}
+            gitUrl={issue.git_url ?? fetchedSnippet?.git_url}
+            isLoading={isSnippetLoading}
+            error={
+              snippetError instanceof ApiError && snippetError.status !== 404
+                ? snippetError.message
+                : null
+            }
           />
         )}
       </div>

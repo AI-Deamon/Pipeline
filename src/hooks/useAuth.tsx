@@ -46,37 +46,6 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; role: Role } | null>(null);
 
-  // Bootstrap the session on mount. A hard page reload has no legacy
-  // sessionStorage token, but the backend's httpOnly access/refresh cookies
-  // may still be valid — without this, a refreshed tab always looks logged
-  // out even with a live session, since `isAuthenticated` is derived from
-  // `token` alone. Skip the network round-trip when a legacy token already
-  // resolved isAuthenticated=true above (grace-period path).
-  useEffect(() => {
-    if (token) {
-      setIsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' });
-        if (!cancelled && response.ok) {
-          const data = await response.json();
-          setToken(data.access_token);
-        }
-      } catch {
-        // No valid session cookie (or offline) — stay logged out, same as before.
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const login = useCallback((newToken: string) => {
     // Only write the legacy sessionStorage copy while the migration grace period is
     // still open; once it closes, the httpOnly cookie set by the backend is the only
@@ -99,6 +68,22 @@ export const AuthProvider: FC<{ children: ReactNode }> = ({ children }) => {
     } catch {
       return false;
     }
+  }, []);
+
+  // Hydrate auth state on mount. The access token lives only in memory, so a full
+  // page load (refresh, direct URL, new tab) always starts with token === null even
+  // when a valid httpOnly refresh cookie is still present — without this, every such
+  // load bounced straight to /login regardless of session validity (finding: reports
+  // pages "unusable" after any hard navigation, once the sessionStorage grace period
+  // closed and the cookie became the only credential store).
+  useEffect(() => {
+    if (token) {
+      // Legacy sessionStorage token already hydrated synchronously in useState init.
+      setIsLoading(false);
+      return;
+    }
+    refreshToken().finally(() => setIsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshUser = useCallback(async (retriesLeft = 2): Promise<void> => {

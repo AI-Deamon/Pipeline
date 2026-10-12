@@ -15,6 +15,15 @@ const TYPE_CONFIG: Record<string, { label: string; icon: typeof Bug; color: stri
   CODE_SMELL: { label: 'Maintainability Issues', icon: Code, color: 'text-blue-600', bg: 'bg-blue-50' },
 };
 
+/** A real file:line beats every fallback — "host" was often just the scan
+ * target repeated identically on every row. */
+function locationOf(finding: Finding): string | null {
+  if (finding.file_path) {
+    return finding.line_number ? `${finding.file_path}:${finding.line_number}` : finding.file_path;
+  }
+  return finding.package || finding.uri || finding.host || null;
+}
+
 interface FindingsTableProps {
   findings: (Finding & { tool: string })[];
   projectId?: string;
@@ -91,6 +100,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
           f.rule?.toLowerCase().includes(q) ||
           f.finding_type?.toLowerCase().includes(q) ||
           f.package?.toLowerCase().includes(q) ||
+          f.file_path?.toLowerCase().includes(q) ||
           f.host?.toLowerCase().includes(q),
       );
     }
@@ -108,7 +118,8 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
 
     filteredFindings.forEach((f) => {
       const type = f.finding_type || 'OTHER';
-      const ruleKey = f.rule || f.description || 'unknown';
+      // Key on rule, else title: findings without a `rule` previously all merged into one 'unknown' bucket.
+      const ruleKey = f.rule ? `rule:${f.rule}` : `title:${f.title}`;
 
       if (!groups[type]) groups[type] = [];
       let ruleGroup = groups[type].find((g) => g.rule === ruleKey);
@@ -354,7 +365,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                                       />
                                     )}
                                     <span className={`w-1.5 h-1.5 rounded-full ${getSeverityDotColor(finding.severity)}`} />
-                                    <span className="truncate">{finding.host || finding.package || finding.uri || 'Unknown'}</span>
+                                    <span className="truncate">{locationOf(finding) ?? 'Unknown'}</span>
                                     {previousScanFindingKeys && !previousScanFindingKeys.has(findingKey(finding)) && (
                                       <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-blue-100 text-blue-700 rounded">New</span>
                                     )}
@@ -426,7 +437,7 @@ export const FindingsTable = ({ findings, projectId, scanId, selectedTool, previ
                         )}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 font-mono">
-                        {finding.host || finding.package || finding.uri || '-'}
+                        {locationOf(finding) ?? '-'}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-500">{finding.tool}</td>
                     </tr>

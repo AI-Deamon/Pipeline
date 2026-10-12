@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Navigate, Link } from 'react-router-dom';
+import { Navigate, Link, useSearchParams } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { ListChecks, ChevronDown, ChevronRight, X, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
@@ -38,12 +38,28 @@ const FINDING_TYPE_OPTIONS = [
   { value: 'SECURITY_HOTSPOT', label: 'Hotspot' },
 ];
 
+const VALID_STATUSES = new Set<string>(STATUS_OPTIONS);
+
 const IssuesTriagePage = () => {
   const { canAssignIssues, isAdmin } = useRbac();
-  const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(['open']);
-  const [severityFilter, setSeverityFilter] = useState<string[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // A deep link (e.g. from Team Workload — "show me this developer's open
+  // issues") arrives as ?assignee=username&status=open,in_progress. Only used
+  // as the initial value: once loaded, the filter buttons below are the
+  // source of truth, same as every other filter on this page.
+  const initialStatus = searchParams.get('status')?.split(',').filter((s) => VALID_STATUSES.has(s)) as IssueStatus[] | undefined;
+  const initialAssignee = searchParams.get('assignee');
+
+  const [statusFilter, setStatusFilter] = useState<IssueStatus[]>(
+    initialStatus && initialStatus.length > 0 ? initialStatus : ['open'],
+  );
+  const [severityFilter, setSeverityFilter] = useState<string[]>(
+    searchParams.get('severity')?.split(',').filter(Boolean) ?? [],
+  );
   const [findingTypeFilter, setFindingTypeFilter] = useState<string[]>([]);
   const [toolFilter, setToolFilter] = useState<string[]>([]);
+  const [assigneeFilter, setAssigneeFilter] = useState<string | null>(initialAssignee);
   const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set());
 
@@ -79,8 +95,15 @@ const IssuesTriagePage = () => {
             statusFilter,
           ],
           queryFn: async () => {
+            // Previously capped at 4 pages (100 issues) per tool — a tool with
+            // more real findings than that (e.g. 151 Sonar issues on a real
+            // project here) silently dropped the rest with no indicator, so a
+            // severity/status filter could show "no results" while matching
+            // issues genuinely existed just past page 4. MAX_PAGES is a sanity
+            // ceiling against a runaway loop, not a real-world cap.
+            const MAX_PAGES = 200;
             const all: IssueResponse[] = [];
-            for (let page = 1; page <= 4; page++) {
+            for (let page = 1; page <= MAX_PAGES; page++) {
               const result = await api.issues.getToolIssues(
                 p.project_id,
                 t.tool,
@@ -128,19 +151,26 @@ const IssuesTriagePage = () => {
   }, [projectToolMap]);
 
   const sortedAndFiltered = useMemo(() => {
+    // Backend normalizes severity to lowercase on write now, but existing rows
+    // (and any gap in that guarantee) can still be mixed-case — found live: a
+    // single "Critical"-cased row alongside "critical" ones made this filter
+    // silently return zero matches for a query that should have hit it.
+    // Comparing lowercased on both sides keeps this correct regardless.
     const filtered = allIssues.filter(
       (i) =>
         statusFilter.includes(i.status) &&
-        (severityFilter.length === 0 || severityFilter.includes(i.severity)) &&
+        (severityFilter.length === 0 || severityFilter.includes(i.severity.toLowerCase())) &&
         (findingTypeFilter.length === 0 || (i.finding_type && findingTypeFilter.includes(i.finding_type))) &&
-        (toolFilter.length === 0 || toolFilter.includes(i.tool_name)),
+        (toolFilter.length === 0 || toolFilter.includes(i.tool_name)) &&
+        (!assigneeFilter ||
+          (assigneeFilter === 'unassigned' ? !i.assignee_id : i.assignee_id === assigneeFilter)),
     );
     return filtered.sort((a, b) => {
-      const sev = (SEVERITY_ORDER[a.severity] ?? 99) - (SEVERITY_ORDER[b.severity] ?? 99);
+      const sev = (SEVERITY_ORDER[a.severity.toLowerCase()] ?? 99) - (SEVERITY_ORDER[b.severity.toLowerCase()] ?? 99);
       if (sev !== 0) return sev;
       return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
     });
-  }, [allIssues, statusFilter, severityFilter, toolFilter, findingTypeFilter]);
+  }, [allIssues, statusFilter, severityFilter, toolFilter, findingTypeFilter, assigneeFilter]);
 
   const groupedByProject = useMemo(() => {
     const grouped = new Map<string, IssueResponse[]>();
@@ -297,7 +327,27 @@ const IssuesTriagePage = () => {
             </div>
           </div>
         )}
-        {(statusFilter.length !== 1 || statusFilter[0] !== 'open' || severityFilter.length > 0 || findingTypeFilter.length > 0 || toolFilter.length > 0) && (
+        {assigneeFilter && (
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">Assignee</div>
+            <button
+              type="button"
+              onClick={() => {
+                setAssigneeFilter(null);
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  next.delete('assignee');
+                  return next;
+                });
+              }}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border bg-blue-50 border-blue-300 text-blue-700"
+            >
+              {assigneeFilter === 'unassigned' ? 'Unassigned' : assigneeFilter}
+              <X size={12} />
+            </button>
+          </div>
+        )}
+        {(statusFilter.length !== 1 || statusFilter[0] !== 'open' || severityFilter.length > 0 || findingTypeFilter.length > 0 || toolFilter.length > 0 || assigneeFilter) && (
           <button
             type="button"
             onClick={() => {
@@ -305,6 +355,8 @@ const IssuesTriagePage = () => {
               setSeverityFilter([]);
               setFindingTypeFilter([]);
               setToolFilter([]);
+              setAssigneeFilter(null);
+              setSearchParams({});
             }}
             className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700"
           >

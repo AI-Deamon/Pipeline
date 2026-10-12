@@ -197,7 +197,7 @@ const UnifiedReportPage = () => {
 
   // Compute available tools and filter findings
   const availableTools = [...new Set(report.findings.map(f => f.tool).filter((tool): tool is string => Boolean(tool)))];
-  
+
   // Compute tool summaries from findings
   const toolSummaries = report.findings.reduce<Record<string, { tool: string; findings: number; critical: number; high: number; medium: number; low: number }>>((acc, f) => {
     const tool = f.tool || 'unknown';

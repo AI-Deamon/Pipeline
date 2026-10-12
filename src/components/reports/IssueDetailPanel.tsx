@@ -1,6 +1,10 @@
 import { ExternalLink, Clock, Shield, Package, Zap } from 'lucide-react';
 import DOMPurify from 'dompurify';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../services/api';
+import { ApiError } from '../../utils/apiError';
 import type { DeveloperIssue } from '../../types';
+import CodeSnippet from '../CodeSnippet';
 
 const severityColors: Record<string, { text: string; bg: string; border: string }> = {
   Critical: { text: 'text-red-600', bg: 'bg-red-50', border: 'border-red-500' },
@@ -19,12 +23,33 @@ const typeLabels: Record<string, string> = {
 
 interface IssueDetailPanelProps {
   issue: DeveloperIssue;
+  projectId: string;
   sonarUrl?: string;
 }
 
-export const IssueDetailPanel = ({ issue, sonarUrl }: IssueDetailPanelProps) => {
+export const IssueDetailPanel = ({ issue, projectId, sonarUrl }: IssueDetailPanelProps) => {
   const colors = severityColors[issue.severity] || severityColors.Info;
   const typeLabel = typeLabels[issue.type || ''] || issue.type || 'Unknown';
+
+  // Same gap as IssueDetailModal previously had (see its comment above its
+  // own useQuery): the finding's own `code_snippet` field is populated by
+  // ~none of the tool parsers, so fetch real surrounding source from the
+  // project's repo instead. This panel never fetched a snippet at all.
+  const {
+    data: fetchedSnippet,
+    isLoading: isSnippetLoading,
+    error: snippetError,
+  } = useQuery({
+    queryKey: ['issue', issue.id, 'code-snippet', projectId, issue.file_path, issue.line],
+    queryFn: () =>
+      api.issues.getCodeSnippet(projectId, {
+        file: issue.file_path!,
+        line: issue.line!,
+      }),
+    enabled: !!projectId && !!issue.file_path && !!issue.line,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -83,6 +108,27 @@ export const IssueDetailPanel = ({ issue, sonarUrl }: IssueDetailPanelProps) => 
           )}
         </div>
       </div>
+
+      {/* Code Snippet */}
+      {issue.file_path && issue.line && (
+        <div className="px-4 py-3 border-b border-slate-100">
+          <h4 className="text-xs font-semibold text-slate-500 uppercase mb-2">Code</h4>
+          <CodeSnippet
+            snippet={fetchedSnippet?.content ?? null}
+            language={fetchedSnippet?.language}
+            highlightLine={issue.line}
+            startLine={fetchedSnippet?.start_line ?? Math.max(1, issue.line - 10)}
+            file={issue.file_path}
+            gitUrl={fetchedSnippet?.git_url}
+            isLoading={isSnippetLoading}
+            error={
+              snippetError instanceof ApiError && snippetError.status !== 404
+                ? snippetError.message
+                : null
+            }
+          />
+        </div>
+      )}
 
       {/* Package Info (for Trivy/SCA findings) */}
       {issue.package_version && (

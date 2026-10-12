@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../services/api";
 import {
   Plus,
@@ -13,6 +13,9 @@ import {
   AlertTriangle,
   CheckCircle,
   BarChart3,
+  LayoutDashboard,
+  TrendingUp,
+  Users,
 } from "lucide-react";
 import { useDebounce } from "../hooks/useDebounce";
 import { useRbac } from "../hooks/useRbac";
@@ -20,14 +23,23 @@ import { PageSkeleton } from "../components/PageSkeleton";
 import { OnboardingChecklist } from "../components/OnboardingChecklist";
 import EmptyState from "../components/EmptyState";
 import SeverityPieChart from "../components/SeverityPieChart";
-import TrendLineChart from "../components/TrendLineChart";
 import QualityGateOverview from "../components/QualityGateOverview";
+import ToolBarChart from "../components/ToolBarChart";
 import ProjectRow from "../components/ProjectRow";
+import DashboardTrendsTab from "../components/dashboard/DashboardTrendsTab";
+import DashboardWorkloadTab from "../components/dashboard/DashboardWorkloadTab";
 import { getRiskLevel } from "../utils/risk";
 
 const ACTIVE_STATES = new Set(["CREATED", "QUEUED", "RUNNING"]);
 const STATUS_FILTERS = ["All", "Running", "Completed", "Failed"] as const;
 const RISK_FILTERS = ["All", "Low", "Medium", "High", "Critical"] as const;
+
+type TabId = "overview" | "trends" | "workload";
+const TABS: { id: TabId; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "trends", label: "Trends", icon: TrendingUp },
+  { id: "workload", label: "Team Workload", icon: Users },
+];
 
 const StatsCard = ({
   icon,
@@ -51,7 +63,7 @@ const StatsCard = ({
   </div>
 );
 
-const DashboardPage = () => {
+const DashboardOverviewTab = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [riskFilter, setRiskFilter] = useState<string>("All");
@@ -67,13 +79,6 @@ const DashboardPage = () => {
     queryFn: api.portfolio.getOverview,
     enabled: !!projects.length,
     refetchInterval: 60_000,
-  });
-
-  const { data: portfolioTrends } = useQuery({
-    queryKey: ["portfolio-trends"],
-    queryFn: () => api.portfolio.getTrends(6),
-    enabled: !!projects.length,
-    refetchInterval: 120_000,
   });
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
@@ -108,6 +113,36 @@ const DashboardPage = () => {
       avgRiskScore: projectsWithRisk > 0 ? Math.round(totalRiskScore / projectsWithRisk) : 0,
     };
   }, [portfolioProjects, projects.length]);
+
+  // Top tools by finding volume across the portfolio — same shape PortfolioDashboardPage
+  // used to compute independently; folded in here since it's the only piece of that
+  // page's content that wasn't already a duplicate of what's on this page.
+  const toolData = useMemo(() => {
+    const toolMap: Record<string, { tool: string; findings: number; critical: number; high: number; medium: number; low: number }> = {};
+    portfolioProjects.forEach((p) => {
+      p.tools.forEach((tool) => {
+        if (!toolMap[tool]) {
+          toolMap[tool] = { tool: tool.replace("_", " "), findings: 0, critical: 0, high: 0, medium: 0, low: 0 };
+        }
+      });
+    });
+    portfolioProjects.forEach((p) => {
+      p.tools.forEach((tool) => {
+        const entry = toolMap[tool];
+        if (entry) {
+          entry.findings += p.total_findings / Math.max(p.tools.length, 1);
+          entry.critical += p.critical / Math.max(p.tools.length, 1);
+          entry.high += p.high / Math.max(p.tools.length, 1);
+          entry.medium += p.medium / Math.max(p.tools.length, 1);
+          entry.low += p.low / Math.max(p.tools.length, 1);
+        }
+      });
+    });
+    return Object.values(toolMap)
+      .sort((a, b) => b.findings - a.findings)
+      .slice(0, 5)
+      .map((t) => ({ ...t, findings: Math.round(t.findings), critical: Math.round(t.critical), high: Math.round(t.high), medium: Math.round(t.medium), low: Math.round(t.low) }));
+  }, [portfolioProjects]);
 
   const filteredProjects = useMemo(() => {
     let result = portfolioProjects;
@@ -144,39 +179,31 @@ const DashboardPage = () => {
   if (isLoading) return <PageSkeleton type="dashboard" />;
 
   return (
-    <div className="max-w-6xl mx-auto p-8">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Projects</h1>
-          <p className="text-slate-500 mt-1">
-            Manage and monitor your security scans.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {isAdmin ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
-              <Shield size={12} /> Admin
-            </span>
-          ) : canViewAllProjects ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-              <ShieldAlert size={12} /> Team Lead
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600">
-              <User size={12} /> Developer
-            </span>
-          )}
-          {isAdmin && (
-            <Link
-              to="/projects/create"
-              className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Add Project
-            </Link>
-          )}
-        </div>
-      </header>
+    <div>
+      <div className="flex items-center justify-end gap-3 mb-6">
+        {isAdmin ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+            <Shield size={12} /> Admin
+          </span>
+        ) : canViewAllProjects ? (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+            <ShieldAlert size={12} /> Team Lead
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600">
+            <User size={12} /> Developer
+          </span>
+        )}
+        {isAdmin && (
+          <Link
+            to="/projects/create"
+            className="px-4 py-2 bg-slate-900 text-white hover:bg-slate-800 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Project
+          </Link>
+        )}
+      </div>
 
       <OnboardingChecklist />
 
@@ -208,31 +235,26 @@ const DashboardPage = () => {
       </div>
 
       {portfolioOverview && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-            <SeverityPieChart
-              critical={portfolioOverview.severity.critical}
-              high={portfolioOverview.severity.high}
-              medium={portfolioOverview.severity.medium}
-              low={portfolioOverview.severity.low}
-              info={portfolioOverview.severity.info}
-            />
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+              <SeverityPieChart
+                critical={portfolioOverview.severity.critical}
+                high={portfolioOverview.severity.high}
+                medium={portfolioOverview.severity.medium}
+                low={portfolioOverview.severity.low}
+                info={portfolioOverview.severity.info}
+              />
+            </div>
+            <QualityGateOverview projects={portfolioOverview.projects} />
           </div>
-          <QualityGateOverview projects={portfolioOverview.projects} />
-        </div>
-      )}
 
-      {portfolioTrends && portfolioTrends.trends.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
-          <TrendLineChart data={portfolioTrends.trends.map(t => ({
-            date: t.month,
-            critical: t.critical,
-            high: t.high,
-            medium: t.medium,
-            low: t.low,
-            coverage_avg: t.coverage_avg,
-          }))} />
-        </div>
+          {toolData.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
+              <ToolBarChart tools={toolData} />
+            </div>
+          )}
+        </>
       )}
 
       {activeScanProjects.length > 0 && (
@@ -373,16 +395,58 @@ const DashboardPage = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-{filteredProjects.map((project) => (
-  <ProjectRow
-    key={project.project_id}
-    project={project}
-  />
-))}
+              {filteredProjects.map((project) => (
+                <ProjectRow
+                  key={project.project_id}
+                  project={project}
+                />
+              ))}
             </tbody>
           </table>
         </div>
       )}
+    </div>
+  );
+};
+
+const DashboardPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: TabId = (["overview", "trends", "workload"] as const).includes(
+    searchParams.get("tab") as TabId
+  )
+    ? (searchParams.get("tab") as TabId)
+    : "overview";
+
+  return (
+    <div className="max-w-6xl mx-auto p-8">
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold text-slate-900">Dashboard</h1>
+        <p className="text-slate-500 mt-1">
+          Projects, portfolio health, trends, and team workload in one place.
+        </p>
+      </header>
+
+      <div className="flex gap-1 border-b border-slate-200 mb-6">
+        {TABS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSearchParams(id === "overview" ? {} : { tab: id })}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === id
+                ? "border-slate-900 text-slate-900"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <Icon className="w-4 h-4" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "overview" && <DashboardOverviewTab />}
+      {activeTab === "trends" && <DashboardTrendsTab />}
+      {activeTab === "workload" && <DashboardWorkloadTab />}
     </div>
   );
 };

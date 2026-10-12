@@ -2,47 +2,36 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { vi, afterEach, test, expect, describe } from 'vitest';
 import { AuthProvider, useAuth } from '../../hooks/useAuth';
 
-/**
- * Regression test: a hard page reload has no legacy sessionStorage token, but
- * the backend's httpOnly access/refresh cookies are still valid. AuthProvider
- * must bootstrap the session from those cookies via /auth/refresh before
- * settling isLoading — otherwise ProtectedRoute sees isAuthenticated=false and
- * redirects to /login even though the user has a live session.
- */
-describe('AuthProvider session bootstrap on mount', () => {
-  const originalFetch = global.fetch;
+describe('AuthProvider mount hydration', () => {
+  const originalFetch = globalThis.fetch;
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     sessionStorage.clear();
+    vi.restoreAllMocks();
   });
 
-  test('restores isAuthenticated from a valid refresh cookie when no legacy token exists', async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/auth/refresh')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ access_token: 'restored-token' }),
-        });
-      }
-      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+  test('hydrates isAuthenticated from a valid httpOnly refresh cookie on a fresh page load', async () => {
+    // No legacy sessionStorage token — this is the post-grace-period, cookie-only state.
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'new-access-token' }),
     }) as unknown as typeof fetch;
 
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      '/api/v1/auth/refresh',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
     expect(result.current.isAuthenticated).toBe(true);
-    expect(result.current.token).toBe('restored-token');
+    expect(result.current.token).toBe('new-access-token');
   });
 
-  test('stays logged out when there is no valid refresh cookie', async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/auth/refresh')) {
-        return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
-      }
-      return Promise.reject(new Error(`unexpected fetch: ${url}`));
-    }) as unknown as typeof fetch;
+  test('leaves user logged out when there is no valid refresh cookie', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false }) as unknown as typeof fetch;
 
     const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
 

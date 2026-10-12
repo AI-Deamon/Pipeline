@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/react-query';
 import IssueDetailModal from '../../components/IssueDetailModal';
 import { api } from '../../services/api';
 import { renderWithProviders } from '../../test/testUtils';
+import { ApiError } from '../../utils/apiError';
 
 vi.mock('../../hooks/useAuth', () => ({
   useAuth: () => ({
@@ -108,6 +109,27 @@ describe('IssueDetailModal', () => {
     expect(screen.getByText('Use parameterized queries')).toBeInTheDocument();
   });
 
+  test('renders package fix version and fix command for a dependency finding', async () => {
+    // Regression coverage for the dependency-check fix: OWASP's own report has
+    // no fix version, so this data comes from an OSV.dev lookup threaded
+    // through extra_metadata onto the issue (see backend/.../depcheck.py).
+    api.issues.get = vi.fn().mockResolvedValue({
+      ...mockIssue,
+      package: 'lodash-4.17.15.tgz',
+      package_version: '4.17.15',
+      fixed_version: '4.17.21',
+      fix_command: 'Upgrade lodash-4.17.15.tgz to version 4.17.21 or later',
+    });
+    renderModal();
+
+    expect(await screen.findByText('lodash-4.17.15.tgz')).toBeInTheDocument();
+    expect(screen.getByText('v4.17.15')).toBeInTheDocument();
+    expect(screen.getByText('→ 4.17.21')).toBeInTheDocument();
+    expect(
+      screen.getByText('Upgrade lodash-4.17.15.tgz to version 4.17.21 or later'),
+    ).toBeInTheDocument();
+  });
+
   test('renders assign button for open issue', async () => {
     renderModal();
     expect(await screen.findByRole('button', { name: /assign/i })).toBeInTheDocument();
@@ -171,6 +193,57 @@ describe('IssueDetailModal', () => {
     fireEvent.click(sendBtn);
     await waitFor(() => {
       expect(api.issues.addComment).toHaveBeenCalledWith(1, 'Looking into this');
+    });
+  });
+
+  describe('code snippet', () => {
+    // Regression coverage for a real bug found live: the backend's
+    // GET /projects/{id}/code-snippet endpoint and the api.issues.getCodeSnippet
+    // client were both fully built, but the modal never called either — every
+    // finding with a file/line silently showed "No code snippet available"
+    // even though real source was fetchable the whole time.
+    const originalGetCodeSnippet = api.issues.getCodeSnippet;
+    const issueWithLocation = { ...mockIssue, file_path: 'src/app.ts', line_number: 42 };
+
+    afterEach(() => {
+      api.issues.getCodeSnippet = originalGetCodeSnippet;
+    });
+
+    test('fetches and renders real source when the finding has a file/line', async () => {
+      api.issues.get = vi.fn().mockResolvedValue(issueWithLocation);
+      api.issues.getCodeSnippet = vi.fn().mockResolvedValue({
+        file: 'src/app.ts',
+        language: 'typescript',
+        branch: 'main',
+        start_line: 40,
+        end_line: 44,
+        highlight_line: 42,
+        content: 'const query = `SELECT * FROM users WHERE id = ${id}`;',
+        git_url: 'https://github.com/org/repo/blob/main/src/app.ts#L42',
+        source: 'github',
+      });
+      renderModal();
+
+      await waitFor(() => {
+        expect(api.issues.getCodeSnippet).toHaveBeenCalledWith('proj_1', {
+          file: 'src/app.ts',
+          line: 42,
+        });
+      });
+      expect(await screen.findByText(/SELECT \* FROM users/)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /view on github/i })).toHaveAttribute(
+        'href',
+        'https://github.com/org/repo/blob/main/src/app.ts#L42',
+      );
+    });
+
+    test('falls back to the placeholder, not an error, when the file is not found (404)', async () => {
+      api.issues.get = vi.fn().mockResolvedValue(issueWithLocation);
+      api.issues.getCodeSnippet = vi.fn().mockRejectedValue(new ApiError(404, 'Not found'));
+      renderModal();
+
+      expect(await screen.findByText(/no code snippet available/i)).toBeInTheDocument();
+      expect(screen.queryByText(/failed to load code/i)).not.toBeInTheDocument();
     });
   });
 });
