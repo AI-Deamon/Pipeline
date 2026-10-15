@@ -368,7 +368,18 @@ def dependencyCheckStage() {
             javaEnv << "JAVA_HOME=${env.JAVA_HOME_DIR}"
         }
         withEnv(javaEnv) {
-            catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+            // Was catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') { ... },
+            // but that `buildResult: 'SUCCESS'` forces currentBuild.result to SUCCESS
+            // as a side effect - which is the exact field odcJvmCrashed below reads to
+            // decide WARN vs PASS. That made a real crash (confirmed: the CLI died
+            // mid-NVD-download with a RejectedExecutionException when the stage
+            // timeout killed it) undetectable - currentBuild.result was never
+            // anything but SUCCESS, so odcJvmCrashed was always false and the stage
+            // always recorded PASS regardless of what actually happened. A plain
+            // try/catch sets our own flag directly from whether the sh step itself
+            // threw, independent of currentBuild.result, and still swallows the
+            // exception so one bad dependency scan doesn't fail the whole build.
+            try {
                 def firstArgs = argsWithKey.join(' ')
                 // Exit-code capture avoids `cmd | tee log; \${PIPESTATUS[0]}` — Jenkins'
                 // `sh` step runs /bin/sh, which is dash on this host, and dash has no
@@ -376,7 +387,7 @@ def dependencyCheckStage() {
                 // that aborts the whole script (confirmed directly against this host's
                 // /bin/sh). Running the command in a `( cmd; echo $? > file )` subshell
                 // ahead of the `| tee` keeps live console streaming for this (potentially
-                // 20+ minute) step while writing the real exit code to a file the pipe
+                // 70+ minute) step while writing the real exit code to a file the pipe
                 // itself can't clobber — no bash-only array needed. The external `timeout`
                 // utility (coreutils, not a shell builtin) bounds the NVD full-update
                 // attempt on its own — a cold/stale local cache can need a multi-hundred-
@@ -389,24 +400,28 @@ def dependencyCheckStage() {
                     mkdir -p "${odcData}"
                     # First attempt: full NVD update, bounded so a slow/cold sync still
                     # leaves time for the cached-data retry below within the stage timeout.
-                    ( timeout 1200 ${odcCli} ${firstArgs} --data "${odcData}"; echo \$? > /tmp/odc_exit_\$\$ ) 2>&1 | tee reports/dependency-check-cli.log
-                    ODC_EXIT=\$(cat /tmp/odc_exit_\$\$); rm -f /tmp/odc_exit_\$\$
+                    ( timeout 4200 ${odcCli} ${firstArgs} --data "${odcData}"; echo \$? > /tmp/odc_exit_\$\$ ) 2>&1 | tee reports/dependency-check-cli.log
+                    # Default to 1 (failure) rather than an empty string if the file
+                    # never got written - e.g. the whole step was SIGTERM'd by the
+                    # *outer* Jenkins stage timeout before the subshell's own `echo \$?`
+                    # ran. An empty \$ODC_EXIT made the `-eq` tests below a dash syntax
+                    # error ("ERROR: script returned exit code 1") that still, via the
+                    # bug above, got recorded as a false PASS.
+                    ODC_EXIT=\$(cat /tmp/odc_exit_\$\$ 2>/dev/null || echo 1); rm -f /tmp/odc_exit_\$\$
                     # If the NVD update failed (exit code 2) or was killed by the inner
                     # timeout (124), retry with cached/incremental data only.
                     if [ "\$ODC_EXIT" -eq 2 ] || [ "\$ODC_EXIT" -eq 124 ]; then
                         echo "" | tee -a reports/dependency-check-cli.log
                         echo "=== NVD update failed or timed out (exit \$ODC_EXIT) — retrying with cached data (--disableRetrieval) ===" | tee -a reports/dependency-check-cli.log
                         ( ${odcCli} ${firstArgs} --disableRetrieval --data "${odcData}"; echo \$? > /tmp/odc_exit_\$\$ ) 2>&1 | tee -a reports/dependency-check-cli.log
-                        ODC_EXIT=\$(cat /tmp/odc_exit_\$\$); rm -f /tmp/odc_exit_\$\$
+                        ODC_EXIT=\$(cat /tmp/odc_exit_\$\$ 2>/dev/null || echo 1); rm -f /tmp/odc_exit_\$\$
                     fi
                     exit "\$ODC_EXIT"
                 """
+            } catch (Exception e) {
+                odcJvmCrashed = true
+                echo "WARNING: ODC CLI step failed: ${e.message} — reports may be incomplete"
             }
-        }
-        // Check if CLI failed (catchError marks UNSTABLE but doesn't throw)
-        if (currentBuild.result == 'UNSTABLE' || currentBuild.result == 'FAILURE') {
-            odcJvmCrashed = true
-            echo "WARNING: ODC CLI returned non-zero — reports may be incomplete"
         }
     }
     def depSummary = "Dependency check completed"
@@ -1247,13 +1262,16 @@ pipeline {
 
         stage('Dependency Check') {
             when { expression { shouldRun('dependency_check') } }
-            // 35 min: the inner NVD full-update attempt is itself bounded to 20 min
-            // (see dependencyCheckStage's `timeout 1200`), leaving room for the
+            // 90 min: the inner NVD full-update attempt is itself bounded to 70 min
+            // (see dependencyCheckStage's `timeout 4200`), leaving ~20 min for the
             // --disableRetrieval fallback pass and report generation afterward. A
-            // cold/stale local NVD cache needs a multi-hundred-thousand-record sync
-            // that a short stage timeout previously killed before the tool's own
-            // graceful fallback ever got a chance to run.
-            options { timeout(time: 35, unit: 'MINUTES') }  // finding #52
+            // brand-new NVD cache (first run on a fresh Jenkins instance) needs a
+            // 400k+-record sync that measured ~20% done after a few minutes - the
+            // previous 35 min budget hard-killed it mid-download instead of letting
+            // it either finish or fall back gracefully. Only the very first run on
+            // a given instance pays this cost; the cache persists under
+            // JENKINS_HOME/.dependency-check-data after that.
+            options { timeout(time: 90, unit: 'MINUTES') }  // finding #52
             steps {
                 script {
                     dependencyCheckStage()
