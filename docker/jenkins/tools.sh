@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euxo pipefail
 
+# A network-path web filter (Sophos, confirmed via its "Blocked download" page)
+# intercepts plain-HTTP apt downloads and blocks specific packages by name
+# (reproducibly 403'd nmap-common only, across every HTTP mirror tried,
+# including snapshot.debian.org - not a Debian-side issue). HTTPS to the same
+# host is not inspected and downloads fine, so switch apt to HTTPS mirrors
+# before anything else.
+sed -i 's#^URIs: http://#URIs: https://#' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+
 # Install system packages
 apt-get update
 
