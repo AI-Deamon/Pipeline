@@ -17,13 +17,22 @@ apt-get update
 # atomic, so when nmap-common 403'd on the mirror in one build, it silently
 # took wget down with it too, and the *next* step then failed on "wget:
 # command not found" - masking the real error.
+#
+# nodejs/npm: SonarQube's JS/TS analyzer needs a real `node` on PATH. The
+# pipeline used to hardcode -Dsonar.nodejs.executable to a Node install under
+# a specific user's home directory on the pre-Docker (systemd) Jenkins host -
+# that path never existed in this container, so every scan with JS/TS source
+# silently failed. Installing node/npm here and dropping that hardcoded
+# property (Agent/Jenkinsfile) lets sonar-scanner find node on PATH instead.
 for i in 1 2 3; do
     apt-get install -y --no-install-recommends \
         curl \
         wget \
         unzip \
         xz-utils \
-        ca-certificates && break || {
+        ca-certificates \
+        nodejs \
+        npm && break || {
         echo "core apt-get install failed (attempt $i), retrying..."
         apt-get update
         sleep 2

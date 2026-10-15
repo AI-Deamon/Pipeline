@@ -205,7 +205,6 @@ def sonarScannerStage() {
                            -Dsonar.projectKey="${PROJECT.sonar_key ?: params.SCAN_ID}" \
                            -Dsonar.projectName="${projectName}" \
                            -Dsonar.sources=. \
-                           -Dsonar.nodejs.executable=/home/kali_linux/node-v20.18.0-linux-x64/bin/node \
                            -Dsonar.scanner.skipJreProvisioning=true \
                            -Dsonar.sourceEncoding=UTF-8 \
                            -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \
@@ -346,8 +345,17 @@ def dependencyCheckStage() {
     def odcJvmCrashed = false
     withCredentials([string(credentialsId: params.CRED_NVD_API, variable: 'NVD_API_KEY')]) {
         def argsWithKey = scanArgs + ["--nvdApiKey ${NVD_API_KEY}"]
-        def odcCli = "/var/lib/jenkins/tools/org.jenkinsci.plugins.DependencyCheck.tools.DependencyCheckInstallation/OWasp/bin/dependency-check.sh"
-        def odcData = "/var/lib/jenkins/.dependency-check-data"
+        // Was hardcoded to /var/lib/jenkins/... - the default JENKINS_HOME for a
+        // native/systemd Debian install, which this pipeline ran under before
+        // being Dockerized. The jenkins user in the container (uid 1000) has no
+        // write access there and JENKINS_HOME is /var/jenkins_home instead, so
+        // the CLI path never existed and this stage silently never ran.
+        // `tool 'OWasp'` resolves (and auto-installs if missing) the real,
+        // writable location under JENKINS_HOME, the same way sonarScannerStage
+        // resolves `tool 'sonar-scanner'` above.
+        def odcHome = tool 'OWasp'
+        def odcCli = "${odcHome}/bin/dependency-check.sh"
+        def odcData = "${env.JENKINS_HOME}/.dependency-check-data"
         def jvmArgs = "-Xmx4g -Xms512m -XX:+UseParallelGC -XX:MaxMetaspaceSize=512m"
         def javaEnv = ["JAVA_OPTS=${jvmArgs}", "_JAVA_OPTIONS=${jvmArgs}"]
         if (env.JAVA_HOME_DIR) {
