@@ -133,6 +133,20 @@ def initContextStage() {
     def projectMap = readJSON text: projectData
     PROJECT = new HashMap(projectMap)
 
+    // readJSON represents an explicit JSON `null` (e.g. target_url: null, sent
+    // when a scan has no live target to DAST/Nmap-scan) as a net.sf.json.JSONNull
+    // sentinel object, not Groovy null. `PROJECT.target_url?.trim()` doesn't
+    // catch that sentinel - `?.` only short-circuits on real null - so it fell
+    // through to .trim() and crashed the whole pipeline with
+    // MissingMethodException instead of letting that stage skip cleanly.
+    // Normalize every JSONNull value back to real null right after parsing so
+    // every `PROJECT.<field>?.` check downstream works as intended.
+    PROJECT.keySet().each { k ->
+        if (PROJECT[k] != null && PROJECT[k].getClass().name == 'net.sf.json.JSONNull') {
+            PROJECT[k] = null
+        }
+    }
+
     def selectedList = readJSON text: selectedStages
     SELECTED = new ArrayList(selectedList)
 
