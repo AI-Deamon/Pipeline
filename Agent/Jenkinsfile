@@ -195,6 +195,11 @@ def sonarScannerStage() {
     try {
         // Use Jenkins SonarQube server configuration
         def projectName = PROJECT.project_name ?: params.SCAN_ID
+        // This pipeline scans an arbitrary git_url without ever compiling it, so
+        // when the repo has .java files, Sonar's Java analyzer throws
+        // AnalysisException demanding compiled classes via sonar.java.binaries -
+        // pointing it at '.' (no real bytecode) still lets analysis proceed
+        // instead of hard-failing; harmless no-op for non-Java repos.
         withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
             withSonarQubeEnv('sonar-server') {
                 withEnv(["SONAR_SCANNER_OPTS=-Xmx3g -Xms512m -XX:+UseSerialGC -Xss8m"] +
@@ -205,6 +210,7 @@ def sonarScannerStage() {
                            -Dsonar.projectKey="${PROJECT.sonar_key ?: params.SCAN_ID}" \
                            -Dsonar.projectName="${projectName}" \
                            -Dsonar.sources=. \
+                           -Dsonar.java.binaries=. \
                            -Dsonar.scanner.skipJreProvisioning=true \
                            -Dsonar.sourceEncoding=UTF-8 \
                            -Dsonar.exclusions='node_modules/**,dist/**,build/**,.next/**,coverage/**,reports/**,vendor/**,*.min.js,**/.venv/**,**/venv/**,**/__pycache__/**,**/.git/**' \
