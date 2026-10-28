@@ -12,7 +12,12 @@ import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, List, Any
-from rich.console import Console
+try:
+    from rich.console import Console
+except ImportError:  # pragma: no cover
+    class Console:
+        def print(self, *args, **kwargs):
+            print(*args)
 
 console = Console()
 

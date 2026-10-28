@@ -11,6 +11,8 @@ services:
     volumes:
       - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-995}"
     environment:
       - JAVA_OPTS=-Djava.awt.headless=true -Xmx7g -Xms512m
       - JENKINS_ADMIN_ID=${JENKINS_ADMIN_ID:-admin}

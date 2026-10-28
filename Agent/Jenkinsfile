@@ -821,10 +821,16 @@ def nmapScanStage() {
     def nmapCleanOutput = nmapLines.findAll { !it.startsWith('___EXIT___') }.join('\n')
 
     sh """
-        cp ${scannerDir}/scans/*/findings.json reports/nmap_findings.json
+        set +e
+        cp ${scannerDir}/scans/*/findings.json reports/nmap_findings.json 2>/dev/null
+        CP_EXIT=\$?
         # Copy raw per-scan txt files to reports
         find ${scannerDir}/scans -name "*.txt" -type f -exec cp {} reports/ \\; 2>/dev/null || true
+        if [ \$CP_EXIT -ne 0 ]; then
+            echo "WARNING: no nmap findings.json produced (scan may have failed); degrading to WARN"
+        fi
         echo "Nmap system scan completed"
+        exit 0
     """
 
     def nmapErrors = nmapExitCode != '0' ? nmapCleanOutput.split('\n').findAll {

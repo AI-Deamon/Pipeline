@@ -36,10 +36,40 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
-from rich.console import Console
-from rich.live import Live
-from rich.table import Table
-from rich.panel import Panel
+try:
+    from rich.console import Console
+    from rich.live import Live
+    from rich.table import Table
+    from rich.panel import Panel
+except ImportError:  # pragma: no cover - fallback for environments without rich
+    import re as _re
+
+    class Console:  # minimal plain-stdout stand-in
+        def print(self, *args, **kwargs):
+            print(*args)
+
+    class Table:
+        def __init__(self, *args, **kwargs):
+            pass
+        def add_column(self, *args, **kwargs):
+            pass
+        def add_row(self, *args, **kwargs):
+            pass
+
+    class Live:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+        def update(self, *args, **kwargs):
+            pass
+
+    class Panel:
+        @staticmethod
+        def fit(content, *args, **kwargs):
+            return content
 
 console = Console()
 

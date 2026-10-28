@@ -32,7 +32,10 @@ for i in 1 2 3; do
         xz-utils \
         ca-certificates \
         nodejs \
-        npm && break || {
+        npm \
+        docker-cli \
+        python3 \
+        python3-pip && break || {
         echo "core apt-get install failed (attempt $i), retrying..."
         apt-get update
         sleep 2
@@ -111,6 +114,27 @@ fi
 # ODC CLI is installed as a Jenkins managed tool via the DependencyCheck plugin.
 # The pipeline uses the Jenkins plugin's tool installation from JENKINS_HOME/tools/.
 # No system-level install needed.
+
+# Docker CLI: required for pipeline docker build/push stages (socket is mounted
+# via docker-compose.jenkins.yml). The Jenkins image previously shipped without
+# the CLI, leaving `docker: not found` (exit 127) on every build.
+DOCKER_OK=0
+for i in 1 2 3 4 5; do
+    if apt-get install -y --no-install-recommends docker-cli; then
+        DOCKER_OK=1
+        break
+    fi
+    echo "docker-cli apt-get install failed (attempt $i), retrying in $((i * 5))s..."
+    apt-get update
+    sleep $((i * 5))
+done
+if [ "$DOCKER_OK" -ne 1 ]; then
+    echo "WARNING: docker-cli install failed after 5 attempts." >&2
+fi
+
+# rich Python module for nmap_scanner/scanner.py + parser.py
+apt-get install -y --no-install-recommends python3-rich 2>/dev/null || true
+pip3 install --no-cache-dir rich 2>/dev/null || python3 -m pip install --no-cache-dir rich 2>/dev/null || true
 
 # Cleanup
 apt-get clean
