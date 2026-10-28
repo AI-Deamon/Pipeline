@@ -179,8 +179,14 @@ def scan_callback(
     jenkins_status = str(report.get("status", "")).upper()
     if jenkins_status == "RUNNING":
         scan_obj.state = ScanState.RUNNING
-        scan_obj.started_at = datetime.now(timezone.utc)
-        logger.info(f"Scan {scan_id} transitioned to RUNNING state")
+        # Jenkinsfile's sendIntermediateCallback() posts status=RUNNING after every
+        # finished stage, not just the first. Resetting started_at here on each one
+        # pushes it forward all pipeline long, so by the final terminal callback the
+        # recorded duration is only the gap since the *last* stage — a few seconds —
+        # instead of the real end-to-end run (this is the "Scan Duration: 00:08" bug).
+        if scan_obj.started_at is None:
+            scan_obj.started_at = datetime.now(timezone.utc)
+            logger.info(f"Scan {scan_id} transitioned to RUNNING state")
     elif jenkins_status == "SUCCESS":
         scan_obj.state = ScanState.COMPLETED
     elif jenkins_status in {"FAILURE", "ABORTED", "UNSTABLE"}:

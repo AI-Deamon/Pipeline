@@ -204,8 +204,16 @@ beforeEach(() => {
   mockMutateAsync.mockReset();
   vi.mocked(useAuthMock).mockReturnValue({
     isAuthenticated: true,
+    token: 'test-token',
     role: 'admin',
-    permissions: {},
+    permissions: {
+      canManageUsers: true,
+      canManageProjectAccess: true,
+      canViewAllProjects: true,
+      canAssignIssues: true,
+      canVerifyIssues: true,
+      canUpdateAssignedIssues: true,
+    },
     currentUser: { id: 'u-1', username: 'admin', role: 'admin' },
     login: vi.fn(),
     logout: vi.fn(),
@@ -295,8 +303,16 @@ test('changing a filter that hides a selected finding prunes it from the selecti
 test('bulk-action bar and row checkboxes are hidden without canAssignIssues', () => {
   vi.mocked(useAuthMock).mockReturnValue({
     isAuthenticated: true,
+    token: 'test-token',
     role: 'developer',
-    permissions: {},
+    permissions: {
+      canManageUsers: false,
+      canManageProjectAccess: false,
+      canViewAllProjects: false,
+      canAssignIssues: false,
+      canVerifyIssues: false,
+      canUpdateAssignedIssues: false,
+    },
     currentUser: { id: 'u-2', username: 'dev', role: 'developer' },
     login: vi.fn(),
     logout: vi.fn(),

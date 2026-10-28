@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.core.db import get_db
 from app.core.auth import get_current_user, get_rbac
-from app.models.db_models import ProjectDB, ScanDB, UserDB, ProjectAssignmentDB
+from app.models.db_models import ProjectDB, ScanDB, UserDB, ProjectAssignmentDB, ScanReportDB, IssueDB, ScanAssignmentDB
 from app.core.config import settings
 from app.api.scans.utils import _expire_scan_if_timed_out, ACTIVE_STATES as _ACTIVE_SCAN_STATES
 from app.state.scan_state import ScanState
@@ -285,6 +285,14 @@ def delete_project(project_id: str, request: Request, db: Annotated[Session, Dep
     scan_ids = [scan.scan_id for scan in scans]
     for scan in scans:
         db.delete(scan)
+
+    # fk_scan_reports_project_id / fk_issues_project_id / fk_scan_assignments_project_id
+    # (added in app.main's startup migration) all RESTRICT deletes of the referenced
+    # project, so every table that still points at it has to be cleared first.
+    db.query(ScanReportDB).filter(ScanReportDB.project_id == project_id).delete(synchronize_session=False)
+    db.query(IssueDB).filter(IssueDB.project_id == project_id).delete(synchronize_session=False)
+    db.query(ScanAssignmentDB).filter(ScanAssignmentDB.project_id == project_id).delete(synchronize_session=False)
+
     db.delete(db_project)
     db.commit()
     deleted_artifacts = 0
